@@ -14,16 +14,18 @@ const WINDOWS = [7, 30, 90, 365] as const;
 export function MoversView() {
   const [days, setDays] = useState<number>(7);
   const [data, setData] = useState<Data | null>(null);
-  const [busy, setBusy] = useState(true);
+  // busy is DERIVED (loaded window ≠ selected window) rather than set
+  // synchronously inside the effect — same behavior, no cascading render.
+  const [loadedDays, setLoadedDays] = useState<number | null>(null);
+  const busy = loadedDays !== days;
 
   useEffect(() => {
     let alive = true;
-    setBusy(true);
     fetch(`/api/cards/movers?days=${days}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => alive && setData(d))
       .catch(() => {})
-      .finally(() => alive && setBusy(false));
+      .finally(() => alive && setLoadedDays(days));
     return () => { alive = false; };
   }, [days]);
 

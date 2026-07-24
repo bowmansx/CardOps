@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
 import { readAllSafe } from "@/lib/supabase/page";
 import { lotAverages, cardBasis } from "@/lib/cards/basis";
+import { requestNowMs } from "@/lib/now";
 
 export const dynamic = "force-dynamic";
 
@@ -116,7 +117,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         {view === "overview" && <Overview sales={sales} open={open} lots={lotsPage.rows} />}
         {view === "monthly" && <Monthly sales={sales} />}
         {view === "category" && <ByCategory sales={sales} />}
-        {view === "velocity" && <Velocity sales={sales} open={open} />}
+        {view === "velocity" && <Velocity sales={sales} open={open} now={requestNowMs()} />}
         {view === "inventory" && <Inventory open={open} />}
       </div>
     </main>
@@ -222,7 +223,7 @@ function ByCategory({ sales }: { sales: SaleRow[] }) {
 }
 
 // ── Velocity: days-to-sell + aged inventory ──────────────────────────────────
-function Velocity({ sales, open }: { sales: SaleRow[]; open: OpenCard[] }) {
+function Velocity({ sales, open, now }: { sales: SaleRow[]; open: OpenCard[]; now: number }) {
   const spans = sales.map((r) => {
     const li = cardOf(r)?.listed_at;
     if (!li) return null;
@@ -233,7 +234,6 @@ function Velocity({ sales, open }: { sales: SaleRow[]; open: OpenCard[] }) {
   const sorted = spans.slice().sort((a, b) => a - b);
   const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
   const listed = open.filter((c) => c.status === "listed");
-  const now = Date.now();
   const aged = listed.filter((c) => c.listed_at && (now - new Date(c.listed_at).getTime()) / 86_400_000 > 60);
   const agedValue = aged.reduce((s, c) => s + num(c.manual_price ?? c.market_value), 0);
 

@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "check": "npm run check:types && npm run check:test && npm run check:forbidden",
+    "check": "npm run check:types && npm run check:lint && npm run check:test && npm run check:forbidden",
     "check:types": "tsc --noEmit",
     "check:test": "vitest run",
     "check:forbidden": "node scripts/check-forbidden.mjs",

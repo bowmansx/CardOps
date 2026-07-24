@@ -90,16 +90,12 @@ count in Zoho by hand.
 
 ## 3. Final cutover — one sitting, in this order
 
-0. **Hardening gate (from TRIAGE.md "before cutover", eBay/cron section):**
-   post-settle cancellations detected and reversed (or surfaced); getOrders
-   pages past 300 with a truncation signal; lot cancel repairs the lot
-   (card_lot_unsell once, not card_unsell per child); order fee/shipping
-   allocation reconciles (remainder to last line, $0.30 once per order);
-   card-alerts stamps notified_at only on delivered; card-estimates gets a
-   run lock + debit-after-insert + per-user error isolation; daemon reprice
-   cursor advances for unchanged cards; paid-spend crons filter by the role
-   roster. (Match-set/guard reads, timeouts, and audit integrity already
-   landed in foundation-fixes.)
+0. ~~Hardening gate~~ **DONE 2026-07-25** (foundation-fixes `136c224`): post-
+   settle cancellation reversal (shared card/lot-aware helper), getOrders
+   paging + truncation signal, cents-exact fee allocation ($0.30 per ORDER),
+   checked post-publish writes, delivery-gated notified_at, estimates
+   roster/debit-ordering/isolation/time-budget, price-refresh roster,
+   daemon cursor advance.
 1. In Master-Ops: strip the card code (the six cron entries are ALREADY gone
    from its `vercel.json`), then deploy.
 2. Only then: add `CRON_SECRET` to the card-ops Vercel project and redeploy.

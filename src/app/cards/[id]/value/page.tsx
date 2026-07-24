@@ -12,11 +12,30 @@ import { MultiCasePanel, type PriceCase } from "@/components/cards/MultiCasePane
 import { LiquidityPanel, type TierRow } from "@/components/cards/LiquidityPanel";
 import { velocity, tierOf, weightedPrices, matchesExact } from "@/lib/cards/liquidity";
 import { readAllSafe } from "@/lib/supabase/page";
+import { requestNowMs } from "@/lib/now";
 
 export const dynamic = "force-dynamic";
 const money = (n: number | null | undefined) =>
   n == null ? "—" : n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const inp = "w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-flag";
+
+// Then-vs-now cell (module-scoped per react-hooks/static-components).
+function ThenCell({ label, then, market }: { label: string; then: number | null; market: number | null }) {
+  const d = then != null && then > 0 && market != null ? ((market - then) / then) * 100 : null;
+  return (
+    <div className="flex items-baseline justify-between rounded-xl border border-hairline bg-white px-3 py-2">
+      <span className="text-[10px] uppercase tracking-wider text-ink/50">{label}</span>
+      <span className="flex items-baseline gap-2">
+        <span className="figures text-sm font-semibold text-ink/80">{money(then)}</span>
+        {d != null && Math.abs(d) >= 0.5 && (
+          <span className={"figures text-xs font-bold " + (d > 0 ? "text-pos" : "text-danger")}>
+            {d > 0 ? "+" : ""}{d.toFixed(0)}%
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
 
 export default async function ValuePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -29,6 +48,7 @@ export default async function ValuePage({ params }: { params: Promise<{ id: stri
     supabase.from("card_price_history").select("price, strategy, ts").eq("card_id", id).order("ts", { ascending: true }).limit(500),
   ]);
   if (!card) notFound();
+  const nowMs = requestNowMs(); // one clock read for the whole page (async RSC)
   const comps = (compsRaw ?? []) as Comp[];
   const multipliers = (mult ?? []) as Multiplier[];
   const SEED_ORDER = ["standard", "conservative", "aggressive", "hot", "thin_market", "manual_lock"];
@@ -101,35 +121,10 @@ export default async function ValuePage({ params }: { params: Promise<{ id: stri
 
         {/* Then vs now — the value as of 30 days / 1 year ago under the SAME
             format, with % change to today. */}
-        {(() => {
-          const now = Date.now();
-          const v30 = valueAt(card as never, comps, activeParams, now - 30 * 86_400_000);
-          const v365 = valueAt(card as never, comps, activeParams, now - 365 * 86_400_000);
-          const delta = (then: number | null) =>
-            then != null && then > 0 && market != null ? ((market - then) / then) * 100 : null;
-          const Cell = ({ label, then }: { label: string; then: number | null }) => {
-            const d = delta(then);
-            return (
-              <div className="flex items-baseline justify-between rounded-xl border border-hairline bg-white px-3 py-2">
-                <span className="text-[10px] uppercase tracking-wider text-ink/50">{label}</span>
-                <span className="flex items-baseline gap-2">
-                  <span className="figures text-sm font-semibold text-ink/80">{money(then)}</span>
-                  {d != null && Math.abs(d) >= 0.5 && (
-                    <span className={"figures text-xs font-bold " + (d > 0 ? "text-pos" : "text-danger")}>
-                      {d > 0 ? "+" : ""}{d.toFixed(0)}%
-                    </span>
-                  )}
-                </span>
-              </div>
-            );
-          };
-          return (
-            <div className="mt-2 grid grid-cols-2 gap-2.5">
-              <Cell label="30 days ago" then={v30} />
-              <Cell label="1 year ago" then={v365} />
-            </div>
-          );
-        })()}
+        <div className="mt-2 grid grid-cols-2 gap-2.5">
+          <ThenCell label="30 days ago" then={valueAt(card as never, comps, activeParams, nowMs - 30 * 86_400_000)} market={market} />
+          <ThenCell label="1 year ago" then={valueAt(card as never, comps, activeParams, nowMs - 365 * 86_400_000)} market={market} />
+        </div>
 
         <MultiCasePanel cases={cases} />
 
@@ -137,7 +132,7 @@ export default async function ValuePage({ params }: { params: Promise<{ id: stri
             slider. Player scope = comps across YOUR cards of this player (an
             honest, labeled proxy until player-wide vendor data lands). */}
         {await (async () => {
-          const now = Date.now();
+          const now = nowMs;
           const exactComps = comps.filter((c) => matchesExact(card as never, c));
 
           let playerNote: string | undefined;

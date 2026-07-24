@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { Camera, Zap, X, CheckCircle2, Loader2, Sparkles } from "lucide-react";
 import { SPORT_CATEGORIES, ZONES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import {
@@ -181,7 +182,7 @@ export function BatchIntake({
                   <Sparkles size={15} className="text-pos" />
                   AI filled {scanDone} of {total}
                   {scanFail > 0 ? ` (${scanFail} need manual details)` : ""} — they&apos;re in the
-                  <a href="/cards?status=review" className="ml-1 font-bold text-flag underline underline-offset-2">review pile</a>.
+                  <Link href="/cards?status=review" className="ml-1 font-bold text-flag underline underline-offset-2">review pile</Link>.
                 </>
               )}
             </div>

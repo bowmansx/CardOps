@@ -173,3 +173,19 @@ fixes). One entry per decision: what, why, commit.
   fail-closed if the roster can't be read.
 - daemon: unchanged cards advance last_priced_at so the reprice cursor
   reaches the tail; history-point inserts checked.
+
+## Lint cleanup + gate promotion
+- All 31 errors fixed for real (no blanket disables): nested components hoisted
+  to module scope (value ThenCell, portfolio Stat, CardEstimates Toggle,
+  PricingBuilder LockBtn via lockProps); SellForm auto-fee and MoversView busy
+  DERIVED in render instead of setState-in-effect; login moved to
+  useSearchParams under a Suspense boundary (kills the state+effect and the
+  build-time constraint the old comment worked around); raw <a> → next/link.
+- En route, two real rule-1 catches the lint surfaced: recompute()'s
+  pre-migration retry never checked its own error, and its history insert was
+  fire-and-forget — both now throw loudly.
+- requestNowMs (src/lib/now.ts) is the sanctioned clock read for server
+  components — the purity lint can't tell RSCs from client components, and a
+  named helper beats scattered eslint-disables.
+- `npm run check` now runs types + LINT + tests + forbidden greps. Remaining
+  lint output: 5 warnings (unused disable directives) — cosmetic.

@@ -53,15 +53,18 @@ async function recompute(supabase: SupabaseClient, id: string) {
       value_30d: valueAt(card as never, (comps ?? []) as Comp[], params, nowMs - 30 * 86_400_000),
       value_365d: valueAt(card as never, (comps ?? []) as Comp[], params, nowMs - 365 * 86_400_000),
     };
-    let { error: upErr } = await supabase.from("cards").update(row).eq("id", id);
-    if (upErr && /value_30d|value_365d/.test(upErr.message)) {
+    const { error: upErr } = await supabase.from("cards").update(row).eq("id", id);
+    if (upErr) {
+      if (!/value_30d|value_365d/.test(upErr.message)) throw new Error(`Value not saved: ${upErr.message}`);
       // Pre-migration fallback: snapshot columns not applied yet.
       delete row.value_30d;
       delete row.value_365d;
-      await supabase.from("cards").update(row).eq("id", id);
+      const { error: retryErr } = await supabase.from("cards").update(row).eq("id", id);
+      if (retryErr) throw new Error(`Value not saved: ${retryErr.message}`);
     }
     if (mv != null) {
-      await supabase.from("card_price_history").insert({ card_id: id, price: mv, strategy: (card as { pricing_strategy: string }).pricing_strategy });
+      const { error: histErr } = await supabase.from("card_price_history").insert({ card_id: id, price: mv, strategy: (card as { pricing_strategy: string }).pricing_strategy });
+      if (histErr) throw new Error(`Value saved but the history point wasn't: ${histErr.message}`);
     }
   }
 }

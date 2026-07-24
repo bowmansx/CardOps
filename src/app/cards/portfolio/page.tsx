@@ -13,6 +13,15 @@ const moneyc = (n: number) => n.toLocaleString("en-US", { style: "currency", cur
 
 type Point = { date: string; cost: number; value: number };
 
+function Stat({ label, val, tone }: { label: string; val: string; tone?: "pos" | "neg" }) {
+  return (
+    <div>
+      <div className={"figures text-xl font-bold " + (tone === "pos" ? "text-pos" : tone === "neg" ? "text-danger" : "text-ink")}>{val}</div>
+      <div className="text-[10px] uppercase tracking-wider text-ink/50">{label}</div>
+    </div>
+  );
+}
+
 export default async function PortfolioPage() {
   const supabase = await createClient();
 
@@ -96,13 +105,6 @@ export default async function PortfolioPage() {
   const y = (v: number) => PT + ih - ((v - yLo) / (yHi - yLo || 1)) * ih;
   const line = (key: "value" | "cost") => points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(" ");
   const area = `${line("value")} L${x(points.length - 1).toFixed(1)},${(PT + ih).toFixed(1)} L${x(0).toFixed(1)},${(PT + ih).toFixed(1)} Z`;
-
-  const Stat = ({ label, val, tone }: { label: string; val: string; tone?: "pos" | "neg" }) => (
-    <div>
-      <div className={"figures text-xl font-bold " + (tone === "pos" ? "text-pos" : tone === "neg" ? "text-danger" : "text-ink")}>{val}</div>
-      <div className="text-[10px] uppercase tracking-wider text-ink/50">{label}</div>
-    </div>
-  );
 
   return (
     <main className="w-full flex-1 bg-paper text-ink" style={{ colorScheme: "dark" }}>

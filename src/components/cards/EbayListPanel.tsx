@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { ShoppingCart, Loader2, ExternalLink, Sparkles } from "lucide-react";
 
 type Listed = { url?: string; listing_id?: string; status?: string; listed_at?: string } | null;
@@ -135,9 +136,9 @@ export function EbayListPanel({
           <ShoppingCart size={15} /> Live on eBay
         </span>
         <span className="flex items-center gap-3">
-          <a href="/cards/ebay" className="text-xs font-bold text-ink/50 underline-offset-2 hover:text-ink hover:underline">
+          <Link href="/cards/ebay" className="text-xs font-bold text-ink/50 underline-offset-2 hover:text-ink hover:underline">
             Manage
-          </a>
+          </Link>
           <a href={listed.url ?? `https://www.ebay.com/itm/${listed.listing_id}`} target="_blank" rel="noreferrer"
             className="flex items-center gap-1 text-xs font-bold text-flag underline-offset-2 hover:underline">
             View listing <ExternalLink size={12} />

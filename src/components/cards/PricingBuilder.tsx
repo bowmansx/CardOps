@@ -98,6 +98,19 @@ function Hint({ children }: { children: React.ReactNode }) {
   return <p className="mt-1 text-[10px] leading-snug text-ink/35">{children}</p>;
 }
 
+function LockBtn({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={on ? "Locked — re-rolls keep this value" : "Unlocked — re-rolls may change this"}
+      className={"rounded p-0.5 " + (on ? "text-flag" : "text-ink/25 hover:text-ink/50")}
+    >
+      {on ? <Lock size={12} /> : <LockOpen size={12} />}
+    </button>
+  );
+}
+
 function numOr(v: string): number | undefined {
   const n = Number(v);
   return v.trim() !== "" && Number.isFinite(n) ? n : undefined;
@@ -180,19 +193,9 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
       return n;
     });
 
-  function LockBtn({ k }: { k: LockKey }) {
-    const on = locked(k);
-    return (
-      <button
-        type="button"
-        onClick={() => toggleLock(k)}
-        title={on ? "Locked — re-rolls keep this value" : "Unlocked — re-rolls may change this"}
-        className={"rounded p-0.5 " + (on ? "text-flag" : "text-ink/25 hover:text-ink/50")}
-      >
-        {on ? <Lock size={12} /> : <LockOpen size={12} />}
-      </button>
-    );
-  }
+  // LockBtn is module-scoped (react-hooks/static-components); these bind the
+  // component's lock state into the props it needs.
+  const lockProps = (k: LockKey) => ({ on: locked(k), onToggle: () => toggleLock(k) });
 
   function loadTemplate(t: PricingTemplate, asCopy: boolean) {
     if (!confirmDiscard()) return;
@@ -386,14 +389,14 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
         </div>
 
         <label className="block">
-          <span className={lbl}>Name <LockBtn k="name" /></span>
+          <span className={lbl}>Name <LockBtn {...lockProps("name")} /></span>
           <input value={form.name} onChange={(e) => set({ name: e.target.value })} className={inp} placeholder="e.g. Patient Vintage Median" />
         </label>
 
         {/* Which sales count as evidence */}
         <div className="rounded-xl border border-hairline bg-paper/60 p-3">
           <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink/40">
-            Which sales count <LockBtn k="scope" />
+            Which sales count <LockBtn {...lockProps("scope")} />
           </div>
           <select value={form.scope} onChange={(e) => set({ scope: e.target.value })} className={inp}>
             <option value="raw">Ungraded (raw) sales</option>
@@ -444,7 +447,7 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className={lbl}>Look-back window <LockBtn k="window" /></span>
+            <span className={lbl}>Look-back window <LockBtn {...lockProps("window")} /></span>
             <select value={form.window_days} onChange={(e) => set({ window_days: e.target.value })} className={inp}>
               <option value="">All-time</option>
               {[7, 30, 60, 90, 180, 365, 730, 1095].map((d) => <option key={d} value={d}>{d} days</option>)}
@@ -452,7 +455,7 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
             <Hint>How far back to look. Short = follows the market fast; long or all-time = steadier, better for cards that rarely sell.</Hint>
           </label>
           <label className="block">
-            <span className={lbl}>Use last N sales <LockBtn k="last_n" /></span>
+            <span className={lbl}>Use last N sales <LockBtn {...lockProps("last_n")} /></span>
             <select value={form.last_n} onChange={(e) => set({ last_n: e.target.value })} className={inp}>
               <option value="">All in window</option>
               {[3, 5, 8, 10, 15, 20, 30, 50, 100, 150, 200].map((n) => <option key={n} value={n}>last {n}</option>)}
@@ -460,7 +463,7 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
             <Hint>Keep only the most RECENT n sales from the window.</Hint>
           </label>
           <label className="block">
-            <span className={lbl}>Keep N highest <LockBtn k="top_n" /></span>
+            <span className={lbl}>Keep N highest <LockBtn {...lockProps("top_n")} /></span>
             <select value={form.top_n} onChange={(e) => set({ top_n: e.target.value })} className={inp}>
               <option value="">Off</option>
               {[3, 5, 8, 10].map((n) => <option key={n} value={n}>highest {n}</option>)}
@@ -468,7 +471,7 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
             <Hint>Then keep only the n PRICIEST. &quot;Average of the 5 highest ever&quot; = All-time window + highest 5 + Average.</Hint>
           </label>
           <label className="block">
-            <span className={lbl}>Aggregate <LockBtn k="aggregate" /></span>
+            <span className={lbl}>Aggregate <LockBtn {...lockProps("aggregate")} /></span>
             <select value={form.aggregate} onChange={(e) => set({ aggregate: e.target.value })} className={inp}>
               {Object.entries(AGG_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
@@ -493,7 +496,7 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
             </label>
           )}
           <label className="block">
-            <span className={lbl}>Min sales required <LockBtn k="min_comps" /></span>
+            <span className={lbl}>Min sales required <LockBtn {...lockProps("min_comps")} /></span>
             <select value={form.min_comps} onChange={(e) => set({ min_comps: e.target.value })} className={inp}>
               {[1, 2, 3, 4, 5, 8, 10].map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
@@ -506,7 +509,7 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
           <Hint>These protect the number from shill bids, $1 lowballs, and one-off freak sales before anything gets averaged.</Hint>
           <div className="grid grid-cols-3 gap-2">
             <label className="block">
-              <span className={lbl}>Outlier fence <LockBtn k="iqr" /></span>
+              <span className={lbl}>Outlier fence <LockBtn {...lockProps("iqr")} /></span>
               <select value={form.iqr} onChange={(e) => set({ iqr: e.target.value })} className={inp}>
                 <option value="">Off</option>
                 <option value="1.5">Classic (1.5)</option>
@@ -515,14 +518,14 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
               </select>
             </label>
             <label className="block">
-              <span className={lbl}>Drop highest <LockBtn k="drop_top" /></span>
+              <span className={lbl}>Drop highest <LockBtn {...lockProps("drop_top")} /></span>
               <select value={form.drop_top} onChange={(e) => set({ drop_top: e.target.value })} className={inp}>
                 <option value="">None</option>
                 {["0.05", "0.1", "0.15", "0.2"].map((p) => <option key={p} value={p}>{Number(p) * 100}%</option>)}
               </select>
             </label>
             <label className="block">
-              <span className={lbl}>Drop lowest <LockBtn k="drop_bottom" /></span>
+              <span className={lbl}>Drop lowest <LockBtn {...lockProps("drop_bottom")} /></span>
               <select value={form.drop_bottom} onChange={(e) => set({ drop_bottom: e.target.value })} className={inp}>
                 <option value="">None</option>
                 {["0.05", "0.1", "0.15", "0.2"].map((p) => <option key={p} value={p}>{Number(p) * 100}%</option>)}
@@ -533,13 +536,13 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className={lbl}>Final multiplier <LockBtn k="multiplier" /></span>
+            <span className={lbl}>Final multiplier <LockBtn {...lockProps("multiplier")} /></span>
             <input value={form.multiplier} onChange={(e) => set({ multiplier: e.target.value })} type="number" step="0.01" min="0.5" max="2" placeholder="1.00" className={inp + " figures"} />
             <Hint>The last nudge: 0.97 prices 3% under the computed number (sells faster); 1.08 prices 8% over (scarcity premium).</Hint>
           </label>
           <label className="flex items-end gap-2 pb-2 text-sm">
             <input type="checkbox" checked={form.round_99} onChange={(e) => set({ round_99: e.target.checked })} className="h-4 w-4 accent-[#c9a227]" />
-            Round to .99 <LockBtn k="round" />
+            Round to .99 <LockBtn {...lockProps("round")} />
           </label>
         </div>
 
@@ -563,7 +566,7 @@ export function PricingBuilder({ templates }: { templates: PricingTemplate[] }) 
         </div>
 
         <label className="block">
-          <span className={lbl}>Suitability tags <LockBtn k="tags" /></span>
+          <span className={lbl}>Suitability tags <LockBtn {...lockProps("tags")} /></span>
           <input value={form.tags} onChange={(e) => set({ tags: e.target.value })} className={inp} placeholder="low population, vintage, numbered…" />
         </label>
 
