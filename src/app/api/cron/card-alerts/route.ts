@@ -8,6 +8,7 @@
 // watchlist hit notified Beau (naming a card that isn't his) and never notified
 // the member. Everything here is per-user: a user's own alerts, own cards, own
 // price history, own prefs, own devices.
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -90,7 +91,7 @@ export async function GET(req: Request) {
 
   if (stale.size) await svc.from("push_subscriptions").delete().in("endpoint", [...stale]);
 
-  await svc.from("audit_log").insert({
+  await auditOrThrow(svc, {
     actor: "cron", action: "card_alerts_run", target: "card_alerts",
     payload: { users: (people ?? []).length, priceHits, pctHits, digests, pruned: stale.size, notes: notes.slice(0, 10) },
     result: "ok",
@@ -111,6 +112,7 @@ async function targetAlerts(
         .select("card_id, target_price, direction, notified_at, cards!inner ( user_id, player, year, set_name, market_value, manual_price )")
         .eq("kind", "target")            // a pct_move row has a null target — never treat it as $0
         .eq("cards.user_id", uid)
+        .order("card_id", { ascending: true }) // readAll requires a deterministic order (rule 2)
         .range(from, to),
     );
     for (const a of rows) {
@@ -126,10 +128,18 @@ async function targetAlerts(
           url: "/cards/watchlist",
         });
         r.stale.forEach((s) => stale.add(s));
-        await svc.from("card_alerts").update({ notified_at: new Date().toISOString() }).eq("card_id", a.card_id);
-        hits++;
+        // Stamp only after a real delivery (rule 7): 0 sent = the crossing is
+        // still un-notified — leave it armed so tomorrow's run retries.
+        if (r.sent > 0) {
+          const { error } = await svc.from("card_alerts").update({ notified_at: new Date().toISOString() }).eq("card_id", a.card_id);
+          if (error) notes.push(`target/${uid}/${a.card_id}: crossing delivered but not stamped (${error.message}) — may re-notify`);
+          hits++;
+        } else {
+          notes.push(`target/${uid}/${a.card_id}: crossing detected, 0 deliveries — staying armed`);
+        }
       } else if (!crossed && a.notified_at) {
-        await svc.from("card_alerts").update({ notified_at: null }).eq("card_id", a.card_id);
+        const { error } = await svc.from("card_alerts").update({ notified_at: null }).eq("card_id", a.card_id);
+        if (error) notes.push(`target/${uid}/${a.card_id}: re-arm failed (${error.message})`);
       }
     }
   } catch (e) {
@@ -152,6 +162,7 @@ async function pctAlerts(
         .select("card_id, threshold_pct, window_days, notified_at, cards!inner ( user_id, player, year, set_name, market_value, manual_price )")
         .eq("kind", "pct_move")
         .eq("cards.user_id", uid)
+        .order("card_id", { ascending: true }) // readAll requires a deterministic order (rule 2)
         .range(from, to),
     );
     for (const a of rows) {
@@ -164,7 +175,7 @@ async function pctAlerts(
       const { rows: h } = await readAll<{ price: number; ts: string }>(
         (from, to) => svc
           .from("card_price_history").select("price, ts").eq("card_id", a.card_id)
-          .gte("ts", since).order("ts", { ascending: true }).range(from, to),
+          .gte("ts", since).order("ts", { ascending: true }).order("id", { ascending: true }).range(from, to),
         MAX_HISTORY,
       );
       const pts: PricePoint[] = h.map((r) => ({ price: Number(r.price), at: new Date(r.ts).getTime() }));
@@ -178,10 +189,17 @@ async function pctAlerts(
           url: "/cards/movers",
         });
         r.stale.forEach((s) => stale.add(s));
-        await svc.from("card_alerts").update({ notified_at: new Date().toISOString() }).eq("card_id", a.card_id);
-        hits++;
+        // Same stamp-after-delivery rule as target alerts (rule 7).
+        if (r.sent > 0) {
+          const { error } = await svc.from("card_alerts").update({ notified_at: new Date().toISOString() }).eq("card_id", a.card_id);
+          if (error) notes.push(`pct/${uid}/${a.card_id}: move delivered but not stamped (${error.message}) — may re-notify`);
+          hits++;
+        } else {
+          notes.push(`pct/${uid}/${a.card_id}: move detected, 0 deliveries — staying armed`);
+        }
       } else if (!crossed && a.notified_at) {
-        await svc.from("card_alerts").update({ notified_at: null }).eq("card_id", a.card_id);
+        const { error } = await svc.from("card_alerts").update({ notified_at: null }).eq("card_id", a.card_id);
+        if (error) notes.push(`pct/${uid}/${a.card_id}: re-arm failed (${error.message})`);
       }
     }
   } catch (e) {
@@ -219,7 +237,9 @@ async function moversDigest(
     const { rows: cards } = await readAll<{ id: string } & CardMeta>(
       (from, to) => svc
         .from("cards").select("id, player, year, set_name, market_value, manual_price")
-        .eq("user_id", uid).not("status", "in", "(archived,sold)").range(from, to),
+        .eq("user_id", uid).not("status", "in", "(archived,sold)")
+        .order("id", { ascending: true }) // readAll requires a deterministic order (rule 2)
+        .range(from, to),
     );
     if (!cards.length) return 0;
     const meta = new Map(cards.map((c) => [c.id, c]));
@@ -230,6 +250,7 @@ async function moversDigest(
         .from("card_price_history").select("card_id, price, ts, cards!inner ( user_id )")
         .eq("cards.user_id", uid).gte("ts", since)
         .order("ts", { ascending: false }) // newest-first, so a cap keeps the recent points
+        .order("id", { ascending: true })  // unique tiebreaker: many points share a ts
         .range(from, to),
       MAX_HISTORY,
     );
@@ -245,13 +266,22 @@ async function moversDigest(
 
     const digest = buildMoversDigest(cards, pts, { pct, days, now, seen });
     let sent = 0;
+    let delivered = true;
     if (digest.push) {
       const r = await sendToAll(devices, digest.push);
       r.stale.forEach((s) => stale.add(s));
-      sent = 1;
+      delivered = r.sent > 0;
+      if (delivered) sent = 1;
+      else notes.push(`movers/${uid}: digest built, 0 deliveries — movers stay unseen for tomorrow's run`);
     }
-    const nextPrefs = { ...prefsObj, cardops: { ...cardops, movers_seen: digest.seenNext } };
-    await svc.from("user_settings").upsert({ user_id: uid, prefs: nextPrefs }, { onConflict: "user_id" });
+    // Advance movers_seen only when the digest was DELIVERED (rule 7) — or
+    // when there was nothing to push, where seenNext is just pruning.
+    if (delivered) {
+      const nextPrefs = { ...prefsObj, cardops: { ...cardops, movers_seen: digest.seenNext } };
+      const { error: seenErr } = await svc.from("user_settings")
+        .upsert({ user_id: uid, prefs: nextPrefs }, { onConflict: "user_id" });
+      if (seenErr) notes.push(`movers/${uid}: digest sent but movers_seen not stamped (${seenErr.message}) — may re-notify`);
+    }
     return sent;
   } catch (e) {
     notes.push(`movers/${uid}: ${e instanceof Error ? e.message : "failed"}`);

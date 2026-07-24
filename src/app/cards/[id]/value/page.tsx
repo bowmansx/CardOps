@@ -9,11 +9,33 @@ import { addComp, setStrategy, setManualPrice } from "./actions";
 import { GRADERS } from "@/lib/cards/types";
 import { CompsPaste } from "@/components/cards/CompsPaste";
 import { MultiCasePanel, type PriceCase } from "@/components/cards/MultiCasePanel";
+import { LiquidityPanel, type TierRow } from "@/components/cards/LiquidityPanel";
+import { velocity, tierOf, weightedPrices, matchesExact } from "@/lib/cards/liquidity";
+import { readAllSafe } from "@/lib/supabase/page";
+import { requestNowMs } from "@/lib/now";
 
 export const dynamic = "force-dynamic";
 const money = (n: number | null | undefined) =>
   n == null ? "—" : n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const inp = "w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-flag";
+
+// Then-vs-now cell (module-scoped per react-hooks/static-components).
+function ThenCell({ label, then, market }: { label: string; then: number | null; market: number | null }) {
+  const d = then != null && then > 0 && market != null ? ((market - then) / then) * 100 : null;
+  return (
+    <div className="flex items-baseline justify-between rounded-xl border border-hairline bg-white px-3 py-2">
+      <span className="text-[10px] uppercase tracking-wider text-ink/50">{label}</span>
+      <span className="flex items-baseline gap-2">
+        <span className="figures text-sm font-semibold text-ink/80">{money(then)}</span>
+        {d != null && Math.abs(d) >= 0.5 && (
+          <span className={"figures text-xs font-bold " + (d > 0 ? "text-pos" : "text-danger")}>
+            {d > 0 ? "+" : ""}{d.toFixed(0)}%
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
 
 export default async function ValuePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,6 +48,7 @@ export default async function ValuePage({ params }: { params: Promise<{ id: stri
     supabase.from("card_price_history").select("price, strategy, ts").eq("card_id", id).order("ts", { ascending: true }).limit(500),
   ]);
   if (!card) notFound();
+  const nowMs = requestNowMs(); // one clock read for the whole page (async RSC)
   const comps = (compsRaw ?? []) as Comp[];
   const multipliers = (mult ?? []) as Multiplier[];
   const SEED_ORDER = ["standard", "conservative", "aggressive", "hot", "thin_market", "manual_lock"];
@@ -98,37 +121,74 @@ export default async function ValuePage({ params }: { params: Promise<{ id: stri
 
         {/* Then vs now — the value as of 30 days / 1 year ago under the SAME
             format, with % change to today. */}
-        {(() => {
-          const now = Date.now();
-          const v30 = valueAt(card as never, comps, activeParams, now - 30 * 86_400_000);
-          const v365 = valueAt(card as never, comps, activeParams, now - 365 * 86_400_000);
-          const delta = (then: number | null) =>
-            then != null && then > 0 && market != null ? ((market - then) / then) * 100 : null;
-          const Cell = ({ label, then }: { label: string; then: number | null }) => {
-            const d = delta(then);
-            return (
-              <div className="flex items-baseline justify-between rounded-xl border border-hairline bg-white px-3 py-2">
-                <span className="text-[10px] uppercase tracking-wider text-ink/50">{label}</span>
-                <span className="flex items-baseline gap-2">
-                  <span className="figures text-sm font-semibold text-ink/80">{money(then)}</span>
-                  {d != null && Math.abs(d) >= 0.5 && (
-                    <span className={"figures text-xs font-bold " + (d > 0 ? "text-pos" : "text-danger")}>
-                      {d > 0 ? "+" : ""}{d.toFixed(0)}%
-                    </span>
-                  )}
-                </span>
-              </div>
-            );
-          };
-          return (
-            <div className="mt-2 grid grid-cols-2 gap-2.5">
-              <Cell label="30 days ago" then={v30} />
-              <Cell label="1 year ago" then={v365} />
-            </div>
-          );
-        })()}
+        <div className="mt-2 grid grid-cols-2 gap-2.5">
+          <ThenCell label="30 days ago" then={valueAt(card as never, comps, activeParams, nowMs - 30 * 86_400_000)} market={market} />
+          <ThenCell label="1 year ago" then={valueAt(card as never, comps, activeParams, nowMs - 365 * 86_400_000)} market={market} />
+        </div>
 
         <MultiCasePanel cases={cases} />
+
+        {/* Liquidity — how fast it trades at three scopes, and the price
+            slider. Player scope = comps across YOUR cards of this player (an
+            honest, labeled proxy until player-wide vendor data lands). */}
+        {await (async () => {
+          const now = nowMs;
+          const exactComps = comps.filter((c) => matchesExact(card as never, c));
+
+          let playerNote: string | undefined;
+          let playerV = null as ReturnType<typeof velocity> | null;
+          if (card.player) {
+            const pc = await readAllSafe<{ id: string }>((from, to) =>
+              supabase.from("cards").select("id").eq("player", card.player)
+                .order("id", { ascending: true }).range(from, to));
+            // .in() rides the query string — cap the id list and SAY so (rule 10).
+            const ids = pc.rows.map((r) => r.id);
+            const capped = ids.slice(0, 200);
+            let playerComps: Comp[] = [];
+            let err = pc.error;
+            if (capped.length) {
+              const cc = await readAllSafe<Comp>((from, to) =>
+                supabase.from("card_comps")
+                  .select("grader, grade, sale_price, sale_date, source")
+                  .in("card_id", capped)
+                  .order("id", { ascending: true }).range(from, to));
+              err = err ?? cc.error;
+              playerComps = cc.rows;
+            }
+            playerV = velocity(playerComps, now);
+            playerNote = err
+              ? "read failed — reload"
+              : `across ${capped.length}${ids.length > capped.length ? ` of your ${ids.length}` : ""} card${ids.length === 1 ? "" : "s"} of this player`;
+          }
+
+          const vExact = velocity(exactComps, now);
+          const vCard = velocity(comps, now);
+          const exactScope = card.condition_type === "graded" && card.grader
+            ? `This exact card (${card.grader} ${card.grade ?? "?"})`
+            : "This exact card (raw)";
+          const rows: TierRow[] = [
+            { scope: exactScope, tier: tierOf(vExact), v: vExact },
+            { scope: "This card, any grade", tier: tierOf(vCard), v: vCard },
+            ...(playerV ? [{ scope: `Player: ${card.player}`, tier: tierOf(playerV), v: playerV, note: playerNote }] : []),
+          ];
+
+          // Slider basis: exact-grade comps when they carry a real sample,
+          // else all grades of this card — always labeled.
+          const useExact = exactComps.length >= 4 && vExact.perMonth != null;
+          const basis = useExact ? exactComps : comps;
+          const basisV = useExact ? vExact : vCard;
+          return (
+            <LiquidityPanel
+              estimate={market}
+              manualPrice={card.manual_price == null ? null : Number(card.manual_price)}
+              rows={rows}
+              perMonth={basisV.perMonth}
+              weighted={weightedPrices(basis, now)}
+              basisLabel={useExact ? "exact-grade comps" : "all grades of this card"}
+              basisN={basis.filter((c) => c.sale_price != null).length}
+            />
+          );
+        })()}
 
         {/* Sales by grade — first thing after the headline: what actually
             trades, at which grade, by which company, and how it compares to

@@ -50,19 +50,59 @@ card activity shows up in your entity cash/P&L with no wiring between the apps.
   redirect URI for the CardOps domain has to be added in eBay's developer
   portal. Until then, eBay listing/sync lives on MasterOps.
 - **The nightly crons.** `vercel.json` here declares six of them, but
-  `CRON_SECRET` is deliberately NOT set on this project, so they return 401 and
-  do nothing. That is on purpose — Master-Ops still declares the same six jobs
-  and still has its secret, so adding it here right now would run everything
-  twice against the same database.
+  `CRON_SECRET` is deliberately NOT set on this project, so they return 401
+  and do nothing. **2026-07-25 update: Master-Ops no longer schedules the six
+  card crons** (removed in MO `02a7563`; its four own crons remain), so right
+  now NO card cron runs anywhere. eBay sales settle via the hub's manual sync
+  button on MasterOps until cutover.
+
+## 2b. Migrations queued to PASTE (in this order)
+
+From the `foundation-fixes` branch — paste each, in sequence:
+
+1. `20260734000000_status_is_a_transition.sql` — sold boundary + born-sold
+   guards (no owner exemption).
+2. `20260735000000_purchase_lots.sql` — READ ITS VERIFICATION SELECT OUTPUT
+   before letting the fold+drop half run. Replaces card_pool with purchase
+   lots; rewrites card_sell/card_unsell/speed_book_commit.
+3. `20260736000000_audit_log_actors.sql` — widens the audit actor CHECK.
+4. Then paste `supabase/tests/money-core.test.sql` (rolls back; expect 13
+   PASS rows) — the money core's first real execution.
+
+The branch's code assumes 34+35 are applied (use_pool_basis is gone from the
+code); merge + deploy and paste in the same sitting.
+
+## 2c. Before the FIRST real Zoho Push (hard gate)
+
+The push protocol posts correctly but REPORTS dishonestly (foundation review
+P1). Do these before trusting a Post:
+
+1. PushToBooks reads `d.failed`, which the API never returns — every push
+   renders as a failure, and refused/uncertain counts never show.
+2. The push-preview must read card_push_log STATUS — a stranded pending/
+   uncertain claim currently shows a green "posted" chip forever.
+3. `pushEntry` must return `attempted:false` for never-sent throws (token
+   refresh failure) so a Zoho blip doesn't quarantine whole batches as
+   "uncertain".
+
+Until then: batches ≤10 entries, ignore the red triangle, verify the entry
+count in Zoho by hand.
 
 ## 3. Final cutover — one sitting, in this order
 
-1. In Master-Ops: strip the card code **and remove those six crons from its
-   `vercel.json`**, then deploy.
+0. ~~Hardening gate~~ **DONE 2026-07-25** (foundation-fixes `136c224`): post-
+   settle cancellation reversal (shared card/lot-aware helper), getOrders
+   paging + truncation signal, cents-exact fee allocation ($0.30 per ORDER),
+   checked post-publish writes, delivery-gated notified_at, estimates
+   roster/debit-ordering/isolation/time-budget, price-refresh roster,
+   daemon cursor advance.
+1. In Master-Ops: strip the card code (the six cron entries are ALREADY gone
+   from its `vercel.json`), then deploy.
 2. Only then: add `CRON_SECRET` to the card-ops Vercel project and redeploy.
 
-Reversed, there's a window where both deployments run the same jobs.
-**Don't start this until eBay is re-registered** (see above).
+**Don't start this until eBay is re-registered** (see above) — and don't set
+CRON_SECRET before step 0's cron items are done: the fixed versions are what
+make the schedule safe to own.
 
 ## 4. Decisions still open
 

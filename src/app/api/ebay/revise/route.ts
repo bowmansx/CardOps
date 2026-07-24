@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
@@ -63,9 +64,9 @@ export async function POST(request: Request) {
     }
   }
 
-  await supabase.from("audit_log").insert({
+  await auditOrThrow(supabase, {
     actor: "web", action: "ebay_reprice", target: (card.sku as string) ?? card.id,
     payload: { price, binPrice: body.binPrice ?? null }, result: "ok",
-  }).then(() => {}, () => {});
+  });
   return NextResponse.json({ ok: true });
 }

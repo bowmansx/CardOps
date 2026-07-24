@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { sellCard, type SellResult } from "@/app/cards/[id]/sell/actions";
@@ -67,17 +67,14 @@ export function SellForm({
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
   const num = (s: string) => (s.trim() === "" ? 0 : Number(s) || 0);
 
-  // Auto-fee: platform preset × price (until the user edits fees themselves).
-  // Clears when it no longer applies — switching to a zero-preset platform or
-  // clearing the price must not leave a stale fee behind (day-review).
-  useEffect(() => {
-    if (feesTouched) return;
-    const preset = FEES[f.platform] ?? FEES.other;
-    const price = num(f.sale_price);
-    const applies = price > 0 && preset.pct + preset.fixed > 0;
-    setF((p) => ({ ...p, fees: applies ? (price * (preset.pct / 100) + preset.fixed).toFixed(2) : "" }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [f.platform, f.sale_price, feesTouched]);
+  // Auto-fee: platform preset × price, DERIVED during render until the user
+  // edits fees themselves (feesTouched). Deriving (instead of the old
+  // setState-in-effect) means it can never lag a render behind the price and
+  // clears itself when it no longer applies.
+  const feePreset = FEES[f.platform] ?? FEES.other;
+  const feeBase = num(f.sale_price);
+  const autoFeeApplies = feeBase > 0 && feePreset.pct + feePreset.fixed > 0;
+  const fees = feesTouched ? f.fees : autoFeeApplies ? (feeBase * (feePreset.pct / 100) + feePreset.fixed).toFixed(2) : "";
 
   async function submit() {
     setErr(null);
@@ -85,7 +82,7 @@ export function SellForm({
     const res = await sellCard(id, {
       platform: f.platform,
       sale_price: num(f.sale_price),
-      fees: num(f.fees),
+      fees: num(fees),
       shipping_income: num(f.shipping_income),
       shipping_cost: num(f.shipping_cost),
       order_ref: f.order_ref.trim() || null,
@@ -146,7 +143,7 @@ export function SellForm({
         <label className="block">
           <span className={lbl}>Fees $</span>
           <input
-            type="number" step="0.01" value={f.fees}
+            type="number" step="0.01" value={fees}
             onChange={(e) => { setFeesTouched(true); set("fees", e.target.value); }}
             className={inp + " figures"}
           />

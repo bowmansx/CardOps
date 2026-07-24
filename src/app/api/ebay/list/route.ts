@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -168,20 +169,31 @@ export async function POST(request: Request) {
       listing_id: r.itemId, url, status: "active", format: "auction",
       title, listed_at: new Date().toISOString(),
     };
-    await supabase.from("cards").update({
+    // The auction is LIVE — if this write fails the card has no listing_refs,
+    // the sync will never settle its PAID order, and a retry double-lists.
+    // Never silent (rule 7): surface it as a loud warning on the ok response.
+    const { error: dbErr0 } = await supabase.from("cards").update({
       listing_refs: refs0, status: "listed", listed_at: new Date().toISOString(),
     }).eq("id", card.id);
     const svc0 = createServiceClient();
+    // The listing is LIVE — an audit failure here must be loud but must not
+    // read as a failed listing (a retry would double-list). Warning, not 500.
+    let auditWarn0: string | undefined;
     if (svc0) {
       try { await svc0.from("service_config").update({ enabled: true }).eq("key", "ebay_api"); } catch {}
       try {
-        await svc0.from("audit_log").insert({
+        await auditOrThrow(svc0, {
           actor: "web", action: "ebay_listed", target: sku,
           payload: { listingId: r.itemId, format: "auction", startBid: body.auction!.startBid }, result: "ok",
         });
-      } catch {}
+      } catch (e) { auditWarn0 = e instanceof Error ? e.message : "audit write failed"; }
     }
-    return NextResponse.json({ ok: true, url, listingId: r.itemId, warnings: r.warnings ?? undefined });
+    const warns0 = [
+      ...(dbErr0 ? [`LISTING IS LIVE (#${r.itemId}) but CardOps couldn't record it (${dbErr0.message}) — do NOT list again; edit the card's listing state or re-run from the hub`] : []),
+      ...(r.warnings ?? []),
+      ...(auditWarn0 ? [auditWarn0] : []),
+    ];
+    return NextResponse.json({ ok: true, url, listingId: r.itemId, warnings: warns0.length ? warns0 : undefined });
   }
 
   // ── FIXED-PRICE path (Inventory API) ──────────────────────────────────────
@@ -259,19 +271,27 @@ export async function POST(request: Request) {
     offer_id: offerId, listing_id: listingId, url, status: "active",
     title, listed_at: new Date().toISOString(),
   };
-  await supabase.from("cards").update({
+  // Same live-listing rule as the auction path: a failed record is loud.
+  const { error: dbErr } = await supabase.from("cards").update({
     listing_refs: refs, status: "listed", listed_at: new Date().toISOString(),
   }).eq("id", card.id);
   const svc = createServiceClient();
+  // Listing is LIVE — audit failure surfaces as a warning, never as ok:false
+  // (a retry off a "failure" would double-list).
+  let auditWarn: string | undefined;
   if (svc) {
     try { await svc.from("service_config").update({ enabled: true }).eq("key", "ebay_api"); } catch {}
     try {
-      await svc.from("audit_log").insert({
+      await auditOrThrow(svc, {
         actor: "web", action: "ebay_listed", target: sku,
         payload: { listingId, price }, result: "ok",
       });
-    } catch {}
+    } catch (e) { auditWarn = e instanceof Error ? e.message : "audit write failed"; }
   }
 
-  return NextResponse.json({ ok: true, url, listingId });
+  const warns = [
+    ...(dbErr ? [`LISTING IS LIVE (#${listingId}) but CardOps couldn't record it (${dbErr.message}) — do NOT list again; reconcile from the hub`] : []),
+    ...(auditWarn ? [auditWarn] : []),
+  ];
+  return NextResponse.json({ ok: true, url, listingId, warnings: warns.length ? warns : undefined });
 }

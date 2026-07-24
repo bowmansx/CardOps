@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
@@ -5,6 +6,9 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { currentRole } from "@/lib/cards/roles";
 import { getEbayAccess, getEbayConnection } from "@/lib/ebay/connection";
 import { getOrders } from "@/lib/ebay/orders";
+import { allocate } from "@/lib/ebay/allocate";
+import { reverseOrderSettlement } from "@/lib/ebay/reverse";
+import { readAll } from "@/lib/supabase/page";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -19,8 +23,9 @@ export const maxDuration = 60;
 // running on the service client (card_sell accepts service_role).
 
 // eBay card-category final value fee fallback when the order doesn't report
-// the actual fee (13.25% + $0.30 per order).
-const estimateFee = (gross: number) => Math.round((gross * 0.1325 + 0.3) * 100) / 100;
+// the actual fee (13.25% + $0.30 — the $0.30 is per ORDER, allocated across
+// lines, never charged once per line).
+const estimateOrderFee = (gross: number) => Math.round((gross * 0.1325 + 0.3) * 100) / 100;
 
 // sellerId scopes the card/lot reads when db is the SERVICE client (cron), which
 // bypasses RLS. The POST path passes undefined: it uses the user client, so RLS
@@ -29,27 +34,41 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
   const ordersRes = await getOrders(access, 90);
   if (!ordersRes.ok) return { error: ordersRes.error };
 
-  // Page the match set (newest first) — a fixed .limit could silently drop
-  // listed cards once the inventory grows past it.
-  const cardRows: { id: string; sku: string | null; status: string; listing_refs: unknown }[] = [];
-  for (let from = 0; from < 20000; from += 1000) {
-    let q = db
-      .from("cards")
-      .select("id, sku, status, listing_refs")
-      .not("listing_refs", "eq", "{}");
-    if (sellerId) q = q.eq("user_id", sellerId);
-    const { data } = await q
-      .order("created_at", { ascending: false })
-      .range(from, from + 999);
-    cardRows.push(...((data ?? []) as typeof cardRows));
-    if (!data || data.length < 1000) break;
+  // Match set = a membership map: page to COMPLETION with a unique tiebreaker
+  // (Speed Book batches share created_at), and ABORT on a failed page — an
+  // errored page treated as "the end" once settled against an EMPTY set while
+  // reporting ok. Match-set errors are fail-closed, like the guard below.
+  let cardRows: { id: string; sku: string | null; status: string; listing_refs: unknown }[];
+  try {
+    const r = await readAll<{ id: string; sku: string | null; status: string; listing_refs: unknown }>(
+      (from, to) => {
+        let q = db
+          .from("cards")
+          .select("id, sku, status, listing_refs")
+          .not("listing_refs", "eq", "{}");
+        if (sellerId) q = q.eq("user_id", sellerId);
+        return q
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to);
+      });
+    cardRows = r.rows;
+  } catch (e) {
+    return { error: `card match set unavailable: ${e instanceof Error ? e.message : "read failed"}` };
   }
   // Durable cancelled-order guard: never re-settle an order we already
   // seller-cancelled, even while eBay's feed still reports it PAID. If we can't
-  // READ the guard, abort — settling blind risks re-booking a refunded order.
-  const { data: cancelledRows, error: cancelledErr } = await db.from("ebay_cancelled_orders").select("order_ref");
-  if (cancelledErr) return { error: `cancelled-order guard unavailable: ${cancelledErr.message}` };
-  const cancelledOrders = new Set((cancelledRows ?? []).map((r) => r.order_ref as string));
+  // READ the guard — or read it INCOMPLETELY (the silent 1000-row cap is not an
+  // error) — abort: settling blind risks re-booking a refunded order.
+  let cancelledOrders: Set<string>;
+  try {
+    const r = await readAll<{ order_ref: string }>((from, to) =>
+      db.from("ebay_cancelled_orders").select("order_ref")
+        .order("order_ref", { ascending: true }).range(from, to));
+    cancelledOrders = new Set(r.rows.map((x) => x.order_ref));
+  } catch (e) {
+    return { error: `cancelled-order guard unavailable: ${e instanceof Error ? e.message : "read failed"}` };
+  }
 
   const byListingId = new Map<string, { id: string; sku: string | null; status: string }>();
   const bySku = new Map<string, { id: string; sku: string | null; status: string }>();
@@ -61,9 +80,19 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
   }
 
   // Lot listings settle through card_lot_sell (splits proceeds across children).
-  let lotQ = db.from("card_lots").select("id, sku, status, listing_refs").not("listing_refs", "eq", "{}");
-  if (sellerId) lotQ = lotQ.eq("user_id", sellerId);
-  const { data: lotRows } = await lotQ;
+  // Same membership-map rules as the cards read: complete, ordered, fail-closed.
+  let lotRows: { id: string; sku: string | null; status: string; listing_refs: unknown }[];
+  try {
+    const r = await readAll<{ id: string; sku: string | null; status: string; listing_refs: unknown }>(
+      (from, to) => {
+        let q = db.from("card_lots").select("id, sku, status, listing_refs").not("listing_refs", "eq", "{}");
+        if (sellerId) q = q.eq("user_id", sellerId);
+        return q.order("id", { ascending: true }).range(from, to);
+      });
+    lotRows = r.rows;
+  } catch (e) {
+    return { error: `lot match set unavailable: ${e instanceof Error ? e.message : "read failed"}` };
+  }
   const lotByListingId = new Map<string, { id: string; sku: string | null; status: string }>();
   const lotBySku = new Map<string, { id: string; sku: string | null; status: string }>();
   for (const l of lotRows ?? []) {
@@ -75,18 +104,59 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
 
   const settled: { sku: string | null; title: string; net: number }[] = [];
   let skipped = 0;
+  let reversedCancellations = 0;
   const failures: string[] = [];
+  if (ordersRes.truncated) {
+    failures.push(`order feed truncated at ${ordersRes.orders.length} — the oldest orders in the 90-day window were NOT checked this run`);
+  }
 
   for (const order of ordersRes.orders) {
+    // Cancellation handling runs BEFORE the PAID gate (review 2026-07-25): a
+    // COMPLETED cancellation flips paymentStatus to FULLY_REFUNDED, so gating
+    // on PAID first skipped exactly the orders that most need reversing.
+    //
+    // Reversal fires ONLY on the terminal state. A pending buyer REQUEST
+    // (CANCEL_REQUESTED / IN_PROGRESS) blocks settlement but must never
+    // reverse or blacklist — the seller can still decline and ship, and the
+    // durable marker has no undo path.
+    const terminallyCancelled = order.cancelState === "CANCELED" || cancelledOrders.has(order.orderId);
+    if (terminallyCancelled) {
+      const rev = await reverseOrderSettlement(db, order.orderId, sellerId);
+      if (rev.reversedCards || rev.reversedLots) {
+        reversedCancellations++;
+        // Durable marker so the next run skips straight past this order.
+        const { error: markErr } = await db.from("ebay_cancelled_orders")
+          .upsert({ order_ref: order.orderId }, { onConflict: "order_ref" });
+        if (markErr) failures.push(`${order.orderId}: reversed but couldn't record the guard (${markErr.message})`);
+        try {
+          await auditOrThrow(db, {
+            actor: "ebay-sync", action: "ebay_cancel_reversed", target: order.orderId,
+            payload: { cards: rev.reversedCards, lots: rev.reversedLots, problems: rev.problems },
+            result: rev.problems.length ? "partial" : "ok",
+          });
+        } catch (e) {
+          failures.push(`${order.orderId}: ${e instanceof Error ? e.message : "audit write failed"}`);
+        }
+      }
+      failures.push(...rev.problems.map((p) => `${order.orderId}: ${p}`));
+      continue;
+    }
+    if (order.cancelState && order.cancelState !== "NONE_REQUESTED") {
+      // Pending cancellation request: hold — settle on a later run if the
+      // seller declines, reverse on a later run if it completes.
+      skipped++;
+      continue;
+    }
     if (order.paymentStatus !== "PAID") continue;
-    // Never settle a cancelled order — both eBay's (eventually-consistent)
-    // cancel state AND our durable local marker (set the instant we cancel).
-    if (order.cancelState && order.cancelState !== "NONE_REQUESTED") continue;
-    if (cancelledOrders.has(order.orderId)) continue;
-    // Split order-level shipping + fee across lines by item value (usually one
-    // card = whole order, but combined checkouts must divide correctly).
-    const orderItems = order.lineItems.reduce((s, li) => s + li.itemCost, 0) || 1;
-    for (const li of order.lineItems) {
+    // Split order-level shipping + the (per-ORDER) fee across lines by item
+    // value, cents-exact with the remainder on the last line (rule 12).
+    const weights = order.lineItems.map((li) => li.itemCost);
+    const itemsTotal = order.lineItems.reduce((s, li) => s + li.itemCost, 0);
+    const shipAlloc = allocate(order.deliveryCost, weights);
+    const feeAlloc = order.marketplaceFee != null
+      ? allocate(order.marketplaceFee, weights)
+      : allocate(estimateOrderFee(itemsTotal + order.deliveryCost), weights);
+    for (const [lineIdx, li] of order.lineItems.entries()) {
       const card =
         (li.legacyItemId && byListingId.get(li.legacyItemId)) ||
         (li.sku && bySku.get(li.sku)) || null;
@@ -95,13 +165,10 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
         : null;
       if (!card && !lot) continue;
 
-      const share = li.itemCost / orderItems;
-      const shipIncome = Math.round(order.deliveryCost * share * 100) / 100;
+      const shipIncome = shipAlloc[lineIdx];
       // itemCost is item-only (NOT li.total, which includes shipping).
       const salePrice = li.itemCost;
-      const fees = order.marketplaceFee != null
-        ? Math.round(order.marketplaceFee * share * 100) / 100
-        : estimateFee(salePrice + shipIncome);
+      const fees = feeAlloc[lineIdx];
       // Per-line order_ref so a combined order can settle every line (the
       // unique (platform, order_ref) index is per line, not per order).
       const orderRef = order.lineItems.length > 1 ? `${order.orderId}:${li.lineItemId}` : order.orderId;
@@ -158,15 +225,24 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
       const refs = (fresh?.listing_refs ?? {}) as Record<string, unknown>;
       refs.ebay = { ...(typeof refs.ebay === "object" ? refs.ebay : {}), status: "sold", order_ref: order.orderId };
       await db.from("cards").update({ listing_refs: refs }).eq("id", c.id);
-      await db.from("audit_log").insert({
-        actor: "ebay-sync", action: "ebay_settled", target: c.sku ?? c.id,
-        payload: { orderId: order.orderId, sale: salePrice, fees, shipping: shipIncome, net },
-        result: "ok",
-      }).then(() => {}, () => {});
+      // The per-order settlement trail must exist — a failed write lands in
+      // failures[] (loud in the response and run summary), settlement stands.
+      try {
+        await auditOrThrow(db, {
+          actor: "ebay-sync", action: "ebay_settled", target: c.sku ?? c.id,
+          payload: { orderId: order.orderId, sale: salePrice, fees, shipping: shipIncome, net },
+          result: "ok",
+        });
+      } catch (e) {
+        failures.push(`${order.orderId}: ${e instanceof Error ? e.message : "audit write failed"}`);
+      }
     }
   }
 
-  return { settled, skipped, failures, checked: ordersRes.orders.length };
+  return {
+    settled, skipped, failures, checked: ordersRes.orders.length,
+    reversedCancellations, ordersTruncated: ordersRes.truncated,
+  };
 }
 
 export async function POST() {
@@ -199,18 +275,18 @@ export async function GET(req: Request) {
   // Service client → no RLS. Settle only the connected seller's own cards.
   const out = await runSync(svc, conn.access, conn.userId);
   if ("error" in out) {
-    await svc.from("audit_log").insert({
+    await auditOrThrow(svc, {
       actor: "cron", action: "ebay_sync", target: "orders",
       payload: { error: out.error }, result: "error",
-    }).then(() => {}, () => {});
+    });
     return NextResponse.json({ error: out.error }, { status: 502 });
   }
   if (out.settled.length || out.failures.length) {
-    await svc.from("audit_log").insert({
+    await auditOrThrow(svc, {
       actor: "cron", action: "ebay_sync", target: "orders",
       payload: { settled: out.settled.length, skipped: out.skipped, failures: out.failures },
       result: out.failures.length ? "partial" : "ok",
-    }).then(() => {}, () => {});
+    });
   }
   return NextResponse.json({ ok: true, ...out });
 }

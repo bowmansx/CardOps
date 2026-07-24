@@ -50,7 +50,11 @@ export async function POST(request: Request) {
   const disposition = b?.disposition as ReceiptDisposition;
   const TREAT = ["dealer", "investment", "hobby"];
   const treatment = TREAT.includes(b?.treatment ?? "") ? b!.treatment! : "dealer";
-  if (!(amount > 0)) return NextResponse.json({ error: "Amount must be greater than 0." }, { status: 400 });
+  // Validate the CENTS value the ledger will actually book: 0.004 passes >0 but
+  // stores $0.00 and books nothing — a receipt with no entry.
+  if (!Number.isFinite(amount) || !(Math.round(amount * 100) / 100 > 0) || amount > 10_000_000) {
+    return NextResponse.json({ error: "Amount must be at least $0.01 (and sane)." }, { status: 400 });
+  }
   if (!["pool", "cards", "advance"].includes(disposition)) return NextResponse.json({ error: "Pick a valid disposition." }, { status: 400 });
   if (!(await entityExists(supabase, b?.entity_id))) return NextResponse.json({ error: "Pick a valid paying business." }, { status: 400 });
 
@@ -117,8 +121,13 @@ export async function DELETE(request: Request) {
   // Drop the stored receipt image too (else the object is orphaned in the bucket).
   const { data: row } = await supabase.from("card_receipts").select("image_path").eq("id", id).maybeSingle();
   if (row?.image_path) await supabase.storage.from("receipts").remove([row.image_path]).catch(() => {});
-  // Remove the receipt's journal entries first, then the receipt.
-  await supabase.from("journal_entries").delete().eq("source", "receipt").eq("source_ref", id);
-  await supabase.from("card_receipts").delete().eq("id", id);
+  // Journal entries first, ABORTING on error — a deleted receipt with surviving
+  // ledger lines is an orphan nothing can ever remove (the rebuild only covers
+  // card_sale). Journal-gone + receipt-still-there self-heals on retry.
+  const { error: jErr } = await supabase.from("journal_entries").delete()
+    .eq("source", "receipt").eq("source_ref", id);
+  if (jErr) return NextResponse.json({ error: `Ledger lines not removed — receipt kept. Retry. (${jErr.message})` }, { status: 500 });
+  const { error: rErr } = await supabase.from("card_receipts").delete().eq("id", id);
+  if (rErr) return NextResponse.json({ error: `Ledger lines removed but the receipt remains — delete it again. (${rErr.message})` }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

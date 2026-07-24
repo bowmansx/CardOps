@@ -22,6 +22,14 @@ const MODES = [
 
 const confTone: Record<string, string> = { high: "text-pos", medium: "text-amber-600", low: "text-danger" };
 
+function Toggle({ on, set, label }: { on: boolean; set: (v: boolean) => void; label: string }) {
+  return (
+    <label className="flex items-center gap-1 rounded-full border border-hairline bg-white px-2 py-0.5 text-[11px]">
+      <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} className="h-3 w-3 accent-flag" /> {label}
+    </label>
+  );
+}
+
 export function CardEstimates({
   cardId, aiOn, initial, initialBalance,
 }: {
@@ -56,14 +64,9 @@ export function CardEstimates({
       setEstimates((p) => ({ ...p, [mode]: d.estimate }));
       setBalance(d.balance);
       setOpen(mode);
+      if (d.cache_warning) setErr(d.cache_warning); // estimate shown, storage failed — say so
     } catch (e) { setErr(e instanceof Error ? e.message : "Estimate failed."); } finally { setBusy(null); }
   }
-
-  const Toggle = ({ on, set, label }: { on: boolean; set: (v: boolean) => void; label: string }) => (
-    <label className="flex items-center gap-1 rounded-full border border-hairline bg-white px-2 py-0.5 text-[11px]">
-      <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} className="h-3 w-3 accent-flag" /> {label}
-    </label>
-  );
 
   return (
     <section className="mt-4 overflow-hidden rounded-xl border border-hairline bg-white">

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { computeMarketValue, valueAt, type Comp, type StrategyParams } from "@/lib/cards/valuation";
+import { coerceDateOrNull } from "@/lib/books/date";
 
 async function authed(): Promise<SupabaseClient> {
   const supabase = await createClient();
@@ -52,15 +53,18 @@ async function recompute(supabase: SupabaseClient, id: string) {
       value_30d: valueAt(card as never, (comps ?? []) as Comp[], params, nowMs - 30 * 86_400_000),
       value_365d: valueAt(card as never, (comps ?? []) as Comp[], params, nowMs - 365 * 86_400_000),
     };
-    let { error: upErr } = await supabase.from("cards").update(row).eq("id", id);
-    if (upErr && /value_30d|value_365d/.test(upErr.message)) {
+    const { error: upErr } = await supabase.from("cards").update(row).eq("id", id);
+    if (upErr) {
+      if (!/value_30d|value_365d/.test(upErr.message)) throw new Error(`Value not saved: ${upErr.message}`);
       // Pre-migration fallback: snapshot columns not applied yet.
       delete row.value_30d;
       delete row.value_365d;
-      await supabase.from("cards").update(row).eq("id", id);
+      const { error: retryErr } = await supabase.from("cards").update(row).eq("id", id);
+      if (retryErr) throw new Error(`Value not saved: ${retryErr.message}`);
     }
     if (mv != null) {
-      await supabase.from("card_price_history").insert({ card_id: id, price: mv, strategy: (card as { pricing_strategy: string }).pricing_strategy });
+      const { error: histErr } = await supabase.from("card_price_history").insert({ card_id: id, price: mv, strategy: (card as { pricing_strategy: string }).pricing_strategy });
+      if (histErr) throw new Error(`Value saved but the history point wasn't: ${histErr.message}`);
     }
   }
 }
@@ -77,16 +81,21 @@ export async function recomputeCard(id: string): Promise<void> {
 export async function addComp(id: string, formData: FormData) {
   const supabase = await authed();
   const price = num(formData.get("sale_price"));
-  if (price == null) throw new Error("Sale price is required.");
-  await supabase.from("card_comps").insert({
+  // A negative comp poisons market_value (min/last_sale aggregates go negative
+  // → NAV, exports, list defaults); a silent insert failure loses evidence.
+  if (price == null || !(price > 0) || price > 1_000_000) {
+    throw new Error("Sale price must be a positive number (max $1M).");
+  }
+  const { error } = await supabase.from("card_comps").insert({
     card_id: id,
     fingerprint: `manual-${id}`,
     source: "manual",
     grader: (str(formData.get("grader")) ?? "RAW").toUpperCase(),
-    grade: num(formData.get("grade")) ?? 0,
+    grade: Math.min(10, Math.max(0, num(formData.get("grade")) ?? 0)),
     sale_price: price,
-    sale_date: str(formData.get("sale_date")),
+    sale_date: coerceDateOrNull(str(formData.get("sale_date"))),
   });
+  if (error) throw new Error(`Comp not saved: ${error.message}`);
   await recompute(supabase, id);
   revalidatePath(`/cards/${id}/value`);
 }

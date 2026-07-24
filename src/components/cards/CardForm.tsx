@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  CATEGORIES, categoryKind, CARD_STATUSES, ZONES, GRADERS, ACQUISITION_METHODS,
+  CATEGORIES, categoryKind, ZONES, GRADERS, ACQUISITION_METHODS,
   PRICING_STRATEGY_OPTIONS, type Card,
 } from "@/lib/cards/types";
 
@@ -130,14 +130,16 @@ export function CardForm({
 
       <section className="space-y-3 rounded-xl border border-hairline bg-white p-4">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/50">Basis · pricing · location</div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="use_pool_basis" defaultChecked={initial?.use_pool_basis ?? true} className="h-4 w-4 accent-[#E8590C]" />
-          Use pool basis (uncheck for an individual-basis card)
-        </label>
+        {initial?.purchase_lot_id ? (
+          <p className="text-xs text-ink/50">
+            Basis comes from this card&apos;s <b>purchase lot</b> (the lot&apos;s current average at sale time).
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className={lblCls}>Individual basis $</span>
-            <input name="individual_basis" type="number" step="0.01" defaultValue={initial?.individual_basis ?? ""} className={inputCls + " figures"} />
+            <span className={lblCls}>Cost basis $ {initial ? "" : "(required — 0 for a free card)"}</span>
+            <input name="individual_basis" type="number" step="0.01" min="0" required={!initial}
+              defaultValue={initial?.individual_basis ?? ""} className={inputCls + " figures"} />
           </label>
           <label className="block">
             <span className={lblCls}>Market value $</span>
@@ -177,9 +179,9 @@ export function CardForm({
           </label>
           <label className="block">
             <span className={lblCls}>Status</span>
-            <select name="status" defaultValue={initial?.status ?? "booked"} className={inputCls}>
-              {CARD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            {/* Read-only: status is a transition (sell/unsell/archive/list), not an editable field. */}
+            <input value={initial?.status ?? "booked"} readOnly disabled className={`${inputCls} opacity-60`} />
+            <span className="mt-1 block text-[10px] text-ink/40">Changes via the sell flow, archive, or listing actions.</span>
           </label>
         </div>
         <label className="block">

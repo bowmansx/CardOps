@@ -22,6 +22,7 @@ export const scryfall: PriceSourceAdapter = {
       r = await fetch(url, {
         headers: { "User-Agent": "CardOps/1.0 (card inventory)", Accept: "application/json" },
         cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
       });
     } catch (e) {
       return { quotes: [], ok: false, matched: false, note: e instanceof Error ? e.message : "network error" };

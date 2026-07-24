@@ -77,16 +77,20 @@ export async function POST(request: Request) {
   if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status });
 
   // Cache the estimate + debit the metered-compute ledger (soft for now — records
-  // spend; hard-enforcement flips on with billing).
-  const { data: row } = svc
+  // spend; hard-enforcement flips on with billing). Row first, debit second
+  // (rule 7): a failed cache insert re-runs (and re-selects) tomorrow, but it
+  // must never CHARGE for an estimate that was never stored.
+  const { data: row, error: cacheErr } = svc
     ? await svc.from("card_estimates").insert({
         card_id: body.cardId, mode, value: res.value, low: res.low, high: res.high,
         confidence: res.confidence, rationale: res.rationale, sources: res.sources,
         credits_spent: credits, model: res.model, created_by: user.id,
       }).select("id, created_at").maybeSingle()
-    : { data: null };
-  if (svc && credits > 0) {
-    await svc.from("credit_ledger").insert({ user_id: user.id, delta: -credits, reason: `estimate:${mode}`, ref: body.cardId });
+    : { data: null, error: null };
+  if (svc && credits > 0 && !cacheErr) {
+    const { error: debErr } = await svc.from("credit_ledger")
+      .insert({ user_id: user.id, delta: -credits, reason: `estimate:${mode}`, ref: body.cardId });
+    if (debErr) console.error(`estimate ${body.cardId}: stored but credits not debited (${debErr.message})`);
   }
 
   return NextResponse.json({
@@ -95,6 +99,9 @@ export async function POST(request: Request) {
       rationale: res.rationale, sources: res.sources, credits_spent: credits, model: res.model,
       created_at: row?.created_at ?? null,
     },
+    // A failed cache insert is worth showing: the estimate wasn't stored, so
+    // the daily auto-run will re-select (and re-bill) this card tomorrow.
+    cache_warning: cacheErr ? `Estimate shown but NOT saved (${cacheErr.message}) — not charged; it may re-run tomorrow.` : undefined,
     credits,
     balance: await balanceOf(supabase),
   });

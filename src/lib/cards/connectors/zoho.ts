@@ -4,7 +4,7 @@
 //
 // push() is money-critical and outward-facing: it is only ever called from an
 // explicitly-confirmed action, never a cron and never automatically.
-import { zohoConfigured, zohoFetch } from "@/lib/zoho/client";
+import { zohoConfigured, zohoFetch, ZohoNotPostedError } from "@/lib/zoho/client";
 import type { AccountingConnector, ConnectorContext, ExternalAccount, PushEntry, PushOutcome } from "./types";
 
 type ZohoAccount = { account_id?: string; account_name?: string; account_type?: string };
@@ -66,6 +66,12 @@ export const zoho: AccountingConnector = {
       );
       return { ok: true, attempted: true, externalId: d?.journal?.journal_id ?? null };
     } catch (err) {
+      // KNOWN not-posted (token refresh failed before send, or Zoho rejected
+      // with 4xx): attempted:false so the caller releases the claim and the
+      // entry stays retryable — a Zoho blip must not quarantine a batch.
+      if (err instanceof ZohoNotPostedError) {
+        return { ok: false, attempted: false, error: err.message };
+      }
       // Sent, outcome unknown — the caller must quarantine, never auto-retry.
       return { ok: false, attempted: true, error: err instanceof Error ? err.message : "post failed" };
     }

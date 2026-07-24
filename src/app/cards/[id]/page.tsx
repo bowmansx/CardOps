@@ -93,7 +93,7 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
     ["Parallel", c.parallel ?? "—"],
     ["Team", c.team ?? "—"],
     ["Condition", c.condition_type === "graded" ? `${c.grader ?? ""} ${c.grade ?? ""}${c.cert_number ? ` · cert ${c.cert_number}` : ""}` : "Raw"],
-    ["Basis", c.use_pool_basis ? "Pool" : `Individual ${money(c.individual_basis)}`],
+    ["Basis", c.purchase_lot_id ? "Purchase lot" : `Individual ${money(c.individual_basis)}`],
     ["Market value", money(c.market_value)],
     ["Manual price", money(c.manual_price)],
     ["Strategy", c.pricing_strategy],

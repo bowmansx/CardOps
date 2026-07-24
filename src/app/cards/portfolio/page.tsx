@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { readAllSafe } from "@/lib/supabase/page";
+import { lotRemainingTotal } from "@/lib/cards/basis";
 
 export const dynamic = "force-dynamic";
 
@@ -12,13 +13,26 @@ const moneyc = (n: number) => n.toLocaleString("en-US", { style: "currency", cur
 
 type Point = { date: string; cost: number; value: number };
 
+function Stat({ label, val, tone }: { label: string; val: string; tone?: "pos" | "neg" }) {
+  return (
+    <div>
+      <div className={"figures text-xl font-bold " + (tone === "pos" ? "text-pos" : tone === "neg" ? "text-danger" : "text-ink")}>{val}</div>
+      <div className="text-[10px] uppercase tracking-wider text-ink/50">{label}</div>
+    </div>
+  );
+}
+
 export default async function PortfolioPage() {
   const supabase = await createClient();
 
-  const [{ data: snaps }, { data: pool }, moverRows] = await Promise.all([
+  const [{ data: snaps }, lotsPage, moverRows] = await Promise.all([
+    // NEWEST 400 (desc + reverse below): ascending+limit kept the OLDEST 400,
+    // silently dropping the most recent — most decision-relevant — year.
     supabase.from("card_portfolio_snapshots")
-      .select("snapshot_date, cost_basis, market_value").order("snapshot_date", { ascending: true }).limit(400),
-    supabase.from("card_pool").select("total_cost").eq("name", "main").maybeSingle(),
+      .select("snapshot_date, cost_basis, market_value").order("snapshot_date", { ascending: false }).limit(400),
+    readAllSafe<{ id: string; remaining_cost: number | null; remaining_count: number | null }>((from, to) =>
+      supabase.from("purchase_lots").select("id, remaining_cost, remaining_count")
+        .order("id", { ascending: true }).range(from, to)),
     // Movers: cards with a 30-day-ago snapshot to compare against.
     // "Biggest movers" is a ranking, so it needs every candidate — a 1000-row cut
     // in arbitrary order would rank an arbitrary subset. (2026-07-24)
@@ -42,28 +56,36 @@ export default async function PortfolioPage() {
   const losers = [...movers].sort((a, b) => a.pct - b.pct).slice(0, 5).filter((m) => m.pct < 0);
 
   // Today's live total (paged) — so the newest point is current, not stale.
+  const livePage = await readAllSafe<{
+    market_value: number | null; manual_price: number | null;
+    purchase_lot_id: string | null; individual_basis: number | null;
+  }>((from, to) => supabase
+    .from("cards").select("market_value, manual_price, purchase_lot_id, individual_basis")
+    .not("status", "in", "(archived,sold)").order("id", { ascending: true }).range(from, to));
   let marketValue = 0, individualBasis = 0;
-  for (let from = 0; from < 20000; from += 1000) {
-    const { data: v } = await supabase
-      .from("cards").select("market_value, manual_price, use_pool_basis, individual_basis")
-      .not("status", "in", "(archived,sold)").order("id", { ascending: true }).range(from, from + 999);
-    for (const r of v ?? []) {
-      marketValue += Number((r.manual_price ?? r.market_value) ?? 0);
-      if (!r.use_pool_basis) individualBasis += Number(r.individual_basis ?? 0);
-    }
-    if (!v || v.length < 1000) break;
+  for (const r of livePage.rows) {
+    marketValue += Number((r.manual_price ?? r.market_value) ?? 0);
+    if (!r.purchase_lot_id) individualBasis += Number(r.individual_basis ?? 0);
   }
-  const todayCost = Number(pool?.total_cost ?? 0) + individualBasis;
+  const livepartial = !!(livePage.error || lotsPage.error);
+  const todayCost = lotRemainingTotal(lotsPage.rows) + individualBasis;
   const today = new Date().toISOString().slice(0, 10);
 
-  const points: Point[] = (snaps ?? []).map((s) => ({
+  const points: Point[] = [...(snaps ?? [])].reverse().map((s) => ({
     date: s.snapshot_date as string, cost: Number(s.cost_basis), value: Number(s.market_value),
   }));
-  if (points[points.length - 1]?.date !== today) {
-    points.push({ date: today, cost: Math.round(todayCost * 100) / 100, value: Math.round(marketValue * 100) / 100 });
-  } else {
-    points[points.length - 1] = { date: today, cost: Math.round(todayCost * 100) / 100, value: Math.round(marketValue * 100) / 100 };
+  // A failed live read must NOT overwrite/append today's point as $0 — the
+  // chart ends at the last good snapshot and a banner says why.
+  if (!livepartial) {
+    if (points[points.length - 1]?.date !== today) {
+      points.push({ date: today, cost: Math.round(todayCost * 100) / 100, value: Math.round(marketValue * 100) / 100 });
+    } else {
+      points[points.length - 1] = { date: today, cost: Math.round(todayCost * 100) / 100, value: Math.round(marketValue * 100) / 100 };
+    }
   }
+  // No snapshots AND a failed live read: keep the page renderable (the banner
+  // above the stats says the figures are unreliable).
+  if (points.length === 0) points.push({ date: today, cost: 0, value: 0 });
 
   const cur = points[points.length - 1];
   const first = points[0];
@@ -84,13 +106,6 @@ export default async function PortfolioPage() {
   const line = (key: "value" | "cost") => points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(" ");
   const area = `${line("value")} L${x(points.length - 1).toFixed(1)},${(PT + ih).toFixed(1)} L${x(0).toFixed(1)},${(PT + ih).toFixed(1)} Z`;
 
-  const Stat = ({ label, val, tone }: { label: string; val: string; tone?: "pos" | "neg" }) => (
-    <div>
-      <div className={"figures text-xl font-bold " + (tone === "pos" ? "text-pos" : tone === "neg" ? "text-danger" : "text-ink")}>{val}</div>
-      <div className="text-[10px] uppercase tracking-wider text-ink/50">{label}</div>
-    </div>
-  );
-
   return (
     <main className="w-full flex-1 bg-paper text-ink" style={{ colorScheme: "dark" }}>
       <div className="mx-auto w-full max-w-2xl px-4 pb-24">
@@ -102,6 +117,11 @@ export default async function PortfolioPage() {
           <Link href="/cards" className="text-xs text-ink/50 underline-offset-4 hover:text-ink hover:underline">← Cards</Link>
         </header>
 
+        {livepartial && (
+          <div className="mt-3 rounded-xl border border-danger/40 bg-danger/5 px-3 py-2.5 text-[11px] leading-snug text-danger">
+            <b>Today&apos;s live totals couldn&apos;t be read</b> — the headline shows the last good snapshot. Reload before relying on it.
+          </div>
+        )}
         <div className="mt-3 grid grid-cols-3 gap-3 rounded-xl border border-hairline bg-white p-4">
           <Stat label="Market value" val={moneyc(cur.value)} />
           <Stat label="Cost basis" val={moneyc(cur.cost)} />

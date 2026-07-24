@@ -2,6 +2,7 @@
 // card name), pull free Google News RSS, score new headlines with Haiku for
 // significance + likely market direction, store them, and push the market-moving
 // ones. Guarded by CRON_SECRET; AI gated by the shared anthropic_vision switch.
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -142,7 +143,7 @@ export async function GET(req: Request) {
     pushed = movers.length;
   }
 
-  await svc.from("audit_log").insert({
+  await auditOrThrow(svc, {
     actor: "cron", action: "card_news", target: "card_news",
     payload: { subjects: subjects.length, inserted, movers: movers.length }, result: "ok",
   });

@@ -10,7 +10,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "npm run check:types && npm run check:lint && npm run check:test && npm run check:forbidden",
+    "check:types": "tsc --noEmit",
+    "check:test": "vitest run",
+    "check:forbidden": "node scripts/check-forbidden.mjs",
+    "check:lint": "eslint src app"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.101.0",

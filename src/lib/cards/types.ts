@@ -70,7 +70,7 @@ export type Card = {
   market_value: number | null;
   manual_price: number | null;
   pricing_strategy: string;
-  use_pool_basis: boolean;
+  purchase_lot_id: string | null;
   individual_basis: number | null;
   acquisition_method: string | null;
   acquisition_source: string | null;

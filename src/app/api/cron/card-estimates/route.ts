@@ -45,13 +45,26 @@ export async function GET(req: Request) {
   if (prefErr) return NextResponse.json({ error: prefErr.message }, { status: 500 });
   if (!prefs?.length) return NextResponse.json({ ok: true, note: "nobody has automatic estimates on" });
 
+  // Paid work follows the ROLE roster, not stale prefs: a demoted user's cards
+  // must stop spending the owner's AI budget the day their role changes.
+  const { data: roster, error: rosterErr } = await svc
+    .from("profiles").select("id").in("role", ["owner", "card_ops"]);
+  if (rosterErr) return NextResponse.json({ error: rosterErr.message }, { status: 500 });
+  const allowed = new Set((roster ?? []).map((r) => r.id as string));
+
   const cutoff = new Date(Date.now() - STALE_DAYS * 86_400_000).toISOString();
+  // Leave 60s of the 300s budget for the tail (audit write + response):
+  // hitting the wall mid-user is fine, silently dying at 300s is not.
+  const deadline = Date.now() + 240_000;
   let made = 0, skipped = 0, failed = 0;
+  let deadlineHit = false;
   const errors: string[] = [];
 
   for (const p of prefs) {
-    if (made >= GLOBAL) break;
+    if (made >= GLOBAL || deadlineHit) break;
     const userId = p.user_id as string;
+    if (!allowed.has(userId)) { skipped++; continue; }
+    try {
     const modes = MODES[String(p.auto_estimate)] ?? [];
     if (!modes.length) continue;
     const ai = p.estimate_model === "deep" ? "deep" : "light";
@@ -112,6 +125,11 @@ export async function GET(req: Request) {
     let forUser = 0;
     for (const { card: stub, mode } of pick) {
       if (forUser >= PER_USER || made >= GLOBAL) break;
+      if (Date.now() > deadline) {
+        deadlineHit = true;
+        errors.push(`time budget reached — remaining candidates roll to tomorrow's run`);
+        break;
+      }
       const card = byId.get(stub.id);
       if (!card) continue;
 
@@ -120,13 +138,18 @@ export async function GET(req: Request) {
       try {
         const res = await runEstimate(svc, card as unknown as EstimateCard, mode, config);
         if (!res.ok) { failed++; errors.push(`${card.id} ${mode}: ${res.error}`); continue; }
-        await svc.from("card_estimates").insert({
+        // Row first, debit second (rule 7): a failed insert must not charge
+        // credits for an estimate that doesn't exist.
+        const { error: insErr } = await svc.from("card_estimates").insert({
           card_id: card.id, mode, value: res.value, low: res.low, high: res.high,
           confidence: res.confidence, rationale: res.rationale, sources: res.sources,
           credits_spent: credits, model: res.model, created_by: userId,
         });
+        if (insErr) { failed++; errors.push(`${card.id} ${mode}: estimate not stored (${insErr.message}) — not charged`); continue; }
         if (credits > 0) {
-          await svc.from("credit_ledger").insert({ user_id: userId, delta: -credits, reason: `auto-estimate:${mode}`, ref: card.id });
+          const { error: debErr } = await svc.from("credit_ledger")
+            .insert({ user_id: userId, delta: -credits, reason: `auto-estimate:${mode}`, ref: card.id });
+          if (debErr) errors.push(`${card.id} ${mode}: estimate stored but credits not debited (${debErr.message})`);
         }
         made++; forUser++;
       } catch (e) {
@@ -134,7 +157,15 @@ export async function GET(req: Request) {
         errors.push(`${card.id} ${mode}: ${e instanceof Error ? e.message : "failed"}`);
       }
     }
+    } catch (e) {
+      // One user's failed reads must not starve everyone after them (rule 11).
+      failed++;
+      errors.push(`user ${userId}: ${e instanceof Error ? e.message : "failed"} — continuing with the next user`);
+    }
   }
 
-  return NextResponse.json({ ok: true, made, skipped_fresh: skipped, failed, users: prefs.length, errors: errors.slice(0, 10) });
+  return NextResponse.json({
+    ok: true, made, skipped_fresh: skipped, failed, users: prefs.length,
+    deadlineHit: deadlineHit || undefined, errors: errors.slice(0, 10),
+  });
 }

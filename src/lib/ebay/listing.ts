@@ -13,6 +13,7 @@ export async function ebayApi<T = unknown>(
 ): Promise<{ ok: boolean; status: number; data: T | null; error: string | null }> {
   const res = await fetch(`${EBAY_HOSTS.api}${path}`, {
     method,
+    signal: AbortSignal.timeout(15_000),
     headers: {
       Authorization: `Bearer ${access}`,
       "Content-Type": "application/json",

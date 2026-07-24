@@ -1,28 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 type Status = "idle" | "sending" | "sent" | "google" | "error";
 
-export default function LoginPage() {
+function LoginInner() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
-  const [rejected, setRejected] = useState(false);
+  // ?error=not-allowed — derived, not state+effect. useSearchParams needs a
+  // Suspense boundary at build time; the default export below provides it.
+  const rejected = useSearchParams().get("error") === "not-allowed";
   // This repo is CardOps, so brand as CardOps from the first paint. It used to
   // default to "MasterOps" and swap post-mount by hostname, back when one login
   // page served both apps out of the monorepo — which meant a visible flash of
   // the wrong product name before hydration (and it's what Vercel's deployment
   // thumbnail captures). (2026-07-24)
   const appName = "CardOps";
-
-  // Read ?error=not-allowed without useSearchParams (avoids a Suspense
-  // boundary requirement at build time).
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setRejected(params.get("error") === "not-allowed");
-  }, []);
 
   async function handleGoogle() {
     setStatus("google");
@@ -148,5 +144,13 @@ export default function LoginPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
   );
 }

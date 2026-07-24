@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -88,7 +89,7 @@ export async function GET(req: Request) {
     snapshots[uid] = await snapshotUser(svc, uid, notes);
   }
 
-  await svc.from("audit_log").insert({
+  await auditOrThrow(svc, {
     actor: "cron", action: "card_reprice", target: "cards",
     payload: { users: (people ?? []).length, scanned, repriced, skippedErr, notes: notes.slice(0, 10) },
     result: notes.length ? "partial" : "ok",
@@ -156,8 +157,16 @@ async function repriceUser(
         ({ error: upErr } = await svc.from("cards").update(row).eq("id", card.id));
       }
       if (upErr) { skippedErr++; continue; }
-      await svc.from("card_price_history").insert({ card_id: card.id, price: mv, strategy: card.pricing_strategy });
+      const { error: histErr } = await svc.from("card_price_history")
+        .insert({ card_id: card.id, price: mv, strategy: card.pricing_strategy });
+      if (histErr) notes.push(`reprice/${uid}/${card.id}: repriced but history point not written (${histErr.message})`);
       repriced++;
+    } else {
+      // Unchanged/no-value cards still advance the cursor — otherwise they
+      // sort first forever and the tail of the inventory is never reached.
+      const { error: stampErr } = await svc.from("cards")
+        .update({ last_priced_at: new Date().toISOString() }).eq("id", card.id);
+      if (stampErr) skippedErr++;
     }
   }
   return { scanned: cards.length, repriced, skippedErr };
@@ -172,15 +181,19 @@ async function snapshotUser(
   svc: SupabaseClient, uid: string, notes: string[],
 ): Promise<{ cost_basis: number; market_value: number; card_count: number } | null> {
   try {
-    const { data: pool } = await svc
-      .from("card_pool").select("total_cost").eq("name", "main").eq("user_id", uid).maybeSingle();
+    const { rows: lots } = await readAll<{ remaining_cost: number | null }>(
+      (from, to) => svc.from("purchase_lots").select("remaining_cost")
+        .eq("user_id", uid).order("id", { ascending: true }).range(from, to),
+      SNAPSHOT_MAX,
+    );
+    const lotTotal = lots.reduce((s, l) => s + Number(l.remaining_cost ?? 0), 0);
 
     const { rows: vrows, truncated } = await readAll<{
       market_value: number | null; manual_price: number | null;
-      use_pool_basis: boolean | null; individual_basis: number | null;
+      purchase_lot_id: string | null; individual_basis: number | null;
     }>(
       (from, to) => svc.from("cards")
-        .select("market_value, manual_price, use_pool_basis, individual_basis")
+        .select("market_value, manual_price, purchase_lot_id, individual_basis")
         .eq("user_id", uid).not("status", "in", "(archived,sold)")
         .order("id", { ascending: true }).range(from, to),
       SNAPSHOT_MAX,
@@ -190,10 +203,10 @@ async function snapshotUser(
     let marketValue = 0, individualBasis = 0, count = 0;
     for (const v of vrows) {
       marketValue += Number((v.manual_price ?? v.market_value) ?? 0);
-      if (!v.use_pool_basis) individualBasis += Number(v.individual_basis ?? 0);
+      if (!v.purchase_lot_id) individualBasis += Number(v.individual_basis ?? 0);
       count++;
     }
-    const costBasis = Number(pool?.total_cost ?? 0) + individualBasis;
+    const costBasis = lotTotal + individualBasis;
     const snapshot = {
       cost_basis: Math.round(costBasis * 100) / 100,
       market_value: Math.round(marketValue * 100) / 100,

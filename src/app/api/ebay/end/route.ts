@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
@@ -54,9 +55,9 @@ export async function POST(request: Request) {
     listing_refs: refs,
     ...(card.status === "listed" ? { status: "booked" } : {}),
   }).eq("id", card.id).neq("status", "sold");
-  await supabase.from("audit_log").insert({
+  await auditOrThrow(supabase, {
     actor: "web", action: "ebay_ended", target: (card.sku as string) ?? card.id,
     payload: { listingId: ref.listing_id }, result: "ok",
-  }).then(() => {}, () => {});
+  });
   return NextResponse.json({ ok: true });
 }

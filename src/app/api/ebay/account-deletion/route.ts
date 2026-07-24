@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -29,21 +30,19 @@ export async function GET(req: Request) {
   return NextResponse.json({ challengeResponse });
 }
 
-// Deletion notices: acknowledge fast (200) and log. CardOps stores no eBay
-// buyer data today, so there is nothing to purge — the log proves receipt.
+// Deletion notices: log FIRST, ack second. CardOps stores no eBay buyer data
+// today, so there is nothing to purge — the log IS the proof of receipt, so a
+// notice we could not log must NOT be acked (a 5xx makes eBay redeliver).
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const svc = createServiceClient();
-  if (svc) {
-    try {
-      await svc.from("audit_log").insert({
-        actor: "ebay",
-        action: "account_deletion_notice",
-        target: "ebay",
-        payload: { notification: body?.notification?.notificationId ?? null },
-        result: "ok",
-      });
-    } catch {}
-  }
+  if (!svc) return NextResponse.json({ error: "service unavailable" }, { status: 503 });
+  await auditOrThrow(svc, {
+    actor: "ebay",
+    action: "account_deletion_notice",
+    target: "ebay",
+    payload: { notification: body?.notification?.notificationId ?? null },
+    result: "ok",
+  });
   return NextResponse.json({ ok: true });
 }
