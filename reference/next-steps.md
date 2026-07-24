@@ -56,7 +56,11 @@ card activity shows up in your entity cash/P&L with no wiring between the apps.
   now NO card cron runs anywhere. eBay sales settle via the hub's manual sync
   button on MasterOps until cutover.
 
-## 2b. Migrations queued to PASTE (in this order)
+## 2b. ✅ APPLIED 2026-07-25 — all three migrations pasted; money-core
+harness ran against the live database: **13 of 13 PASSED**. (Historical
+paste order kept below for reference.)
+
+### Original paste queue (done)
 
 From the `foundation-fixes` branch — paste each, in sequence:
 
