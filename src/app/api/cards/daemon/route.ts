@@ -172,15 +172,19 @@ async function snapshotUser(
   svc: SupabaseClient, uid: string, notes: string[],
 ): Promise<{ cost_basis: number; market_value: number; card_count: number } | null> {
   try {
-    const { data: pool } = await svc
-      .from("card_pool").select("total_cost").eq("name", "main").eq("user_id", uid).maybeSingle();
+    const { rows: lots } = await readAll<{ remaining_cost: number | null }>(
+      (from, to) => svc.from("purchase_lots").select("remaining_cost")
+        .eq("user_id", uid).order("id", { ascending: true }).range(from, to),
+      SNAPSHOT_MAX,
+    );
+    const lotTotal = lots.reduce((s, l) => s + Number(l.remaining_cost ?? 0), 0);
 
     const { rows: vrows, truncated } = await readAll<{
       market_value: number | null; manual_price: number | null;
-      use_pool_basis: boolean | null; individual_basis: number | null;
+      purchase_lot_id: string | null; individual_basis: number | null;
     }>(
       (from, to) => svc.from("cards")
-        .select("market_value, manual_price, use_pool_basis, individual_basis")
+        .select("market_value, manual_price, purchase_lot_id, individual_basis")
         .eq("user_id", uid).not("status", "in", "(archived,sold)")
         .order("id", { ascending: true }).range(from, to),
       SNAPSHOT_MAX,
@@ -190,10 +194,10 @@ async function snapshotUser(
     let marketValue = 0, individualBasis = 0, count = 0;
     for (const v of vrows) {
       marketValue += Number((v.manual_price ?? v.market_value) ?? 0);
-      if (!v.use_pool_basis) individualBasis += Number(v.individual_basis ?? 0);
+      if (!v.purchase_lot_id) individualBasis += Number(v.individual_basis ?? 0);
       count++;
     }
-    const costBasis = Number(pool?.total_cost ?? 0) + individualBasis;
+    const costBasis = lotTotal + individualBasis;
     const snapshot = {
       cost_basis: Math.round(costBasis * 100) / 100,
       market_value: Math.round(marketValue * 100) / 100,

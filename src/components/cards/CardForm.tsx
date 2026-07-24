@@ -130,14 +130,16 @@ export function CardForm({
 
       <section className="space-y-3 rounded-xl border border-hairline bg-white p-4">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/50">Basis · pricing · location</div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="use_pool_basis" defaultChecked={initial?.use_pool_basis ?? true} className="h-4 w-4 accent-[#E8590C]" />
-          Use pool basis (uncheck for an individual-basis card)
-        </label>
+        {initial?.purchase_lot_id ? (
+          <p className="text-xs text-ink/50">
+            Basis comes from this card&apos;s <b>purchase lot</b> (the lot&apos;s current average at sale time).
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className={lblCls}>Individual basis $</span>
-            <input name="individual_basis" type="number" step="0.01" defaultValue={initial?.individual_basis ?? ""} className={inputCls + " figures"} />
+            <span className={lblCls}>Cost basis $ {initial ? "" : "(required — 0 for a free card)"}</span>
+            <input name="individual_basis" type="number" step="0.01" min="0" required={!initial}
+              defaultValue={initial?.individual_basis ?? ""} className={inputCls + " figures"} />
           </label>
           <label className="block">
             <span className={lblCls}>Market value $</span>

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
 import { PostToLedger } from "@/components/cards/PostToLedger";
 import { readAllSafe } from "@/lib/supabase/page";
+import { lotAverages, cardBasis } from "@/lib/cards/basis";
 
 export const dynamic = "force-dynamic";
 
@@ -59,13 +60,18 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
   // Every figure on this page is a SUM over these two reads, so both must be
   // complete. `.limit(20000)` is capped at 1000 by PostgREST, which quietly made
   // inventory value, cost basis and YTD P/L partial. (2026-07-24)
-  const [{ data: ents }, { data: pools }, cardsPage, salesPage, { count: journalCount }] = await Promise.all([
+  const [{ data: ents }, lotsPage, cardsPage, salesPage, { count: journalCount }] = await Promise.all([
     supabase.from("card_businesses").select("id, name, short_code, zoho_books_org_id").order("short_code"),
-    supabase.from("card_pool").select("entity_id, total_cost, card_count"),
+    readAllSafe<{ id: string; remaining_cost: number | null; remaining_count: number | null }>((from, to) =>
+      supabase
+        .from("purchase_lots")
+        .select("id, remaining_cost, remaining_count")
+        .order("id", { ascending: true })
+        .range(from, to)),
     readAllSafe<Record<string, unknown>>((from, to) =>
       supabase
         .from("cards")
-        .select("id, entity_id, use_pool_basis, individual_basis, market_value, manual_price, tax_treatment")
+        .select("id, entity_id, purchase_lot_id, individual_basis, market_value, manual_price, tax_treatment")
         .not("status", "in", "(archived,sold)")
         .order("id", { ascending: true })
         .range(from, to)),
@@ -81,7 +87,8 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
   ]);
   const cards = cardsPage.rows;
   const sales = salesPage.rows;
-  const totalsPartial = !!(cardsPage.error || salesPage.error);
+  const totalsPartial = !!(cardsPage.error || salesPage.error || lotsPage.error);
+  const avgByLot = lotAverages(lotsPage.rows);
 
   const entityById = new Map<string, Entity>((ents ?? []).map((e) => [e.id as string, e as Entity]));
   const aggs = new Map<string, Agg>();
@@ -91,17 +98,17 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
     return aggs.get(key)!;
   };
 
-  // Inventory (assets): pooled basis from card_pool, individual basis + market from live cards.
-  for (const p of pools ?? []) {
-    const a = get((p.entity_id as string) ?? null);
-    a.invBasisPooled += Number(p.total_cost ?? 0);
-  }
+  // Inventory (assets): each live card contributes its own basis — lot average
+  // for purchase-lot cards, individual_basis otherwise — so per-entity pooled
+  // basis follows the cards that actually sit in that entity.
   const treatmentTally: Record<string, number> = { dealer: 0, investment: 0, hobby: 0 };
   for (const c of cards) {
     const a = get((c.entity_id as string) ?? null);
     a.invCount += 1;
     a.invMarket += Number((c.manual_price ?? c.market_value) ?? 0);
-    if (!c.use_pool_basis) a.invBasisIndiv += Number(c.individual_basis ?? 0);
+    const cb = cardBasis(c as { purchase_lot_id: string | null; individual_basis: number | null }, avgByLot);
+    if (c.purchase_lot_id) a.invBasisPooled += cb;
+    else a.invBasisIndiv += cb;
     const t = (c.tax_treatment as string) ?? "dealer";
     if (t in treatmentTally) treatmentTally[t] += 1;
   }

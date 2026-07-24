@@ -32,3 +32,38 @@ fixes). One entry per decision: what, why, commit.
 - The RPCs leave cardops.in_sell set for the rest of their transaction; in
   production each request is its own transaction so it cannot leak, but the
   harness resets it after every RPC call before testing the guards.
+
+## Item 4a — funding.ts reviewed (report, no changes)
+- It is NOT the pool implementation: a pure simulation engine for the Booking
+  Simulator (funding paths, §267/SE flags), balanced by construction, no I/O,
+  and it never touches card_pool — so purchase lots do not invalidate it.
+  Soft edges only (degenerate negative/zero transfer prices produce odd
+  display-only entries); left alone deliberately.
+
+## Item 3 — purchase-lot basis
+- **Naming**: `purchase_lots`, never "lots" — `card_lots` already means
+  SELL-side listing bundles. Buy-side and sell-side stay distinct words
+  everywhere.
+- **Ledger untouched**: books/post reads `basis_drawn` off `card_sales`, so
+  swapping the draw source required zero books-layer changes.
+- **Lot economics guarded like the sold boundary**: remaining/total columns
+  move only under the RPC handshake; label/source/date/tax_bucket stay freely
+  editable. A card may only link to a lot owned by the same user (FK alone
+  would accept foreign lot ids — FK checks bypass RLS).
+- **Per-entity pooled basis** on the Books page now follows the CARDS (each
+  live lot-card contributes its lot average to its own entity) instead of the
+  old card_pool.entity_id column — exact when a lot's cards share an entity,
+  and the only definition that survives cards moving between entities.
+- **Legacy fold, unconditional**: any funded card_pool row becomes a per-user
+  "Legacy pool" purchase lot and its live pooled cards link to it, BEFORE the
+  drop — zero data loss even if "effectively empty" hides something. The
+  migration opens with a verification SELECT so Beau sees row counts at paste
+  time.
+- **CSV import cost**: not required per-row (a bulk file shouldn't die on a
+  missing column) — defaults individual_basis 0; the create form and Full
+  Intake DO require an explicit cost (0 allowed). Speed Book's lot cost now
+  requires >= 0 instead of > 0 (a genuinely free lot is legal).
+- **Harness rewritten in the same commit** (13 assertions) since it seeded
+  card_pool, which this migration drops — the paste sequence stays coherent.
+  This absorbs most of item 8's scope. Still not executed locally (no
+  Postgres here); first paste-run pending.

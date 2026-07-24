@@ -96,7 +96,6 @@ function fields(formData: FormData) {
     market_value: num(formData.get("market_value")),
     manual_price: num(formData.get("manual_price")),
     pricing_strategy: str(formData.get("pricing_strategy")) ?? "standard",
-    use_pool_basis: formData.get("use_pool_basis") != null,
     individual_basis: num(formData.get("individual_basis")),
     acquisition_method: str(formData.get("acquisition_method")),
     acquisition_source: str(formData.get("acquisition_source")),
@@ -107,6 +106,11 @@ function fields(formData: FormData) {
 export async function createCard(formData: FormData) {
   const supabase = await authed();
   const f = fields(formData);
+  // Cost is REQUIRED at create (0 is fine for gifts/pulls): a card without a
+  // stated basis is the never-funded-pool trap all over again.
+  if (f.individual_basis == null || f.individual_basis < 0) {
+    throw new Error("Cost basis is required — enter 0 for a free card.");
+  }
   const year = f.year ?? new Date().getFullYear();
   const cat = catCode(f.sport_category);
   // Retry on the rare SKU race (two concurrent creates read the same max seq

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { readAllSafe } from "@/lib/supabase/page";
+import { lotRemainingTotal } from "@/lib/cards/basis";
 
 export const dynamic = "force-dynamic";
 
@@ -15,10 +16,12 @@ type Point = { date: string; cost: number; value: number };
 export default async function PortfolioPage() {
   const supabase = await createClient();
 
-  const [{ data: snaps }, { data: pool }, moverRows] = await Promise.all([
+  const [{ data: snaps }, lotsPage, moverRows] = await Promise.all([
     supabase.from("card_portfolio_snapshots")
       .select("snapshot_date, cost_basis, market_value").order("snapshot_date", { ascending: true }).limit(400),
-    supabase.from("card_pool").select("total_cost").eq("name", "main").maybeSingle(),
+    readAllSafe<{ id: string; remaining_cost: number | null; remaining_count: number | null }>((from, to) =>
+      supabase.from("purchase_lots").select("id, remaining_cost, remaining_count")
+        .order("id", { ascending: true }).range(from, to)),
     // Movers: cards with a 30-day-ago snapshot to compare against.
     // "Biggest movers" is a ranking, so it needs every candidate — a 1000-row cut
     // in arbitrary order would rank an arbitrary subset. (2026-07-24)
@@ -45,15 +48,15 @@ export default async function PortfolioPage() {
   let marketValue = 0, individualBasis = 0;
   for (let from = 0; from < 20000; from += 1000) {
     const { data: v } = await supabase
-      .from("cards").select("market_value, manual_price, use_pool_basis, individual_basis")
+      .from("cards").select("market_value, manual_price, purchase_lot_id, individual_basis")
       .not("status", "in", "(archived,sold)").order("id", { ascending: true }).range(from, from + 999);
     for (const r of v ?? []) {
       marketValue += Number((r.manual_price ?? r.market_value) ?? 0);
-      if (!r.use_pool_basis) individualBasis += Number(r.individual_basis ?? 0);
+      if (!r.purchase_lot_id) individualBasis += Number(r.individual_basis ?? 0);
     }
     if (!v || v.length < 1000) break;
   }
-  const todayCost = Number(pool?.total_cost ?? 0) + individualBasis;
+  const todayCost = lotRemainingTotal(lotsPage.rows) + individualBasis;
   const today = new Date().toISOString().slice(0, 10);
 
   const points: Point[] = (snaps ?? []).map((s) => ({

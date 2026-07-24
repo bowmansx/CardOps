@@ -38,6 +38,28 @@ if it's ever sold. Consequences:
 - Some tables CardOps reads (e.g. `push_subscriptions`) are CREATEd only in
   Master-Ops migrations; CardOps migrations may only add policies to them.
 
+## Basis architecture: purchase lots (2026-07-25)
+
+A card's cost basis has exactly two sources — no third path:
+
+- **`cards.purchase_lot_id` set** → basis at sale = that lot's current average
+  (`remaining_cost / remaining_count`), drawn inside `card_sell` and reversed
+  by `card_unsell` via the append-only `purchase_lot_adjustments` trail.
+  A purchase lot = one purchase EVENT (cost, date, source, tax bucket) —
+  it answers "which purchase, what cost". Speed Book creates one per batch.
+- **No lot** → `individual_basis`, which is REQUIRED at create/intake
+  (explicit $0 allowed). CSV import defaults it to 0.
+
+The old global `card_pool` (average of everything ever pooled, default-on) is
+GONE — it couldn't answer the audit question and let unfunded cards dilute
+funded basis. Do not reintroduce a global pool. NAMING: "purchase lots"
+(buy-side) vs `card_lots` (SELL-side listing bundles) — never just "lots" in
+schema or code. Status is likewise a transition, not a field: the sold
+boundary and lot balances move only through the RPCs (DB-enforced triggers;
+see 20260734/20260735 migrations). The paste-ready money-core test harness
+lives at `supabase/tests/money-core.test.sql` — run it after any change to
+sell/unsell/lot SQL.
+
 ## The two recurring bug classes (see reference/audit-2026-07-24.md)
 
 1. **Service-role and SECURITY DEFINER code bypasses RLS entirely.** Crons run

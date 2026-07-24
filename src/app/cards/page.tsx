@@ -3,6 +3,8 @@ import { SlidersHorizontal } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
 import { CARD_STATUSES, CATEGORIES, TAG_FACETS, type Card } from "@/lib/cards/types";
+import { readAllSafe } from "@/lib/supabase/page";
+import { lotRemainingTotal } from "@/lib/cards/basis";
 import { CardBrowser } from "@/components/cards/CardBrowser";
 import { CardsMoreMenu } from "@/components/cards/CardsMoreMenu";
 import { EbayLogo } from "@/components/cards/EbayLogo";
@@ -101,14 +103,16 @@ export default async function CardsPage({ searchParams }: { searchParams: Promis
   const entities =
     (await supabase.from("card_businesses").select("id, name, short_code").eq("active", true).order("short_code")).data ?? [];
 
-  const [{ data: pool }, { count: invCount }, { data: groupsList }] = await Promise.all([
-    supabase.from("card_pool").select("total_cost, card_count").eq("name", "main").maybeSingle(),
+  const [lotsPage, { count: invCount }, { data: groupsList }] = await Promise.all([
+    readAllSafe<{ id: string; remaining_cost: number | null; remaining_count: number | null }>((from, to) =>
+      supabase.from("purchase_lots").select("id, remaining_cost, remaining_count")
+        .order("id", { ascending: true }).range(from, to)),
     supabase.from("cards").select("id", { count: "exact", head: true }).neq("status", "archived"),
     supabase.from("card_groups").select("id, name").order("sort").order("name"),
   ]);
   const myGroups = (groupsList ?? []) as { id: string; name: string }[];
-  const poolTotal = Number(pool?.total_cost ?? 0);
-  const poolCount = Number(pool?.card_count ?? 0);
+  const poolTotal = lotRemainingTotal(lotsPage.rows);
+  const poolCount = lotsPage.rows.reduce((s, l) => s + Number(l.remaining_count ?? 0), 0);
 
   // Portfolio banner (Beau): cost basis vs accumulated market value vs return %.
   // Values-only paged scan of live inventory (capped; move to an RPC if the
@@ -118,13 +122,13 @@ export default async function CardsPage({ searchParams }: { searchParams: Promis
   for (let from = 0; from < 8000; from += 1000) {
     const { data: vrows } = await supabase
       .from("cards")
-      .select("market_value, manual_price, use_pool_basis, individual_basis")
+      .select("market_value, manual_price, purchase_lot_id, individual_basis")
       .not("status", "in", "(archived,sold)")
       .order("id", { ascending: true })
       .range(from, from + 999);
     for (const v of vrows ?? []) {
       marketValue += Number((v.manual_price ?? v.market_value) ?? 0);
-      if (!v.use_pool_basis) individualBasis += Number(v.individual_basis ?? 0);
+      if (!v.purchase_lot_id) individualBasis += Number(v.individual_basis ?? 0);
     }
     if (!vrows || vrows.length < 1000) break;
   }

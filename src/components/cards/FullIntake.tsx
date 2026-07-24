@@ -202,6 +202,15 @@ export function FullIntake({
             <Field label="Location" k="location_code" f={f} set={set} />
           </div>
           <label className="block">
+            <span className={lbl}>Cost $ — what you paid for THIS card (required; 0 for a free card)</span>
+            <input
+              type="number" step="0.01" min="0" inputMode="decimal"
+              value={f.cost ?? ""}
+              onChange={(e) => set("cost", e.target.value)}
+              className={inp}
+            />
+          </label>
+          <label className="block">
             <span className={lbl}>Pricing standard — how this card&apos;s value gets determined (editable later)</span>
             <select
               value={f.pricing_strategy ?? "standard"}

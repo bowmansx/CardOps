@@ -73,6 +73,7 @@ export type IntakeInput = {
   grader?: string; grade?: string; cert_number?: string;
   zone?: string; location_code?: string; pricing_strategy?: string;
   entity_id?: string; tax_treatment?: string;
+  cost?: string; // REQUIRED (validated in commitIntakeCard): what was paid, 0 allowed
   vision_confidence?: unknown;
   front?: string; back?: string;
 };
@@ -85,6 +86,12 @@ export async function commitIntakeCard(
   input: IntakeInput,
 ): Promise<{ ok: boolean; id?: string; sku?: string; error?: string }> {
   const { supabase } = await authed();
+  // Cost is REQUIRED (0 allowed): un-costed cards are how basis silently
+  // corrupted under the old global pool. Lot-funded intake comes via Speed Book.
+  const cost = Number(input.cost);
+  if (input.cost == null || input.cost === "" || !Number.isFinite(cost) || cost < 0) {
+    return { ok: false, error: "Cost is required — enter 0 for a free card." };
+  }
   const category = input.sport_category?.trim() || null;
   const year = input.year && Number.isFinite(Number(input.year)) ? Number(input.year) : new Date().getFullYear();
   const cat = catCode(category);
@@ -111,6 +118,7 @@ export async function commitIntakeCard(
     location_code: input.location_code?.trim() || null,
     pricing_strategy: input.pricing_strategy?.trim() || "standard",
     vision_confidence: input.vision_confidence ?? null,
+    individual_basis: cost,
     status: "booked",
     entity_id: await resolveEntityId(supabase, input.entity_id),
     // Tax treatment is an owner decision (drives the owner-only books); staff default to dealer.

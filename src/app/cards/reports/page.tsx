@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
+import { readAllSafe } from "@/lib/supabase/page";
+import { lotAverages, cardBasis } from "@/lib/cards/basis";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +25,7 @@ type SaleRow = {
 type OpenCard = {
   sport_category: string | null; status: string; condition_type: string | null;
   manual_price: number | null; market_value: number | null;
-  use_pool_basis: boolean; individual_basis: number | null; listed_at: string | null;
+  purchase_lot_id: string | null; individual_basis: number | null; listed_at: string | null;
 };
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -74,14 +76,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const view = VIEWS.some((v) => v.key === sp.view) ? sp.view! : "overview";
   const supabase = await createClient();
 
-  const [sales, open, { data: pool }] = await Promise.all([
+  const [sales, open, lotsPage] = await Promise.all([
     pageAll<SaleRow>((from, to) => supabase.from("card_sales")
       .select("platform, sale_price, fees, shipping_income, shipping_cost, net_proceeds, basis_drawn, profit_loss, sold_at, cards ( sport_category, player, set_name, listed_at )")
       .order("sold_at", { ascending: false }).range(from, to)),
     pageAll<OpenCard>((from, to) => supabase.from("cards")
-      .select("sport_category, status, condition_type, manual_price, market_value, use_pool_basis, individual_basis, listed_at")
+      .select("sport_category, status, condition_type, manual_price, market_value, purchase_lot_id, individual_basis, listed_at")
       .not("status", "in", "(sold,archived)").order("id", { ascending: true }).range(from, to)),
-    supabase.from("card_pool").select("total_cost, card_count").eq("name", "main").maybeSingle(),
+    readAllSafe<{ id: string; remaining_cost: number | null; remaining_count: number | null }>((from, to) =>
+      supabase.from("purchase_lots").select("id, remaining_cost, remaining_count")
+        .order("id", { ascending: true }).range(from, to)),
   ]);
 
   const tabHref = (v: string) => (v === "overview" ? "/cards/reports" : `/cards/reports?view=${v}`);
@@ -110,7 +114,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           ))}
         </div>
 
-        {view === "overview" && <Overview sales={sales} open={open} pool={pool} />}
+        {view === "overview" && <Overview sales={sales} open={open} lots={lotsPage.rows} />}
         {view === "monthly" && <Monthly sales={sales} />}
         {view === "category" && <ByCategory sales={sales} />}
         {view === "velocity" && <Velocity sales={sales} open={open} />}
@@ -121,13 +125,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 }
 
 // ── Overview: unrealized snapshot + realized per year (+ CSV) ─────────────────
-function Overview({ sales, open, pool }: { sales: SaleRow[]; open: OpenCard[]; pool: { total_cost: number | null; card_count: number | null } | null }) {
+function Overview({ sales, open, lots }: { sales: SaleRow[]; open: OpenCard[]; lots: { id: string; remaining_cost: number | null; remaining_count: number | null }[] }) {
   const unrealizedValue = open.reduce((s, c) => s + num(c.manual_price ?? c.market_value), 0);
-  const individualBasis = open.reduce((s, c) => s + (c.use_pool_basis ? 0 : num(c.individual_basis)), 0);
-  const poolCount = num(pool?.card_count);
-  const poolAvg = poolCount > 0 ? num(pool?.total_cost) / poolCount : 0;
-  const openPooledCount = open.filter((c) => c.use_pool_basis).length;
-  const openPoolBasis = Math.round(poolAvg * openPooledCount * 100) / 100;
+  const avgByLot = lotAverages(lots);
+  const individualBasis = open.reduce((s, c) => s + (c.purchase_lot_id ? 0 : num(c.individual_basis)), 0);
+  const openPooledCount = open.filter((c) => c.purchase_lot_id).length;
+  const openPoolBasis = Math.round(open.reduce((s, c) => s + (c.purchase_lot_id ? cardBasis(c, avgByLot) : 0), 0) * 100) / 100;
   const openBasis = openPoolBasis + individualBasis;
   const years = [...new Set(sales.map((s) => s.sold_at.slice(0, 4)))].sort().reverse();
 
@@ -135,7 +138,7 @@ function Overview({ sales, open, pool }: { sales: SaleRow[]; open: OpenCard[]; p
     <>
       <Card title="On the shelf (unrealized)">
         <Line label={`Inventory value · ${open.length} cards`} value={money(unrealizedValue)} strong />
-        <Line label={`Pool basis (${openPooledCount} pooled @ ${money(poolAvg)})`} value={money(openPoolBasis)} />
+        <Line label={`Purchase-lot basis (${openPooledCount} lot cards)`} value={money(openPoolBasis)} />
         {individualBasis > 0 && <Line label="Individually-based cards basis" value={money(individualBasis)} />}
         <Line label="Unrealized gain if sold at value" value={money(unrealizedValue - openBasis)} tone={unrealizedValue - openBasis >= 0 ? "pos" : "neg"} />
       </Card>
