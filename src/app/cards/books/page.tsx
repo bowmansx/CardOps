@@ -160,7 +160,8 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
           </div>
           <span className="flex items-center gap-3 text-xs">
             <Link href="/cards/books/simulator" className="text-ink/50 underline-offset-4 hover:text-flag hover:underline">Simulator</Link>
-            <Link href="/tax" className="text-ink/50 underline-offset-4 hover:text-flag hover:underline">Tax advisor</Link>
+            {/* Tax advisor is single-homed on MasterOps (reads the shared Supabase) — stays there after cutover. */}
+            <a href="https://master-ops-iota.vercel.app/tax" className="text-ink/50 underline-offset-4 hover:text-flag hover:underline">Tax advisor</a>
             <Link href="/cards" className="text-ink/50 underline-offset-4 hover:text-ink hover:underline">← Cards</Link>
           </span>
         </header>
