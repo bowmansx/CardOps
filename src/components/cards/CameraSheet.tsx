@@ -173,7 +173,6 @@ export function CameraSheet({
       </div>
 
       <div ref={boxRef} className="relative flex flex-1 items-center justify-center overflow-hidden">
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
         <video ref={videoRef} playsInline muted onLoadedMetadata={layoutGuide} className="max-h-full max-w-full" />
         {guideRect && ready && (
           <div

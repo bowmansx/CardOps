@@ -113,9 +113,12 @@ export function FullIntake({
               return (
                 <button key={kind} type="button" onClick={() => setCam(kind)}
                   className="flex aspect-[3/4] w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-hairline bg-paper">
-                  {val
-                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={val} alt={kind} className="h-full w-full object-cover" />
-                    : <span className="flex flex-col items-center gap-1 text-xs text-ink/50"><Camera size={22} /> {kind}</span>}
+                  {val ? (
+                    /* eslint-disable-next-line @next/next/no-img-element -- data-URL camera preview; next/image can't optimize it */
+                    <img src={val} alt={kind} className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex flex-col items-center gap-1 text-xs text-ink/50"><Camera size={22} /> {kind}</span>
+                  )}
                 </button>
               );
             })}

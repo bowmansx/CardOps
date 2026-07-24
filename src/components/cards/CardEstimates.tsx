@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Brain, Loader2, ChevronDown, Coins } from "lucide-react";
 import { estimateCost, type EstimateConfig, type AiDepth } from "@/lib/cards/credits";
 
@@ -46,11 +46,14 @@ export function CardEstimates({
   const [open, setOpen] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const configFor = (mode: string): EstimateConfig => ({ mode: mode as EstimateConfig["mode"], comparables, macro, news, pop, ai });
+  const configFor = useCallback(
+    (mode: string): EstimateConfig => ({ mode: mode as EstimateConfig["mode"], comparables, macro, news, pop, ai }),
+    [comparables, macro, news, pop, ai],
+  );
   const cost = useMemo(() => ({
     standard_plus: estimateCost(configFor("standard_plus")).credits,
     all_sales_plus: estimateCost(configFor("all_sales_plus")).credits,
-  }), [comparables, macro, news, pop, ai]);
+  }), [configFor]);
 
   async function run(mode: string) {
     setBusy(mode); setErr(null);

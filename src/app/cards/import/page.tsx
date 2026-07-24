@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { importCards } from "../actions";
 
 // Minimal CSV parser (handles quoted fields + escaped quotes).
@@ -29,7 +28,6 @@ function parseCsv(text: string): Record<string, string>[] {
 }
 
 export default function ImportPage() {
-  const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [busy, setBusy] = useState(false);
