@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { readAllSafe } from "@/lib/supabase/page";
 
 export const dynamic = "force-dynamic";
 
@@ -14,13 +15,26 @@ type Sale = {
 
 export default async function SalesPage() {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("card_sales")
-    .select("id, platform, sale_price, net_proceeds, basis_drawn, profit_loss, order_ref, sold_at, cards(sku, player, year, set_name)")
-    .order("sold_at", { ascending: false })
-    .limit(1000);
+  // The VISIBLE list stays a "most recent 1000"; the headline totals sum a
+  // COMPLETE paged read — a capped read fed these sums before. (2026-07-25)
+  const [{ data }, totalsPage] = await Promise.all([
+    supabase
+      .from("card_sales")
+      .select("id, platform, sale_price, net_proceeds, basis_drawn, profit_loss, order_ref, sold_at, cards(sku, player, year, set_name)")
+      .order("sold_at", { ascending: false })
+      .order("id", { ascending: true })
+      .limit(1000),
+    readAllSafe<{ net_proceeds: number | null; basis_drawn: number | null; profit_loss: number | null }>(
+      (from, to) => supabase
+        .from("card_sales")
+        .select("net_proceeds, basis_drawn, profit_loss")
+        .order("id", { ascending: true })
+        .range(from, to)),
+  ]);
   const sales = (data ?? []) as unknown as Sale[];
-  const t = sales.reduce(
+  const totalsPartial = !!totalsPage.error;
+  const totalCount = totalsPage.rows.length;
+  const t = totalsPage.rows.reduce(
     (a, s) => ({
       net: a.net + Number(s.net_proceeds ?? 0),
       basis: a.basis + Number(s.basis_drawn ?? 0),
@@ -40,10 +54,15 @@ export default async function SalesPage() {
           <Link href="/cards" className="text-xs text-ink/50 underline-offset-4 hover:text-ink hover:underline">← Cards</Link>
         </header>
 
+        {totalsPartial && (
+          <div className="mt-3 rounded-xl border border-danger/40 bg-danger/5 px-3 py-2.5 text-[11px] leading-snug text-danger">
+            <b>Some sales couldn&apos;t be read</b> — the totals below are unreliable. Reload before relying on them.
+          </div>
+        )}
         <div className="mt-4 grid grid-cols-3 gap-2.5">
-          <Stat label={`Sales · ${sales.length}`} value={money(t.net)} />
-          <Stat label="Basis drawn" value={money(t.basis)} />
-          <Stat label="Profit / loss" value={money(t.pl)} tone={t.pl >= 0 ? "pos" : "danger"} />
+          <Stat label={`Sales · ${totalsPartial ? "?" : totalCount}`} value={totalsPartial ? "—" : money(t.net)} />
+          <Stat label="Basis drawn" value={totalsPartial ? "—" : money(t.basis)} />
+          <Stat label="Profit / loss" value={totalsPartial ? "—" : money(t.pl)} tone={t.pl >= 0 ? "pos" : "danger"} />
         </div>
 
         <div className="mt-4 overflow-hidden rounded-xl border border-hairline bg-white">

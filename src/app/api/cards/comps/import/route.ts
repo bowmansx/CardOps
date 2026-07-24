@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { currentRole, hasCardAccess } from "@/lib/cards/roles";
 import { recomputeCard } from "@/app/cards/[id]/value/actions";
+import { coerceDateOrNull } from "@/lib/books/date";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -100,7 +101,9 @@ export async function POST(request: Request) {
   for (const s of parsed.sales) {
     if (!(s.sale_price > 0) || s.sale_price > 1_000_000) { skipped++; continue; }
     const grader = (s.grader || "RAW").toUpperCase();
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(s.sale_date) ? s.sale_date : null;
+    // Round-trip the model-emitted date: "2026-06-31" passes the regex but
+    // makes the date column throw, 500ing the whole batch. Invalid → null.
+    const date = coerceDateOrNull(s.sale_date);
     const k = `${grader}|${s.grade}|${s.sale_price}|${date ?? ""}`;
     if (seen.has(k)) { skipped++; continue; }
     seen.add(k);

@@ -32,15 +32,6 @@ const num = (v: unknown) => Number(v ?? 0);
 const sum = (rows: SaleRow[], k: keyof SaleRow) => rows.reduce((s, r) => s + num(r[k]), 0);
 const cardOf = (r: SaleRow): CardBits | null => (Array.isArray(r.cards) ? r.cards[0] : r.cards) ?? null;
 
-async function pageAll<T>(make: (from: number, to: number) => PromiseLike<{ data: T[] | null }>): Promise<T[]> {
-  const PAGE = 1000, MAX = 100_000, out: T[] = [];
-  for (let from = 0; from < MAX; from += PAGE) {
-    const { data } = await make(from, from + PAGE - 1);
-    out.push(...(data ?? []));
-    if (!data || data.length < PAGE) break;
-  }
-  return out;
-}
 
 const VIEWS = [
   { key: "overview", label: "Overview" },
@@ -76,17 +67,20 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const view = VIEWS.some((v) => v.key === sp.view) ? sp.view! : "overview";
   const supabase = await createClient();
 
-  const [sales, open, lotsPage] = await Promise.all([
-    pageAll<SaleRow>((from, to) => supabase.from("card_sales")
+  const [salesPage, openPage, lotsPage] = await Promise.all([
+    readAllSafe<SaleRow>((from, to) => supabase.from("card_sales")
       .select("platform, sale_price, fees, shipping_income, shipping_cost, net_proceeds, basis_drawn, profit_loss, sold_at, cards ( sport_category, player, set_name, listed_at )")
-      .order("sold_at", { ascending: false }).range(from, to)),
-    pageAll<OpenCard>((from, to) => supabase.from("cards")
+      .order("sold_at", { ascending: false }).order("id", { ascending: true }).range(from, to)),
+    readAllSafe<OpenCard>((from, to) => supabase.from("cards")
       .select("sport_category, status, condition_type, manual_price, market_value, purchase_lot_id, individual_basis, listed_at")
       .not("status", "in", "(sold,archived)").order("id", { ascending: true }).range(from, to)),
     readAllSafe<{ id: string; remaining_cost: number | null; remaining_count: number | null }>((from, to) =>
       supabase.from("purchase_lots").select("id, remaining_cost, remaining_count")
         .order("id", { ascending: true }).range(from, to)),
   ]);
+  const sales = salesPage.rows;
+  const open = openPage.rows;
+  const partial = !!(salesPage.error || openPage.error || lotsPage.error);
 
   const tabHref = (v: string) => (v === "overview" ? "/cards/reports" : `/cards/reports?view=${v}`);
 
@@ -104,6 +98,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </span>
         </header>
 
+        {partial && (
+          <div className="mt-3 rounded-xl border border-danger/40 bg-danger/5 px-3 py-2.5 text-[11px] leading-snug text-danger">
+            <b>Some records couldn&apos;t be read</b> — every figure on this page is unreliable. Reload before relying on any of them.
+          </div>
+        )}
         {/* Report picker */}
         <div className="mt-3 flex flex-wrap gap-1.5">
           {VIEWS.map((v) => (

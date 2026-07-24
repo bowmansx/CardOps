@@ -35,6 +35,7 @@ export async function GET(req: Request) {
       .gte("sold_at", `${year}-01-01`)
       .lt("sold_at", `${Number(year) + 1}-01-01`)
       .order("sold_at", { ascending: true })
+      .order("id", { ascending: true }) // unique tiebreaker: lot children share sold_at
       .range(from, from + PAGE - 1);
     if (error) return Response.json({ error: error.message }, { status: 500 });
     rows.push(...((data ?? []) as Record<string, unknown>[]));

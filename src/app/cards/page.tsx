@@ -50,8 +50,12 @@ export default async function CardsPage({ searchParams }: { searchParams: Promis
   const groupId = sp.group && UUID.test(sp.group) ? sp.group : null;
   let groupIds: string[] | null = null;
   if (groupId) {
-    const { data: gm } = await supabase.from("card_group_items").select("card_id").eq("group_id", groupId).limit(1000);
-    groupIds = (gm ?? []).map((x) => x.card_id as string);
+    // Membership set → complete paged read (a capped read silently hid cards
+    // from big groups, and WHICH cards varied between requests).
+    const gm = await readAllSafe<{ card_id: string }>((from, to) =>
+      supabase.from("card_group_items").select("card_id").eq("group_id", groupId)
+        .order("card_id", { ascending: true }).range(from, to));
+    groupIds = gm.rows.map((x) => x.card_id);
     if (groupIds.length === 0) groupIds = ["00000000-0000-0000-0000-000000000000"]; // empty group → no matches
   }
 
@@ -119,19 +123,21 @@ export default async function CardsPage({ searchParams }: { searchParams: Promis
   // shelf ever exceeds this). Cost basis = pool total + individual-basis cards.
   let marketValue = 0;
   let individualBasis = 0;
-  for (let from = 0; from < 8000; from += 1000) {
-    const { data: vrows } = await supabase
-      .from("cards")
-      .select("market_value, manual_price, purchase_lot_id, individual_basis")
-      .not("status", "in", "(archived,sold)")
-      .order("id", { ascending: true })
-      .range(from, from + 999);
-    for (const v of vrows ?? []) {
-      marketValue += Number((v.manual_price ?? v.market_value) ?? 0);
-      if (!v.purchase_lot_id) individualBasis += Number(v.individual_basis ?? 0);
-    }
-    if (!vrows || vrows.length < 1000) break;
+  const bannerPage = await readAllSafe<{
+    market_value: number | null; manual_price: number | null;
+    purchase_lot_id: string | null; individual_basis: number | null;
+  }>((from, to) => supabase
+    .from("cards")
+    .select("market_value, manual_price, purchase_lot_id, individual_basis")
+    .not("status", "in", "(archived,sold)")
+    .order("id", { ascending: true })
+    .range(from, to));
+  for (const v of bannerPage.rows) {
+    marketValue += Number((v.manual_price ?? v.market_value) ?? 0);
+    if (!v.purchase_lot_id) individualBasis += Number(v.individual_basis ?? 0);
   }
+  // A failed read renders as "—", never as $0 / −100% presented as fact.
+  const bannerPartial = !!(bannerPage.error || lotsPage.error);
   const costBasis = poolTotal + individualBasis;
   const returnPct = costBasis > 0 ? ((marketValue - costBasis) / costBasis) * 100 : null;
 
@@ -194,16 +200,16 @@ export default async function CardsPage({ searchParams }: { searchParams: Promis
         {/* Portfolio banner (tap → value-over-time): cost basis · market value · return. */}
         <Link href="/cards/portfolio" className="mt-3 grid grid-cols-3 divide-x divide-hairline overflow-hidden rounded-xl border border-hairline bg-white hover:border-flag/50">
           <div className="px-3 py-2.5">
-            <div className="figures text-lg font-bold text-ink">{money(costBasis)}</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink/50">Cost basis · {invCount ?? poolCount}</div>
+            <div className="figures text-lg font-bold text-ink">{bannerPartial ? "—" : money(costBasis)}</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink/50">{bannerPartial ? "Read failed · reload" : `Cost basis · ${invCount ?? poolCount}`}</div>
           </div>
           <div className="px-3 py-2.5">
-            <div className="figures text-lg font-bold text-ink">{money(marketValue)}</div>
+            <div className="figures text-lg font-bold text-ink">{bannerPartial ? "—" : money(marketValue)}</div>
             <div className="text-[10px] uppercase tracking-wider text-ink/50">Market value</div>
           </div>
           <div className="px-3 py-2.5">
-            <div className={"figures text-lg font-bold " + (returnPct == null ? "text-ink/40" : returnPct >= 0 ? "text-pos" : "text-danger")}>
-              {returnPct == null ? "—" : `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(0)}%`}
+            <div className={"figures text-lg font-bold " + (bannerPartial || returnPct == null ? "text-ink/40" : returnPct >= 0 ? "text-pos" : "text-danger")}>
+              {bannerPartial || returnPct == null ? "—" : `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(0)}%`}
             </div>
             <div className="text-[10px] uppercase tracking-wider text-ink/50">Return ›</div>
           </div>

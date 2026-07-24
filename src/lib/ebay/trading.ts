@@ -25,6 +25,7 @@ async function tradingCall(
 </${callName}Request>`;
   const res = await fetch(`${EBAY_HOSTS.api}/ws/api.dll`, {
     method: "POST",
+    signal: AbortSignal.timeout(15_000),
     headers: {
       "X-EBAY-API-CALL-NAME": callName,
       "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",

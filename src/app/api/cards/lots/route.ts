@@ -123,14 +123,27 @@ export async function POST(request: Request) {
 
   if (op === "sell") {
     const salePrice = Number(body?.salePrice);
-    if (!(salePrice > 0)) return NextResponse.json({ error: "A positive sale price is required." }, { status: 400 });
+    if (!(salePrice > 0) || salePrice > 10_000_000) {
+      return NextResponse.json({ error: "A positive sale price is required." }, { status: 400 });
+    }
+    // Same guard the single-card sell action carries: the RPC only checks the
+    // sale price, and a negative fee would inflate net proceeds and corrupt
+    // every child's P/L (and the books rows built from them).
+    const fees = Number(body?.fees) || 0;
+    const shipIncome = Number(body?.shipIncome) || 0;
+    const shipCost = Number(body?.shipCost) || 0;
+    for (const [label, v] of [["fees", fees], ["shipIncome", shipIncome], ["shipCost", shipCost]] as const) {
+      if (!Number.isFinite(v) || v < 0 || v > 10_000_000) {
+        return NextResponse.json({ error: `${label} must be a non-negative number.` }, { status: 400 });
+      }
+    }
     const { data, error } = await supabase.rpc("card_lot_sell", {
       p_lot_id: lotId,
       p_platform: typeof body?.platform === "string" ? body.platform : "ebay",
       p_sale_price: salePrice,
-      p_fees: Number(body?.fees) || 0,
-      p_ship_income: Number(body?.shipIncome) || 0,
-      p_ship_cost: Number(body?.shipCost) || 0,
+      p_fees: fees,
+      p_ship_income: shipIncome,
+      p_ship_cost: shipCost,
       p_order_ref: (body?.orderRef as string) || `lot-${lotId}-${salePrice}`,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });

@@ -103,14 +103,26 @@ function fields(formData: FormData) {
   };
 }
 
+// Money/grade sanity for the create+edit forms — a stray minus on a basis
+// field would flow straight into sale P/L and the NAV/export sums.
+function validateFields(f: ReturnType<typeof fields>): void {
+  for (const k of ["market_value", "manual_price", "individual_basis"] as const) {
+    const v = f[k];
+    if (v != null && (v < 0 || v > 10_000_000)) throw new Error(`${k.replace(/_/g, " ")} must be between 0 and 10,000,000.`);
+  }
+  if (f.grade != null && (f.grade < 0 || f.grade > 10)) throw new Error("Grade must be between 0 and 10.");
+  if (f.year != null && (f.year < 1800 || f.year > 2100)) throw new Error("Year looks wrong.");
+}
+
 export async function createCard(formData: FormData) {
   const supabase = await authed();
   const f = fields(formData);
   // Cost is REQUIRED at create (0 is fine for gifts/pulls): a card without a
   // stated basis is the never-funded-pool trap all over again.
-  if (f.individual_basis == null || f.individual_basis < 0) {
+  if (f.individual_basis == null) {
     throw new Error("Cost basis is required — enter 0 for a free card.");
   }
+  validateFields(f);
   const year = f.year ?? new Date().getFullYear();
   const cat = catCode(f.sport_category);
   // Retry on the rare SKU race (two concurrent creates read the same max seq
@@ -138,6 +150,7 @@ export async function createCard(formData: FormData) {
 export async function updateCard(id: string, formData: FormData) {
   const supabase = await authed();
   const f = fields(formData);
+  validateFields(f);
   let { error } = await supabase
     .from("cards")
     .update({ ...f, updated_at: new Date().toISOString() })
@@ -216,8 +229,9 @@ export async function importCards(
       sport_category: category,
       condition_type: r.condition_type?.trim() || "raw",
       grader: r.grader?.trim() || null,
-      grade: r.grade ? Number(r.grade) || null : null,
-      market_value: r.market_value ? Number(r.market_value) || null : null,
+      grade: (() => { const g = r.grade ? Number(r.grade) || null : null; return g != null && g >= 0 && g <= 10 ? g : null; })(),
+      // Negative/absurd CSV money is treated as absent, never imported as fact.
+      market_value: (() => { const m = r.market_value ? Number(r.market_value) || null : null; return m != null && m >= 0 && m <= 10_000_000 ? m : null; })(),
       status: (() => {
         const s = r.status?.trim() || "booked";
         if (IMPORTABLE_STATUSES.has(s)) return s;

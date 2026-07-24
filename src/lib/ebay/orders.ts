@@ -181,6 +181,7 @@ export async function cancelOrder(
 ): Promise<{ ok: true; cancelId: string | null } | { ok: false; error: string }> {
   const res = await fetch(`${EBAY_HOSTS.api}/post-order/v2/cancellation`, {
     method: "POST",
+    signal: AbortSignal.timeout(15_000),
     headers: {
       Authorization: `IAF ${access}`,
       "Content-Type": "application/json",

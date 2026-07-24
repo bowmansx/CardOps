@@ -4,6 +4,7 @@ import { currentRole } from "@/lib/cards/roles";
 import { getEbayAccess } from "@/lib/ebay/connection";
 import { getMyEbaySelling, type MySelling } from "@/lib/ebay/trading";
 import { getOrders, findEligibleOfferListings, type EbayOrder } from "@/lib/ebay/orders";
+import { readAllSafe } from "@/lib/supabase/page";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -45,12 +46,16 @@ export async function GET() {
   const unsold: MySelling[] = selling.ok ? selling.unsold : [];
   const orders: EbayOrder[] = ordersRes.ok ? ordersRes.orders : [];
 
-  // CardOps matches: any card that has ever had an eBay listing ref.
-  const { data: cardRows } = await supabase
-    .from("cards")
-    .select("id, sku, player, year, set_name, status, listing_refs")
-    .not("listing_refs", "eq", "{}")
-    .limit(1000);
+  // CardOps matches: any card that has ever had an eBay listing ref. This is a
+  // membership map, so it pages to completion (a capped read mislabeled orders
+  // as unmatched once ever-listed cards passed 1000).
+  const { rows: cardRows } = await readAllSafe<Record<string, unknown>>((from, to) =>
+    supabase
+      .from("cards")
+      .select("id, sku, player, year, set_name, status, listing_refs")
+      .not("listing_refs", "eq", "{}")
+      .order("id", { ascending: true })
+      .range(from, to));
   const cards: CardStub[] = (cardRows ?? []).map((c) => ({
     id: c.id as string,
     sku: (c.sku as string) ?? null,
@@ -70,11 +75,15 @@ export async function GET() {
   const matchCard = (itemId: string | null, sku: string | null): CardStub | null =>
     (itemId && byListingId.get(itemId)) || (sku && bySku.get(sku)) || null;
 
-  // Settled state: which eBay order_refs already exist in card_sales.
+  // Settled state + 30-day stats: the NEWEST 1000 eBay sales (explicit order —
+  // unordered, this was an arbitrary 1000-row subset past 1000 lifetime sales).
+  // The newest 1000 always cover the 90-day order window and the 30-day tiles.
   const { data: saleRows } = await supabase
     .from("card_sales")
     .select("order_ref, sale_price, profit_loss, sold_at")
     .eq("platform", "ebay")
+    .order("sold_at", { ascending: false })
+    .order("id", { ascending: true })
     .limit(1000);
   // order_ref is the orderId, or "orderId:lineItemId" for combined orders —
   // strip the suffix so an order shows settled once any of its lines settle.

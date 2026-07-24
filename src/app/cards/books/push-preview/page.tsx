@@ -38,6 +38,7 @@ export default async function PushPreviewPage() {
       supabase.from("journal_entries")
         .select("entity_id, entry_date, source, source_ref, line, account, debit, credit, memo")
         .order("source_ref", { ascending: true }).order("line", { ascending: true })
+        .order("id", { ascending: true }) // advance halves tie on (source_ref, line)
         .range(from, to)),
     supabase.from("card_account_map").select("business_id, provider, account_key, external_account_id"),
     readAllSafe<{ business_id: string; reference: string }>((from, to) =>

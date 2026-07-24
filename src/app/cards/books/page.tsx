@@ -87,7 +87,7 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
   ]);
   const cards = cardsPage.rows;
   const sales = salesPage.rows;
-  const totalsPartial = !!(cardsPage.error || salesPage.error || lotsPage.error);
+  let totalsPartial = !!(cardsPage.error || salesPage.error || lotsPage.error);
   const avgByLot = lotAverages(lotsPage.rows);
 
   const entityById = new Map<string, Entity>((ents ?? []).map((e) => [e.id as string, e as Entity]));
@@ -134,12 +134,15 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
 
   // Intercompany balances from the journal — an advance creates a receivable on
   // the payer (debit-normal asset) and a payable on the payee (credit-normal).
-  const { rows: intercoRows } = await readAllSafe<Record<string, unknown>>((from, to) =>
+  // A failed interco read must trip the SAME banner as the other money reads —
+  // silently rendering $0 receivables/payables reads as "none exist".
+  const intercoPage = await readAllSafe<Record<string, unknown>>((from, to) =>
     supabase
       .from("journal_entries").select("id, entity_id, account, debit, credit")
       .in("account", ["intercompany_advance", "intercompany_payable"])
       .order("id", { ascending: true }).range(from, to));
-  for (const r of intercoRows) {
+  if (intercoPage.error || intercoPage.truncated) totalsPartial = true;
+  for (const r of intercoPage.rows) {
     const a = get((r.entity_id as string) ?? null);
     const net = Number(r.debit ?? 0) - Number(r.credit ?? 0);
     if (r.account === "intercompany_advance") a.intercoAdvance += net;

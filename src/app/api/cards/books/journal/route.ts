@@ -38,6 +38,7 @@ export async function GET(request: Request) {
       .order("entry_date", { ascending: true })
       .order("source_ref", { ascending: true })
       .order("line", { ascending: true })
+      .order("id", { ascending: true }) // intercompany advances tie on all three keys above
       .range(from, to);
     if (year) q = q.gte("entry_date", `${year}-01-01`).lt("entry_date", `${year + 1}-01-01`);
     return q;

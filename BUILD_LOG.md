@@ -100,3 +100,34 @@ fixes). One entry per decision: what, why, commit.
   bypass; the readAll test pins the pagination primitive; "awaited but
   {error} discarded" is NOT machine-catchable here — that class is held by
   prevention rule 1 and review, not tooling.
+
+## Item 7 — mechanical wave (one commit, rules 1-6/9-10 applied)
+- Sales & P&L: totals from a complete paged read + banner; the visible list
+  stays "most recent 1000" (rule 2's legal use).
+- Reports page: private pageAll deleted in favor of readAllSafe + page banner;
+  card_sales ordered (sold_at desc, id) — lot children tie on sold_at.
+- CPA CSV + journal export + push-preview: unique `.order("id")` tiebreakers
+  (intercompany advance halves tie on all previous keys).
+- Books page: interco + (already) lot reads feed the partial banner.
+- Portfolio: snapshots keep the NEWEST 400 (desc + reverse); live-total read
+  via readAllSafe — on failure the chart ends at the last good snapshot with a
+  banner instead of a $0 today-point. Cards-index banner renders "—" on a
+  failed read, never $0/−100%.
+- Group filter membership paged to completion, ordered by card_id.
+- eBay hub: card match map pages to completion; sales slice explicitly newest-
+  first. Sync: card + lot match sets and the cancelled-order guard all read
+  via readAll, ordered, FAIL-CLOSED (a failed page aborts the run instead of
+  settling against an empty set).
+- Lot sell validates fees/shipping like the single-card path (the RPC only
+  checks sale price). Create/edit forms clamp money 0..10M and grade 0..10;
+  CSV import treats negative money as absent.
+- addComp checks its insert error, requires positive price, and dates go
+  through coerceDateOrNull — NEW: invalid dates become null, NOT today
+  (substituting today would corrupt comp recency weighting; coerceDate keeps
+  its today-fallback for receipts where "when" defaults to now).
+- Every vendor fetch now carries AbortSignal.timeout (10s price sources, 15s
+  eBay/Zoho); card-news already had timeouts.
+- NOT in this wave (deliberate): push-preview claim-status display (T2, gated
+  with the push-honesty trio in next-steps.md); sync post-settle reversal,
+  getOrders 300-cap redesign, lot-cancel repair, fee allocation remainder —
+  behavioral eBay changes, folded into the cutover checklist (item 9).

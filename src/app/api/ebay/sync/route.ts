@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { currentRole } from "@/lib/cards/roles";
 import { getEbayAccess, getEbayConnection } from "@/lib/ebay/connection";
 import { getOrders } from "@/lib/ebay/orders";
+import { readAll } from "@/lib/supabase/page";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -30,27 +31,41 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
   const ordersRes = await getOrders(access, 90);
   if (!ordersRes.ok) return { error: ordersRes.error };
 
-  // Page the match set (newest first) — a fixed .limit could silently drop
-  // listed cards once the inventory grows past it.
-  const cardRows: { id: string; sku: string | null; status: string; listing_refs: unknown }[] = [];
-  for (let from = 0; from < 20000; from += 1000) {
-    let q = db
-      .from("cards")
-      .select("id, sku, status, listing_refs")
-      .not("listing_refs", "eq", "{}");
-    if (sellerId) q = q.eq("user_id", sellerId);
-    const { data } = await q
-      .order("created_at", { ascending: false })
-      .range(from, from + 999);
-    cardRows.push(...((data ?? []) as typeof cardRows));
-    if (!data || data.length < 1000) break;
+  // Match set = a membership map: page to COMPLETION with a unique tiebreaker
+  // (Speed Book batches share created_at), and ABORT on a failed page — an
+  // errored page treated as "the end" once settled against an EMPTY set while
+  // reporting ok. Match-set errors are fail-closed, like the guard below.
+  let cardRows: { id: string; sku: string | null; status: string; listing_refs: unknown }[];
+  try {
+    const r = await readAll<{ id: string; sku: string | null; status: string; listing_refs: unknown }>(
+      (from, to) => {
+        let q = db
+          .from("cards")
+          .select("id, sku, status, listing_refs")
+          .not("listing_refs", "eq", "{}");
+        if (sellerId) q = q.eq("user_id", sellerId);
+        return q
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to);
+      });
+    cardRows = r.rows;
+  } catch (e) {
+    return { error: `card match set unavailable: ${e instanceof Error ? e.message : "read failed"}` };
   }
   // Durable cancelled-order guard: never re-settle an order we already
   // seller-cancelled, even while eBay's feed still reports it PAID. If we can't
-  // READ the guard, abort — settling blind risks re-booking a refunded order.
-  const { data: cancelledRows, error: cancelledErr } = await db.from("ebay_cancelled_orders").select("order_ref");
-  if (cancelledErr) return { error: `cancelled-order guard unavailable: ${cancelledErr.message}` };
-  const cancelledOrders = new Set((cancelledRows ?? []).map((r) => r.order_ref as string));
+  // READ the guard — or read it INCOMPLETELY (the silent 1000-row cap is not an
+  // error) — abort: settling blind risks re-booking a refunded order.
+  let cancelledOrders: Set<string>;
+  try {
+    const r = await readAll<{ order_ref: string }>((from, to) =>
+      db.from("ebay_cancelled_orders").select("order_ref")
+        .order("order_ref", { ascending: true }).range(from, to));
+    cancelledOrders = new Set(r.rows.map((x) => x.order_ref));
+  } catch (e) {
+    return { error: `cancelled-order guard unavailable: ${e instanceof Error ? e.message : "read failed"}` };
+  }
 
   const byListingId = new Map<string, { id: string; sku: string | null; status: string }>();
   const bySku = new Map<string, { id: string; sku: string | null; status: string }>();
@@ -62,9 +77,19 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
   }
 
   // Lot listings settle through card_lot_sell (splits proceeds across children).
-  let lotQ = db.from("card_lots").select("id, sku, status, listing_refs").not("listing_refs", "eq", "{}");
-  if (sellerId) lotQ = lotQ.eq("user_id", sellerId);
-  const { data: lotRows } = await lotQ;
+  // Same membership-map rules as the cards read: complete, ordered, fail-closed.
+  let lotRows: { id: string; sku: string | null; status: string; listing_refs: unknown }[];
+  try {
+    const r = await readAll<{ id: string; sku: string | null; status: string; listing_refs: unknown }>(
+      (from, to) => {
+        let q = db.from("card_lots").select("id, sku, status, listing_refs").not("listing_refs", "eq", "{}");
+        if (sellerId) q = q.eq("user_id", sellerId);
+        return q.order("id", { ascending: true }).range(from, to);
+      });
+    lotRows = r.rows;
+  } catch (e) {
+    return { error: `lot match set unavailable: ${e instanceof Error ? e.message : "read failed"}` };
+  }
   const lotByListingId = new Map<string, { id: string; sku: string | null; status: string }>();
   const lotBySku = new Map<string, { id: string; sku: string | null; status: string }>();
   for (const l of lotRows ?? []) {

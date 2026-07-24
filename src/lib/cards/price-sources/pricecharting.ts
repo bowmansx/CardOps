@@ -36,7 +36,7 @@ export const pricecharting: PriceSourceAdapter = {
     const url = `https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&q=${encodeURIComponent(q)}`;
     let r: Response;
     try {
-      r = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+      r = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(10_000) });
     } catch (e) {
       return { quotes: [], ok: false, matched: false, note: e instanceof Error ? e.message : "network error" };
     }

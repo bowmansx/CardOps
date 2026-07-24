@@ -31,7 +31,7 @@ async function accessToken(): Promise<string> {
     client_secret: process.env.ZOHO_CLIENT_SECRET!,
     refresh_token: process.env.ZOHO_REFRESH_TOKEN!,
   });
-  const res = await fetch(`${ACCOUNTS}/oauth/v2/token`, { method: "POST", body });
+  const res = await fetch(`${ACCOUNTS}/oauth/v2/token`, { method: "POST", body, signal: AbortSignal.timeout(15_000) });
   const data = (await res.json()) as { access_token?: string; expires_in?: number };
   if (!res.ok || !data.access_token) {
     throw new Error(`Zoho token refresh failed (${res.status})`);
@@ -51,6 +51,7 @@ export async function zohoFetch<T>(path: string, init?: RequestInit): Promise<T>
     const token = await accessToken();
     const res = await fetch(url, {
       ...init,
+      signal: AbortSignal.timeout(15_000),
       headers: { ...(init?.headers ?? {}), Authorization: `Zoho-oauthtoken ${token}` },
     });
     if (res.status === 429 && attempt < 3) {

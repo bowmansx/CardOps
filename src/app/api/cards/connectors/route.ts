@@ -109,7 +109,11 @@ export async function PUT(request: Request) {
   }
 
   if (clearKeys.length) {
-    await supabase.from("card_account_map").delete().eq("business_id", businessId).eq("provider", provider).in("account_key", clearKeys);
+    // A failed clear must not report "cleared" — the stale mapping would keep
+    // routing money to an account the owner explicitly unmapped.
+    const { error } = await supabase.from("card_account_map").delete()
+      .eq("business_id", businessId).eq("provider", provider).in("account_key", clearKeys);
+    if (error) return NextResponse.json({ error: `Couldn't clear mappings: ${error.message}` }, { status: 500 });
   }
   if (rows.length) {
     const { error } = await supabase.from("card_account_map").upsert(rows, { onConflict: "business_id,provider,account_key" });

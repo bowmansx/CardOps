@@ -117,7 +117,7 @@ export async function fetchCardApiByQuery(q: string, limit = 12): Promise<CardAp
 async function runQuery(token: string, params: URLSearchParams): Promise<{ sales: CardApiSale[]; ok: boolean; note?: string }> {
   let r: Response;
   try {
-    r = await fetch(`${BASE}/sales?${params.toString()}`, { headers: { "x-market-api-key": token, Accept: "application/json" }, cache: "no-store" });
+    r = await fetch(`${BASE}/sales?${params.toString()}`, { headers: { "x-market-api-key": token, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(10_000) });
   } catch (e) {
     return { sales: [], ok: false, note: e instanceof Error ? e.message : "network error" };
   }
@@ -148,6 +148,7 @@ export const thecardapi: PriceSourceAdapter = {
       r = await fetch(`${BASE}/sales?${params.toString()}`, {
         headers: { "x-market-api-key": token, Accept: "application/json" },
         cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
       });
     } catch (e) {
       return { quotes: [], ok: false, matched: false, note: e instanceof Error ? e.message : "network error" };

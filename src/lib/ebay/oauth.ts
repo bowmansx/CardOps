@@ -43,6 +43,7 @@ async function tokenPost(body: URLSearchParams): Promise<TokenSet> {
   const basic = Buffer.from(`${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`).toString("base64");
   const res = await fetch(`${EBAY_HOSTS.api}/identity/v1/oauth2/token`, {
     method: "POST",
+    signal: AbortSignal.timeout(15_000),
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       Authorization: `Basic ${basic}`,
