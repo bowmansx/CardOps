@@ -10,16 +10,18 @@ export default function LoginPage() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [rejected, setRejected] = useState(false);
-  // One shared login page serves both apps; brand by host (set post-mount to
-  // avoid a hydration mismatch — the static shell says MasterOps).
-  const [appName, setAppName] = useState("MasterOps");
+  // This repo is CardOps, so brand as CardOps from the first paint. It used to
+  // default to "MasterOps" and swap post-mount by hostname, back when one login
+  // page served both apps out of the monorepo — which meant a visible flash of
+  // the wrong product name before hydration (and it's what Vercel's deployment
+  // thumbnail captures). (2026-07-24)
+  const appName = "CardOps";
 
   // Read ?error=not-allowed without useSearchParams (avoids a Suspense
   // boundary requirement at build time).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setRejected(params.get("error") === "not-allowed");
-    if (window.location.hostname.startsWith("card-ops")) setAppName("CardOps");
   }, []);
 
   async function handleGoogle() {
