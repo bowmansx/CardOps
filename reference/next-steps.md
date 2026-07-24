@@ -33,6 +33,13 @@ nothing.** Press **Post** when you're satisfied; it confirms first, naming the
 business and the count. Already-posted entries are skipped, and anything
 unbalanced or unmapped is refused rather than half-posted.
 
+> **Before you Post — check the mapping on the preview.** Confirm each CardOps
+> key landed on the RIGHT Zoho account: inventory, cash, COGS, card sales,
+> selling fees. A wrong mapping is the one mistake here that's annoying to unwind
+> once it's in real books, and it's trivial to catch on this screen. Worth a
+> second pair of eyes — share the preview before pressing Post.
+> (Calendar reminder set for 10am ET Sat 2026-07-25.)
+
 MasterOps then reflects it automatically — it already reads those Zoho orgs, so
 card activity shows up in your entity cash/P&L with no wiring between the apps.
 
