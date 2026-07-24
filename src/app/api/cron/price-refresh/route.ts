@@ -47,6 +47,12 @@ export async function GET(req: Request) {
   const SELECT = "id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, market_value, manual_price, price_locked, track_history, last_priced_at";
   const { data: ownerRow } = await svc.from("profiles").select("id").eq("role", "owner").limit(1).maybeSingle();
   const ownerId = (ownerRow?.id as string | undefined) ?? null;
+  // Paid spend follows the ROLE roster: a demoted member's cards must not keep
+  // consuming the owner's vendor budget. Fail closed if the roster is unreadable.
+  const { data: rosterRows, error: rosterErr } = await svc
+    .from("profiles").select("id").in("role", ["owner", "card_ops"]);
+  if (rosterErr) return NextResponse.json({ error: `Couldn't read the role roster: ${rosterErr.message}` }, { status: 500 });
+  const others = (rosterRows ?? []).map((r) => r.id as string).filter((id) => id !== ownerId);
 
   let list: (CardRow & { last_priced_at: string | null })[] = [];
   if (ownerId) {
@@ -59,12 +65,11 @@ export async function GET(req: Request) {
     if (mineErr) return NextResponse.json({ error: mineErr.message }, { status: 500 });
     list = (mine ?? []) as typeof list;
   }
-  if (list.length < CAP) {
+  if (list.length < CAP && others.length) {
     const { data: rest, error: restErr } = await svc
       .from("cards").select(SELECT)
       .not("status", "in", "(archived,sold)")
-      .not("user_id", "is", null)
-      .neq("user_id", ownerId ?? "00000000-0000-0000-0000-000000000000")
+      .in("user_id", others)
       .order("last_priced_at", { ascending: true, nullsFirst: true })
       .limit(CAP - list.length);
     if (restErr) return NextResponse.json({ error: restErr.message }, { status: 500 });

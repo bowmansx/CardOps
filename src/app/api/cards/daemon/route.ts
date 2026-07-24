@@ -157,8 +157,16 @@ async function repriceUser(
         ({ error: upErr } = await svc.from("cards").update(row).eq("id", card.id));
       }
       if (upErr) { skippedErr++; continue; }
-      await svc.from("card_price_history").insert({ card_id: card.id, price: mv, strategy: card.pricing_strategy });
+      const { error: histErr } = await svc.from("card_price_history")
+        .insert({ card_id: card.id, price: mv, strategy: card.pricing_strategy });
+      if (histErr) notes.push(`reprice/${uid}/${card.id}: repriced but history point not written (${histErr.message})`);
       repriced++;
+    } else {
+      // Unchanged/no-value cards still advance the cursor — otherwise they
+      // sort first forever and the tail of the inventory is never reached.
+      const { error: stampErr } = await svc.from("cards")
+        .update({ last_priced_at: new Date().toISOString() }).eq("id", card.id);
+      if (stampErr) skippedErr++;
     }
   }
   return { scanned: cards.length, repriced, skippedErr };

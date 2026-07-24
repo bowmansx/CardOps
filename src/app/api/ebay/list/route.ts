@@ -169,7 +169,10 @@ export async function POST(request: Request) {
       listing_id: r.itemId, url, status: "active", format: "auction",
       title, listed_at: new Date().toISOString(),
     };
-    await supabase.from("cards").update({
+    // The auction is LIVE — if this write fails the card has no listing_refs,
+    // the sync will never settle its PAID order, and a retry double-lists.
+    // Never silent (rule 7): surface it as a loud warning on the ok response.
+    const { error: dbErr0 } = await supabase.from("cards").update({
       listing_refs: refs0, status: "listed", listed_at: new Date().toISOString(),
     }).eq("id", card.id);
     const svc0 = createServiceClient();
@@ -185,7 +188,11 @@ export async function POST(request: Request) {
         });
       } catch (e) { auditWarn0 = e instanceof Error ? e.message : "audit write failed"; }
     }
-    const warns0 = [...(r.warnings ?? []), ...(auditWarn0 ? [auditWarn0] : [])];
+    const warns0 = [
+      ...(dbErr0 ? [`LISTING IS LIVE (#${r.itemId}) but CardOps couldn't record it (${dbErr0.message}) — do NOT list again; edit the card's listing state or re-run from the hub`] : []),
+      ...(r.warnings ?? []),
+      ...(auditWarn0 ? [auditWarn0] : []),
+    ];
     return NextResponse.json({ ok: true, url, listingId: r.itemId, warnings: warns0.length ? warns0 : undefined });
   }
 
@@ -264,7 +271,8 @@ export async function POST(request: Request) {
     offer_id: offerId, listing_id: listingId, url, status: "active",
     title, listed_at: new Date().toISOString(),
   };
-  await supabase.from("cards").update({
+  // Same live-listing rule as the auction path: a failed record is loud.
+  const { error: dbErr } = await supabase.from("cards").update({
     listing_refs: refs, status: "listed", listed_at: new Date().toISOString(),
   }).eq("id", card.id);
   const svc = createServiceClient();
@@ -281,5 +289,9 @@ export async function POST(request: Request) {
     } catch (e) { auditWarn = e instanceof Error ? e.message : "audit write failed"; }
   }
 
-  return NextResponse.json({ ok: true, url, listingId, warnings: auditWarn ? [auditWarn] : undefined });
+  const warns = [
+    ...(dbErr ? [`LISTING IS LIVE (#${listingId}) but CardOps couldn't record it (${dbErr.message}) — do NOT list again; reconcile from the hub`] : []),
+    ...(auditWarn ? [auditWarn] : []),
+  ];
+  return NextResponse.json({ ok: true, url, listingId, warnings: warns.length ? warns : undefined });
 }

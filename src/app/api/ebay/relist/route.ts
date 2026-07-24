@@ -62,9 +62,15 @@ export async function POST(request: Request) {
   };
   // Guard against a sync settling this card between our read and write —
   // never resurrect a sold card to 'listed' (would allow a double sale).
-  const { data: updated } = await supabase.from("cards").update({
+  const { data: updated, error: upErr } = await supabase.from("cards").update({
     listing_refs: refs, status: "listed", listed_at: new Date().toISOString(),
   }).eq("id", card.id).neq("status", "sold").select("id");
+  if (upErr) {
+    // The relist IS live on eBay — a DB error must not read like "just sold".
+    return NextResponse.json({
+      error: `Relist is LIVE on eBay (#${listingId}) but CardOps couldn't record it (${upErr.message}) — reconcile from the hub before touching this card.`,
+    }, { status: 500 });
+  }
   if (!updated?.length) {
     return NextResponse.json({ error: "Card was just sold — not relisting. End the new eBay listing manually." }, { status: 409 });
   }

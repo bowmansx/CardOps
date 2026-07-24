@@ -6,6 +6,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { currentRole } from "@/lib/cards/roles";
 import { getEbayAccess, getEbayConnection } from "@/lib/ebay/connection";
 import { getOrders } from "@/lib/ebay/orders";
+import { allocate } from "@/lib/ebay/allocate";
+import { reverseOrderSettlement } from "@/lib/ebay/reverse";
 import { readAll } from "@/lib/supabase/page";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +23,9 @@ export const maxDuration = 60;
 // running on the service client (card_sell accepts service_role).
 
 // eBay card-category final value fee fallback when the order doesn't report
-// the actual fee (13.25% + $0.30 per order).
-const estimateFee = (gross: number) => Math.round((gross * 0.1325 + 0.3) * 100) / 100;
+// the actual fee (13.25% + $0.30 — the $0.30 is per ORDER, allocated across
+// lines, never charged once per line).
+const estimateOrderFee = (gross: number) => Math.round((gross * 0.1325 + 0.3) * 100) / 100;
 
 // sellerId scopes the card/lot reads when db is the SERVICE client (cron), which
 // bypasses RLS. The POST path passes undefined: it uses the user client, so RLS
@@ -101,18 +104,48 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
 
   const settled: { sku: string | null; title: string; net: number }[] = [];
   let skipped = 0;
+  let reversedCancellations = 0;
   const failures: string[] = [];
+  if (ordersRes.truncated) {
+    failures.push(`order feed truncated at ${ordersRes.orders.length} — the oldest orders in the 90-day window were NOT checked this run`);
+  }
 
   for (const order of ordersRes.orders) {
     if (order.paymentStatus !== "PAID") continue;
-    // Never settle a cancelled order — both eBay's (eventually-consistent)
-    // cancel state AND our durable local marker (set the instant we cancel).
-    if (order.cancelState && order.cancelState !== "NONE_REQUESTED") continue;
-    if (cancelledOrders.has(order.orderId)) continue;
-    // Split order-level shipping + fee across lines by item value (usually one
-    // card = whole order, but combined checkouts must divide correctly).
-    const orderItems = order.lineItems.reduce((s, li) => s + li.itemCost, 0) || 1;
-    for (const li of order.lineItems) {
+    // Cancelled order (eBay's eventually-consistent state OR our durable local
+    // marker): never settle it — and if it was ALREADY settled on an earlier
+    // run (cancelled after payment), REVERSE that settlement now. Before this,
+    // a post-settlement refund left basis drawn and phantom revenue forever.
+    if ((order.cancelState && order.cancelState !== "NONE_REQUESTED") || cancelledOrders.has(order.orderId)) {
+      const rev = await reverseOrderSettlement(db, order.orderId, sellerId);
+      if (rev.reversedCards || rev.reversedLots) {
+        reversedCancellations++;
+        // Durable marker so the next run skips straight past this order.
+        const { error: markErr } = await db.from("ebay_cancelled_orders")
+          .upsert({ order_ref: order.orderId }, { onConflict: "order_ref" });
+        if (markErr) failures.push(`${order.orderId}: reversed but couldn't record the guard (${markErr.message})`);
+        try {
+          await auditOrThrow(db, {
+            actor: "ebay-sync", action: "ebay_cancel_reversed", target: order.orderId,
+            payload: { cards: rev.reversedCards, lots: rev.reversedLots, problems: rev.problems },
+            result: rev.problems.length ? "partial" : "ok",
+          });
+        } catch (e) {
+          failures.push(`${order.orderId}: ${e instanceof Error ? e.message : "audit write failed"}`);
+        }
+      }
+      failures.push(...rev.problems.map((p) => `${order.orderId}: ${p}`));
+      continue;
+    }
+    // Split order-level shipping + the (per-ORDER) fee across lines by item
+    // value, cents-exact with the remainder on the last line (rule 12).
+    const weights = order.lineItems.map((li) => li.itemCost);
+    const itemsTotal = order.lineItems.reduce((s, li) => s + li.itemCost, 0);
+    const shipAlloc = allocate(order.deliveryCost, weights);
+    const feeAlloc = order.marketplaceFee != null
+      ? allocate(order.marketplaceFee, weights)
+      : allocate(estimateOrderFee(itemsTotal + order.deliveryCost), weights);
+    for (const [lineIdx, li] of order.lineItems.entries()) {
       const card =
         (li.legacyItemId && byListingId.get(li.legacyItemId)) ||
         (li.sku && bySku.get(li.sku)) || null;
@@ -121,13 +154,10 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
         : null;
       if (!card && !lot) continue;
 
-      const share = li.itemCost / orderItems;
-      const shipIncome = Math.round(order.deliveryCost * share * 100) / 100;
+      const shipIncome = shipAlloc[lineIdx];
       // itemCost is item-only (NOT li.total, which includes shipping).
       const salePrice = li.itemCost;
-      const fees = order.marketplaceFee != null
-        ? Math.round(order.marketplaceFee * share * 100) / 100
-        : estimateFee(salePrice + shipIncome);
+      const fees = feeAlloc[lineIdx];
       // Per-line order_ref so a combined order can settle every line (the
       // unique (platform, order_ref) index is per line, not per order).
       const orderRef = order.lineItems.length > 1 ? `${order.orderId}:${li.lineItemId}` : order.orderId;
@@ -198,7 +228,10 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
     }
   }
 
-  return { settled, skipped, failures, checked: ordersRes.orders.length };
+  return {
+    settled, skipped, failures, checked: ordersRes.orders.length,
+    reversedCancellations, ordersTruncated: ordersRes.truncated,
+  };
 }
 
 export async function POST() {

@@ -104,10 +104,16 @@ function parseOrder(o: RawOrder): EbayOrder {
 export async function getOrders(
   access: string,
   daysBack = 90,
-): Promise<{ ok: true; orders: EbayOrder[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; orders: EbayOrder[]; truncated: boolean } | { ok: false; error: string }> {
   const since = new Date(Date.now() - daysBack * 86400_000).toISOString();
   const orders: EbayOrder[] = [];
-  for (let offset = 0; offset < 300; offset += 100) {
+  // Page to completion up to a sanity cap (30 pages ≈ 3000 orders in the
+  // window). Hitting the cap without a short page = TRUNCATED, and callers
+  // must surface that (rule 10) — the old silent 300 cap meant a busy month
+  // could push a PAID order out of sight so it never settled.
+  const MAX = 3000;
+  let sawEnd = false;
+  for (let offset = 0; offset < MAX; offset += 100) {
     const filter = encodeURIComponent(`creationdate:[${since}..]`);
     const r = await ebayApi<{ orders?: RawOrder[]; total?: number }>(
       access, "GET", `/sell/fulfillment/v1/order?filter=${filter}&limit=100&offset=${offset}`,
@@ -115,9 +121,9 @@ export async function getOrders(
     if (!r.ok) return { ok: false, error: r.error ?? "getOrders failed" };
     const batch = (r.data?.orders ?? []).map(parseOrder);
     orders.push(...batch);
-    if (batch.length < 100) break;
+    if (batch.length < 100) { sawEnd = true; break; }
   }
-  return { ok: true, orders };
+  return { ok: true, orders, truncated: !sawEnd };
 }
 
 export async function shipOrder(

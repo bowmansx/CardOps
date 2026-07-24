@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
 import { getEbayAccess } from "@/lib/ebay/connection";
 import { cancelOrder, CANCEL_REASONS, type CancelReason } from "@/lib/ebay/orders";
+import { reverseOrderSettlement } from "@/lib/ebay/reverse";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -47,24 +48,16 @@ export async function POST(request: Request) {
     .upsert({ order_ref: body.orderId }, { onConflict: "order_ref" });
   if (markErr) problems.push(`couldn't record the cancelled-order guard (${markErr.message}) — a sync could re-settle it`);
 
-  // Reverse any settlement tied to this order (order_ref = orderId, or the
-  // per-line "orderId:lineItemId" form). card_unsell restores basis + books.
-  const { data: sales, error: salesErr } = await supabase
-    .from("card_sales")
-    .select("card_id, order_ref")
-    .eq("platform", "ebay")
-    .or(`order_ref.eq.${body.orderId},order_ref.like.${body.orderId}:%`);
-  if (salesErr) problems.push(`couldn't look up the sale(s) to reverse (${salesErr.message})`);
-  const reversed: string[] = [];
-  for (const s of sales ?? []) {
-    const { error } = await supabase.rpc("card_unsell", { p_card_id: s.card_id });
-    if (error) problems.push(`reversal failed for ${s.card_id} (${error.message})`);
-    else reversed.push(s.card_id as string);
-  }
+  // Reverse any settlement tied to this order via the shared helper: single
+  // cards through card_unsell; LOT children through card_lot_unsell once per
+  // lot (reversing children one-by-one stranded the lot row in 'sold').
+  const rev = await reverseOrderSettlement(supabase, body.orderId);
+  problems.push(...rev.problems);
+  const reversed = rev.reversedCards + rev.reversedLots;
 
   await auditOrThrow(supabase, {
     actor: "web", action: "ebay_order_cancelled", target: body.orderId,
-    payload: { reason, cancelId: r.cancelId, reversed: reversed.length, problems },
+    payload: { reason, cancelId: r.cancelId, reversedCards: rev.reversedCards, reversedLots: rev.reversedLots, problems },
     result: problems.length ? "partial" : "ok",
   });
 
@@ -72,9 +65,9 @@ export async function POST(request: Request) {
   // loudly rather than reporting a clean success.
   if (problems.length) {
     return NextResponse.json({
-      ok: true, cancelId: r.cancelId, reversed: reversed.length,
+      ok: true, cancelId: r.cancelId, reversed,
       warning: `Order cancelled & buyer refunded, but follow-up steps need attention: ${problems.join("; ")}. Fix the card status manually.`,
     });
   }
-  return NextResponse.json({ ok: true, cancelId: r.cancelId, reversed: reversed.length });
+  return NextResponse.json({ ok: true, cancelId: r.cancelId, reversed });
 }

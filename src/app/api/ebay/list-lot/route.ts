@@ -129,7 +129,8 @@ export async function POST(request: Request) {
   const url = `https://www.ebay.com/itm/${listingId}`;
   const refs = (lot.listing_refs && typeof lot.listing_refs === "object" && !Array.isArray(lot.listing_refs) ? lot.listing_refs : {}) as Record<string, unknown>;
   refs.ebay = { ...(typeof refs.ebay === "object" ? refs.ebay : {}), offer_id: offerId, listing_id: listingId, url, status: "active", title, listed_at: new Date().toISOString() };
-  await supabase.from("card_lots").update({ listing_refs: refs, status: "listed", ask_price: Number(price) }).eq("id", lot.id);
+  const { error: dbErr } = await supabase.from("card_lots")
+    .update({ listing_refs: refs, status: "listed", ask_price: Number(price) }).eq("id", lot.id);
 
   const svc = createServiceClient();
   // Listing is LIVE — audit failure surfaces as a warning, never as ok:false.
@@ -140,5 +141,9 @@ export async function POST(request: Request) {
       await auditOrThrow(svc, { actor: "web", action: "ebay_lot_listed", target: sku, payload: { listingId, price, cards: children.length }, result: "ok" });
     } catch (e) { auditWarn = e instanceof Error ? e.message : "audit write failed"; }
   }
-  return NextResponse.json({ ok: true, url, listingId, warnings: auditWarn ? [auditWarn] : undefined });
+  const warns = [
+    ...(dbErr ? [`LOT LISTING IS LIVE (#${listingId}) but CardOps couldn't record it (${dbErr.message}) — do NOT list again; reconcile from the hub`] : []),
+    ...(auditWarn ? [auditWarn] : []),
+  ];
+  return NextResponse.json({ ok: true, url, listingId, warnings: warns.length ? warns : undefined });
 }

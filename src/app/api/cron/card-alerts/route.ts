@@ -112,6 +112,7 @@ async function targetAlerts(
         .select("card_id, target_price, direction, notified_at, cards!inner ( user_id, player, year, set_name, market_value, manual_price )")
         .eq("kind", "target")            // a pct_move row has a null target — never treat it as $0
         .eq("cards.user_id", uid)
+        .order("card_id", { ascending: true }) // readAll requires a deterministic order (rule 2)
         .range(from, to),
     );
     for (const a of rows) {
@@ -127,10 +128,18 @@ async function targetAlerts(
           url: "/cards/watchlist",
         });
         r.stale.forEach((s) => stale.add(s));
-        await svc.from("card_alerts").update({ notified_at: new Date().toISOString() }).eq("card_id", a.card_id);
-        hits++;
+        // Stamp only after a real delivery (rule 7): 0 sent = the crossing is
+        // still un-notified — leave it armed so tomorrow's run retries.
+        if (r.sent > 0) {
+          const { error } = await svc.from("card_alerts").update({ notified_at: new Date().toISOString() }).eq("card_id", a.card_id);
+          if (error) notes.push(`target/${uid}/${a.card_id}: crossing delivered but not stamped (${error.message}) — may re-notify`);
+          hits++;
+        } else {
+          notes.push(`target/${uid}/${a.card_id}: crossing detected, 0 deliveries — staying armed`);
+        }
       } else if (!crossed && a.notified_at) {
-        await svc.from("card_alerts").update({ notified_at: null }).eq("card_id", a.card_id);
+        const { error } = await svc.from("card_alerts").update({ notified_at: null }).eq("card_id", a.card_id);
+        if (error) notes.push(`target/${uid}/${a.card_id}: re-arm failed (${error.message})`);
       }
     }
   } catch (e) {
@@ -153,6 +162,7 @@ async function pctAlerts(
         .select("card_id, threshold_pct, window_days, notified_at, cards!inner ( user_id, player, year, set_name, market_value, manual_price )")
         .eq("kind", "pct_move")
         .eq("cards.user_id", uid)
+        .order("card_id", { ascending: true }) // readAll requires a deterministic order (rule 2)
         .range(from, to),
     );
     for (const a of rows) {
@@ -165,7 +175,7 @@ async function pctAlerts(
       const { rows: h } = await readAll<{ price: number; ts: string }>(
         (from, to) => svc
           .from("card_price_history").select("price, ts").eq("card_id", a.card_id)
-          .gte("ts", since).order("ts", { ascending: true }).range(from, to),
+          .gte("ts", since).order("ts", { ascending: true }).order("id", { ascending: true }).range(from, to),
         MAX_HISTORY,
       );
       const pts: PricePoint[] = h.map((r) => ({ price: Number(r.price), at: new Date(r.ts).getTime() }));
@@ -179,10 +189,17 @@ async function pctAlerts(
           url: "/cards/movers",
         });
         r.stale.forEach((s) => stale.add(s));
-        await svc.from("card_alerts").update({ notified_at: new Date().toISOString() }).eq("card_id", a.card_id);
-        hits++;
+        // Same stamp-after-delivery rule as target alerts (rule 7).
+        if (r.sent > 0) {
+          const { error } = await svc.from("card_alerts").update({ notified_at: new Date().toISOString() }).eq("card_id", a.card_id);
+          if (error) notes.push(`pct/${uid}/${a.card_id}: move delivered but not stamped (${error.message}) — may re-notify`);
+          hits++;
+        } else {
+          notes.push(`pct/${uid}/${a.card_id}: move detected, 0 deliveries — staying armed`);
+        }
       } else if (!crossed && a.notified_at) {
-        await svc.from("card_alerts").update({ notified_at: null }).eq("card_id", a.card_id);
+        const { error } = await svc.from("card_alerts").update({ notified_at: null }).eq("card_id", a.card_id);
+        if (error) notes.push(`pct/${uid}/${a.card_id}: re-arm failed (${error.message})`);
       }
     }
   } catch (e) {

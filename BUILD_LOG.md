@@ -145,3 +145,31 @@ fixes). One entry per decision: what, why, commit.
   player-wide vendor data lands (phase 2, TheCardAPI daily cache).
 - Model floors the "overpayer tail" at 3% so absurd prices show ~tiny-but-
   nonzero odds instead of zero; refuses to estimate below 2 sales/yr.
+
+## eBay/cron hardening (cutover step 0 — executed)
+- reverseOrderSettlement (src/lib/ebay/reverse.ts) is the ONE reversal used by
+  both the manual cancel route and the sync's new cancelled-after-settlement
+  detection: singles via card_unsell, lot children resolved through
+  card_lot_items → card_lot_unsell once per lot (child-by-child reversal
+  stranded card_lots in 'sold').
+- Sync now REVERSES settlements on orders that cancel after payment, then
+  writes the durable guard + an ebay_cancel_reversed audit row. getOrders
+  pages to 3000 with a truncated flag; truncation lands in failures[] so the
+  run reads partial, and the hub surfaces ordersTruncated.
+- Fee/shipping allocation via allocate() (cents-exact, remainder on last
+  line); the estimated 13.25% + $0.30 fee is computed once per ORDER and
+  allocated — the $0.30 was previously charged per LINE on combined orders.
+- Post-publish DB writes in list/list-lot/relist are checked: a live listing
+  that CardOps failed to record returns loud "do NOT list again" warnings
+  (list paths) or a 500 naming the live listing (relist) — never a silent
+  success that the sync can never settle, never a retryable-looking failure.
+- card-alerts: notified_at stamps only after >0 deliveries (0-delivery
+  crossings stay armed); stamp/re-arm writes checked; readAll calls got
+  deterministic orders.
+- card-estimates: role-roster filter (demoted users stop spending credits),
+  insert-then-debit ordering (both cron and interactive route), per-user
+  try/catch isolation, 240s time budget with a loud deadline note.
+- price-refresh: the non-owner budget share is scoped to the role roster,
+  fail-closed if the roster can't be read.
+- daemon: unchanged cards advance last_priced_at so the reprice cursor
+  reaches the tail; history-point inserts checked.
