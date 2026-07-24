@@ -87,7 +87,13 @@ begin
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 5. the OWNER gets no exemption either ─────────────────────────────────
+  -- guard_profile_role (a shared-DB safety trigger) rightly blocks an
+  -- authenticated non-owner from changing roles — step outside the simulated
+  -- session for the flip, then step back in as the (now-owner) test user.
+  perform set_config('request.jwt.claims', '', true);
   update public.profiles set role = 'owner' where id = v_uid;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
   v_name := '5. owner un-sell via UPDATE blocked';
   begin
     update public.cards set status = 'booked' where id = v_card;
@@ -95,7 +101,10 @@ begin
   exception when others then
     v_ok := sqlerrm like '%card_sell / card_unsell%'; v_note := sqlerrm;
   end;
+  perform set_config('request.jwt.claims', '', true);
   update public.profiles set role = 'card_ops' where id = v_uid;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
