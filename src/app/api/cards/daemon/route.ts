@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -88,7 +89,7 @@ export async function GET(req: Request) {
     snapshots[uid] = await snapshotUser(svc, uid, notes);
   }
 
-  await svc.from("audit_log").insert({
+  await auditOrThrow(svc, {
     actor: "cron", action: "card_reprice", target: "cards",
     payload: { users: (people ?? []).length, scanned, repriced, skippedErr, notes: notes.slice(0, 10) },
     result: notes.length ? "partial" : "ok",

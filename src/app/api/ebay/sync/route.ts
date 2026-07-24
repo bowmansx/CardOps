@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
@@ -158,11 +159,17 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
       const refs = (fresh?.listing_refs ?? {}) as Record<string, unknown>;
       refs.ebay = { ...(typeof refs.ebay === "object" ? refs.ebay : {}), status: "sold", order_ref: order.orderId };
       await db.from("cards").update({ listing_refs: refs }).eq("id", c.id);
-      await db.from("audit_log").insert({
-        actor: "ebay-sync", action: "ebay_settled", target: c.sku ?? c.id,
-        payload: { orderId: order.orderId, sale: salePrice, fees, shipping: shipIncome, net },
-        result: "ok",
-      }).then(() => {}, () => {});
+      // The per-order settlement trail must exist — a failed write lands in
+      // failures[] (loud in the response and run summary), settlement stands.
+      try {
+        await auditOrThrow(db, {
+          actor: "ebay-sync", action: "ebay_settled", target: c.sku ?? c.id,
+          payload: { orderId: order.orderId, sale: salePrice, fees, shipping: shipIncome, net },
+          result: "ok",
+        });
+      } catch (e) {
+        failures.push(`${order.orderId}: ${e instanceof Error ? e.message : "audit write failed"}`);
+      }
     }
   }
 
@@ -199,18 +206,18 @@ export async function GET(req: Request) {
   // Service client → no RLS. Settle only the connected seller's own cards.
   const out = await runSync(svc, conn.access, conn.userId);
   if ("error" in out) {
-    await svc.from("audit_log").insert({
+    await auditOrThrow(svc, {
       actor: "cron", action: "ebay_sync", target: "orders",
       payload: { error: out.error }, result: "error",
-    }).then(() => {}, () => {});
+    });
     return NextResponse.json({ error: out.error }, { status: 502 });
   }
   if (out.settled.length || out.failures.length) {
-    await svc.from("audit_log").insert({
+    await auditOrThrow(svc, {
       actor: "cron", action: "ebay_sync", target: "orders",
       payload: { settled: out.settled.length, skipped: out.skipped, failures: out.failures },
       result: out.failures.length ? "partial" : "ok",
-    }).then(() => {}, () => {});
+    });
   }
   return NextResponse.json({ ok: true, ...out });
 }

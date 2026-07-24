@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
@@ -61,11 +62,11 @@ export async function POST(request: Request) {
     else reversed.push(s.card_id as string);
   }
 
-  await supabase.from("audit_log").insert({
+  await auditOrThrow(supabase, {
     actor: "web", action: "ebay_order_cancelled", target: body.orderId,
     payload: { reason, cancelId: r.cancelId, reversed: reversed.length, problems },
     result: problems.length ? "partial" : "ok",
-  }).then(() => {}, () => {});
+  });
 
   // Buyer refunded regardless — but if anything after the refund failed, say so
   // loudly rather than reporting a clean success.

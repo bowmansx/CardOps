@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
@@ -67,9 +68,9 @@ export async function POST(request: Request) {
   if (!updated?.length) {
     return NextResponse.json({ error: "Card was just sold — not relisting. End the new eBay listing manually." }, { status: 409 });
   }
-  await supabase.from("audit_log").insert({
+  await auditOrThrow(supabase, {
     actor: "web", action: "ebay_relisted", target: (card.sku as string) ?? card.id,
     payload: { listingId, from: ref.listing_id }, result: "ok",
-  }).then(() => {}, () => {});
+  });
   return NextResponse.json({ ok: true, url, listingId });
 }

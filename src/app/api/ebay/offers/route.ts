@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
@@ -48,10 +49,10 @@ export async function POST(request: Request) {
     }
     const r = await respondToBestOffer(access, body.itemId, body.offerId, action, Number(body.counterPrice) || undefined);
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: 502 });
-    await supabase.from("audit_log").insert({
+    await auditOrThrow(supabase, {
       actor: "web", action: "ebay_offer_" + (body.action ?? ""), target: body.itemId,
       payload: { offerId: body.offerId, counterPrice: body.counterPrice ?? null }, result: "ok",
-    }).then(() => {}, () => {});
+    });
     return NextResponse.json({ ok: true });
   }
 

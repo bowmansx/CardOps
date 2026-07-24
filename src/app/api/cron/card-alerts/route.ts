@@ -8,6 +8,7 @@
 // watchlist hit notified Beau (naming a card that isn't his) and never notified
 // the member. Everything here is per-user: a user's own alerts, own cards, own
 // price history, own prefs, own devices.
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -90,7 +91,7 @@ export async function GET(req: Request) {
 
   if (stale.size) await svc.from("push_subscriptions").delete().in("endpoint", [...stale]);
 
-  await svc.from("audit_log").insert({
+  await auditOrThrow(svc, {
     actor: "cron", action: "card_alerts_run", target: "card_alerts",
     payload: { users: (people ?? []).length, priceHits, pctHits, digests, pruned: stale.size, notes: notes.slice(0, 10) },
     result: "ok",

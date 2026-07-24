@@ -67,3 +67,20 @@ fixes). One entry per decision: what, why, commit.
   card_pool, which this migration drops — the paste sequence stays coherent.
   This absorbs most of item 8's scope. Still not executed locally (no
   Postgres here); first paste-run pending.
+
+## Item 4b/c — audit integrity
+- Widened the audit_log actor CHECK to the actors the code actually writes
+  ('ebay-sync', 'ebay') instead of collapsing them to 'cron' — the trail is
+  more informative and the constraint drop/add is name-agnostic (scans
+  pg_constraint). Migration 20260736000000.
+- auditOrThrow everywhere (19 sites). Typed actor union = compile-time mirror
+  of the CHECK, so a future actor/constraint mismatch is a tsc error first.
+- Two deliberate exceptions to throw-on-failure:
+  (1) the three eBay list routes audit AFTER a live publish — a thrown 500
+      would invite a retry and a double-listing, so audit failure surfaces as
+      a warnings[] entry on an ok:true response;
+  (2) the sync's per-order audit failure lands in failures[] (response +
+      run-summary audit row) so one order's audit problem doesn't abort the
+      rest of the run — the settlement itself stands either way.
+- account-deletion now logs FIRST and acks second: no logged receipt → 5xx →
+  eBay redelivers. Previously it acked notices it silently failed to record.

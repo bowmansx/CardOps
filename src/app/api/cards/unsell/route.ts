@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole, hasCardAccess } from "@/lib/cards/roles";
@@ -41,9 +42,9 @@ export async function POST(request: Request) {
     await supabase.from("cards").update({ listing_refs: refs }).eq("id", body.cardId);
   }
 
-  await supabase.from("audit_log").insert({
+  await auditOrThrow(supabase, {
     actor: "web", action: "card_unsold", target: body.cardId,
     payload: data ?? {}, result: "ok",
-  }).then(() => {}, () => {});
+  });
   return NextResponse.json({ ok: true, ...(data as object) });
 }

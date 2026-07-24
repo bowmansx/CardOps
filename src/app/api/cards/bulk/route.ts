@@ -1,3 +1,4 @@
+import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -97,9 +98,9 @@ export async function POST(request: Request) {
   // Audit via the service client so card_ops edits are still attributable
   // (audit_log INSERT is owner-only under RLS).
   const svc = createServiceClient();
-  await (svc ?? supabase).from("audit_log").insert({
+  await auditOrThrow(svc ?? supabase, {
     actor: "web", action: "cards_bulk_edit", target: `${user.id} · ${ids.length} selected`,
     payload: { patch, updated, skipped }, result: "ok",
-  }).then(() => {}, () => {});
+  });
   return NextResponse.json({ ok: true, updated, skipped });
 }
