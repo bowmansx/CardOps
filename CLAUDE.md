@@ -106,3 +106,36 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
 - `reference/foundation-review-2026-07-25.md` — the full-core review: open
   defects by priority, the test plan, and the blind-spot list; check it before
   building on sell/books/eBay/cron code
+
+## PREVENTION RULES (2026-07-24 audit)
+
+One line per bug CLASS that appeared 3+ times in the foundation review.
+These govern every new line of code and every fix.
+
+1. Check and surface EVERY Supabase write's `{ error }` — success is confirmed,
+   never assumed; fire-and-forget writes are forbidden.
+2. Every paginated read has an explicit `.order()` with a unique tiebreaker
+   (`id`) and pages to completion; a bare `.limit()` is legal only for a
+   display list labeled "most recent N".
+3. A failed page read throws or flags — an errored page is never treated as
+   the natural end of the data.
+4. Money figures render complete or flagged: on any partial/failed read show
+   the "records couldn't be read" banner — never a computed-from-partial
+   number, never $0-as-fact.
+5. Sums, counts, membership sets, idempotency guards, and destructive rebuilds
+   read via readAll/readAllSafe — no exceptions, no hand-rolled pagers.
+6. Every external fetch carries an AbortSignal timeout — one stalled vendor
+   call may not eat a route's whole time budget.
+7. Stamp state only after the effect is confirmed — no notified_at on zero
+   deliveries, no credit debit before the row landed, no ok:true after an
+   unchecked write.
+8. Money state machines have no dead ends: every claim/pending/uncertain state
+   is visible on some screen and has a recovery path.
+9. Vendor money fields are validated, never defaulted — a missing price is a
+   failure, not $0.
+10. Any hard cap returns a `truncated` signal the caller must surface — silent
+    truncation reads as "covered everything".
+11. Per-user cron loops isolate failures: one user's error is recorded and the
+    loop continues to the next user.
+12. Money allocations reconcile exactly: remainders land on the last line, and
+    per-order fixed fees apply once per ORDER, not per line.
