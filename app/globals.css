@@ -1,0 +1,56 @@
+/* CardOps standalone — same House Colors theme as MasterOps, one source of
+   truth: import the root stylesheet, then point Tailwind v4's source scanner
+   at the shared source tree (it only auto-scans this app's folder). */
+@import "../src/app/globals.css";
+@source "../src";
+/* ── CardOps skin (Beau, 2026-07-18) — this app only; MasterOps untouched.
+   Direction: MUCH blacker ground, heavy gold trim on every outline, and the
+   bubbles' navy gradient sinking into black. Loaded after the shared sheet,
+   so these override by source order. */
+
+:root {
+  /* Ground: a notch blacker still (skin round 2, Beau) — bloom dimmed, every
+     stop pulled down toward true black. */
+  --ground:
+    radial-gradient(1100px 800px at 78% 88%, rgba(18, 74, 52, 0.20), transparent 58%),
+    radial-gradient(820px 620px at 92% 8%, rgba(201, 162, 39, 0.08), transparent 52%),
+    linear-gradient(150deg, #050907 0%, #070f0b 30%, #08120d 56%, #020304 100%);
+
+  /* Every hairline border reads as fine gold trim. */
+  --color-hairline: rgba(201, 162, 39, 0.55);
+
+  /* Bubble text (round 3): 72% white + 22% cream + 6% red — warmer blush. */
+  --color-ink: #fceae5;
+
+  /* The signature gold, deepened toward dark metallic (round 3) — feeds
+     text-flag / border-flag / underlines so accents match the new surfaces. */
+  --color-flag: #a8842a;
+}
+
+/* Bubbles (round 3): blue pulled back for black (+~10%) and a dark-grey
+   breath (+~8%); leather-brown warmth stays; gold-dominant edge. */
+.bg-white {
+  border: 2px solid transparent;
+  background:
+    radial-gradient(82% 108% at 4% -8%, rgba(242, 236, 221, 0.12), transparent 44%) padding-box,   /* pearl sheen, dialed down */
+    radial-gradient(70% 92% at 100% 106%, rgba(234, 228, 212, 0.08), transparent 46%) padding-box,
+    radial-gradient(120% 150% at 96% -12%, rgba(201, 162, 39, 0.18), transparent 46%) padding-box,  /* gold glint */
+    radial-gradient(95% 130% at 8% 102%, rgba(96, 66, 36, 0.20), transparent 56%) padding-box,      /* leather-brown warmth, lower-left */
+    linear-gradient(157deg, #0e2136 0%, #0a1626 26%, #1e2124 46%, #12100c 62%, #04070d 80%, #010203 100%) padding-box, /* navy (shorter) → dark grey → brown → true black */
+    linear-gradient(140deg, #f6e6ac 0%, #c9a227 28%, #6b5414 52%, #e9d489 76%, #8a6d1f 100%) border-box; /* gold edge */
+}
+
+/* Signature surfaces (the + FAB, selected chips, primary buttons): 80% bold
+   dark metallic gold with a machined light sweep (round 3). */
+.bg-flag {
+  background:
+    linear-gradient(115deg, rgba(255, 240, 190, 0.28) 0%, transparent 24%),   /* metallic sweep */
+    linear-gradient(150deg, #b18a26 0%, #8a6d1f 26%, #6f5512 56%, #96771c 80%, #57430d 100%);
+}
+
+/* Calendar-style internal gridlines (if ever shown here) pick up the trim too. */
+.mo-calendar .fc-theme-standard td,
+.mo-calendar .fc-theme-standard th,
+.mo-calendar .fc-scrollgrid {
+  border-color: rgba(201, 162, 39, 0.35);
+}

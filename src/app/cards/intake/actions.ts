@@ -1,0 +1,260 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
+import { currentRole } from "@/lib/cards/roles";
+import { catCode } from "@/lib/cards/sku";
+import { nextSku } from "@/lib/cards/skudb";
+
+const CARD_ENTITY = "bfa6ad79-0d3a-412b-a682-603aa9d23f1d";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function authed(): Promise<{ supabase: SupabaseClient; userId: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+  return { supabase, userId: user.id };
+}
+
+/** Validate a requested owning-business, falling back to the default CARD entity.
+ *  Entities are owner-gated by RLS, so a non-owner's request simply can't resolve
+ *  and safely defaults — no way to attribute a card to a business you can't see. */
+async function resolveEntityId(supabase: SupabaseClient, requested?: string): Promise<string> {
+  const req = (requested ?? "").trim();
+  if (req && UUID.test(req)) {
+    const { data } = await supabase.from("card_businesses").select("id").eq("id", req).maybeSingle();
+    if (data) return req;
+  }
+  return CARD_ENTITY;
+}
+
+/** Owner-only businesses for the intake picker; [] for anyone else (RLS). */
+export async function listEntityOptions(): Promise<{ id: string; short_code: string; name: string }[]> {
+  try {
+    const { supabase } = await authed();
+    const { data } = await supabase.from("card_businesses").select("id, short_code, name").eq("active", true).order("short_code");
+    return (data ?? []).map((e) => ({ id: e.id as string, short_code: e.short_code as string, name: e.name as string }));
+  } catch {
+    return [];
+  }
+}
+
+async function uploadPhoto(
+  supabase: SupabaseClient,
+  cardId: string,
+  kind: "front" | "back",
+  dataUrl: string | undefined,
+) {
+  if (!dataUrl) return;
+  const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUrl);
+  if (!m) return;
+  const ext = m[1].split("/")[1].replace("jpeg", "jpg");
+  // Folder by user first so the storage bucket itself is per-tenant (the RLS
+  // policy also still honours the legacy <card_id>/… layout for older photos).
+  const { data: { user } } = await supabase.auth.getUser();
+  const path = user ? `${user.id}/${cardId}/${kind}-${Date.now()}.${ext}` : `${cardId}/${kind}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage
+    .from("card-photos")
+    .upload(path, Buffer.from(m[2], "base64"), { contentType: m[1], upsert: false });
+  if (error) return;
+  await supabase
+    .from("card_photos")
+    .insert({ card_id: cardId, kind, variant: "original", bucket: "card-photos", path });
+}
+
+export type IntakeInput = {
+  player?: string; year?: string; set_name?: string; card_number?: string;
+  parallel?: string; sport_category?: string; team?: string; rarity?: string; brand?: string;
+  is_rookie?: boolean; is_auto?: boolean; is_relic?: boolean; serial_number?: string;
+  condition_type?: string; raw_grade_estimate?: string;
+  grader?: string; grade?: string; cert_number?: string;
+  zone?: string; location_code?: string; pricing_strategy?: string;
+  entity_id?: string; tax_treatment?: string;
+  vision_confidence?: unknown;
+  front?: string; back?: string;
+};
+
+const TREATMENTS = ["dealer", "investment", "hobby"];
+const treatmentOf = (t?: string) => (t && TREATMENTS.includes(t) ? t : "dealer");
+
+// Full Intake: human-reviewed card → insert + store photos.
+export async function commitIntakeCard(
+  input: IntakeInput,
+): Promise<{ ok: boolean; id?: string; sku?: string; error?: string }> {
+  const { supabase } = await authed();
+  const category = input.sport_category?.trim() || null;
+  const year = input.year && Number.isFinite(Number(input.year)) ? Number(input.year) : new Date().getFullYear();
+  const cat = catCode(category);
+  const row = {
+    player: input.player?.trim() || null,
+    year: input.year && Number.isFinite(Number(input.year)) ? Number(input.year) : null,
+    set_name: input.set_name?.trim() || null,
+    card_number: input.card_number?.trim() || null,
+    parallel: input.parallel?.trim() || null,
+    sport_category: category,
+    team: input.team?.trim() || null,
+    rarity: input.rarity?.trim() || null,
+    brand: input.brand?.trim() || null,
+    is_rookie: !!input.is_rookie,
+    is_auto: !!input.is_auto,
+    is_relic: !!input.is_relic,
+    serial_number: input.serial_number?.trim() || null,
+    condition_type: input.condition_type === "graded" ? "graded" : "raw",
+    raw_grade_estimate: input.raw_grade_estimate?.trim() || null,
+    grader: input.grader?.trim() || null,
+    grade: input.grade && Number.isFinite(Number(input.grade)) ? Number(input.grade) : null,
+    cert_number: input.cert_number?.trim() || null,
+    zone: input.zone?.trim() || null,
+    location_code: input.location_code?.trim() || null,
+    pricing_strategy: input.pricing_strategy?.trim() || "standard",
+    vision_confidence: input.vision_confidence ?? null,
+    status: "booked",
+    entity_id: await resolveEntityId(supabase, input.entity_id),
+    // Tax treatment is an owner decision (drives the owner-only books); staff default to dealer.
+    tax_treatment: (await currentRole()) === "owner" ? treatmentOf(input.tax_treatment) : "dealer",
+  } as Record<string, unknown>;
+  let id: string | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const sku = await nextSku(supabase, cat, year);
+    const { data, error } = await supabase.from("cards").insert({ ...row, sku }).select("id").single();
+    if (!error) { id = data.id as string; break; }
+    // Pre-migration fallback: new columns not applied yet — strip and retry.
+    if (/rarity|brand|tax_treatment/.test(error.message)) { delete row.rarity; delete row.brand; delete row.tax_treatment; continue; }
+    if (error.code !== "23505" || attempt === 4) return { ok: false, error: error.message };
+  }
+  if (!id) return { ok: false, error: "Could not create the card." };
+  await uploadPhoto(supabase, id, "front", input.front);
+  await uploadPhoto(supabase, id, "back", input.back);
+  revalidatePath("/cards");
+  return { ok: true, id };
+}
+
+// Batch (AI) mode: stamp the chosen pricing standard + storage place onto a
+// whole batch at once (Speed Book's RPC books with defaults; this applies the
+// picked ones after).
+export async function applyBatchStrategy(
+  ids: string[],
+  strategy: string,
+  storageLocation?: string,
+  entityId?: string,
+  treatment?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { supabase } = await authed();
+  if (!ids.length) return { ok: true };
+  const row: Record<string, unknown> = { pricing_strategy: strategy || "standard" };
+  const loc = storageLocation?.trim();
+  if (loc) row.storage_location = loc;
+  // Attribute the batch to the chosen business (validated; defaults to CARD).
+  if (entityId) row.entity_id = await resolveEntityId(supabase, entityId);
+  if (treatment && TREATMENTS.includes(treatment) && (await currentRole()) === "owner") row.tax_treatment = treatment;
+  let { error } = await supabase.from("cards").update(row).in("id", ids);
+  if (error && /storage_location|tax_treatment/.test(error.message)) {
+    // Pre-migration fallback: a new column not applied yet — strip and retry.
+    delete row.storage_location;
+    delete row.tax_treatment;
+    ({ error } = await supabase.from("cards").update(row).in("id", ids));
+  }
+  if (loc) {
+    try {
+      await supabase.from("card_storage_locations").upsert({ name: loc }, { onConflict: "user_id,name" });
+    } catch {}
+  }
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+// Storage pick-list for the batch defaults; [] before the migration is pasted.
+export async function listStorageNames(): Promise<string[]> {
+  try {
+    const { supabase } = await authed();
+    const { data } = await supabase.from("card_storage_locations").select("name").order("name");
+    return (data ?? []).map((r) => r.name as string);
+  } catch {
+    return [];
+  }
+}
+
+// Batch (AI) mode: apply a vision scan's identity fields to an already-booked
+// card and park it in `review` so the batch collects into one edit pile.
+// Fresh quick-booked cards only — fills fields, never a destructive rewrite.
+export async function applyBatchScan(
+  id: string,
+  input: IntakeInput,
+): Promise<{ ok: boolean; error?: string }> {
+  const { supabase } = await authed();
+  const row: Record<string, unknown> = {
+    player: input.player?.trim() || null,
+    year: input.year && Number.isFinite(Number(input.year)) ? Number(input.year) : null,
+    set_name: input.set_name?.trim() || null,
+    card_number: input.card_number?.trim() || null,
+    parallel: input.parallel?.trim() || null,
+    team: input.team?.trim() || null,
+    is_rookie: !!input.is_rookie,
+    is_auto: !!input.is_auto,
+    is_relic: !!input.is_relic,
+    serial_number: input.serial_number?.trim() || null,
+    condition_type: input.condition_type === "graded" ? "graded" : "raw",
+    raw_grade_estimate: input.raw_grade_estimate?.trim() || null,
+    grader: input.grader?.trim() || null,
+    grade: input.grade && Number.isFinite(Number(input.grade)) ? Number(input.grade) : null,
+    cert_number: input.cert_number?.trim() || null,
+    vision_confidence: input.vision_confidence ?? null,
+    status: "review",
+  };
+  // The batch default category stands unless the scan actually read one.
+  if (input.sport_category?.trim()) row.sport_category = input.sport_category.trim();
+  if (input.rarity?.trim()) row.rarity = input.rarity.trim();
+  if (input.brand?.trim()) row.brand = input.brand.trim();
+  let { error } = await supabase.from("cards").update(row).eq("id", id);
+  if (error && /rarity|brand/.test(error.message)) {
+    // Pre-migration fallback: new columns not applied yet.
+    delete row.rarity;
+    delete row.brand;
+    ({ error } = await supabase.from("cards").update(row).eq("id", id));
+  }
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/cards");
+  return { ok: true };
+}
+
+export type SpeedItem = { front?: string; sport_category?: string; zone?: string };
+
+// Speed Book: rapid front-only batch. GUARDRAIL — a lot cost is REQUIRED so the
+// pool average never gets deflated by $0-basis cards. The pool ledger is written
+// service-role (RLS: pool writes are service-role only) and is append-only.
+export async function commitSpeedBatch(
+  items: SpeedItem[],
+  lotCost: number,
+): Promise<{ ok: boolean; inserted?: number; poolTotal?: number; ids?: string[]; error?: string }> {
+  const { supabase } = await authed();
+  if (!items.length) return { ok: false, error: "No cards in the batch." };
+  if (!(lotCost > 0)) return { ok: false, error: "Enter the lot cost for this batch (required)." };
+
+  // Atomic: the RPC inserts every card + writes the append-only pool ledger +
+  // increments the pool inside ONE locked transaction. Either the whole lot
+  // and its pool cost land together, or nothing does — no orphan pool-basis
+  // cards, no lost pool updates. Photos are attached afterward (best-effort).
+  const payload = items.map((it) => ({
+    cat: catCode(it.sport_category?.trim() || null),
+    sport_category: it.sport_category?.trim() || "",
+    zone: it.zone?.trim() || "BULK",
+  }));
+  const { data, error } = await supabase.rpc("speed_book_commit", {
+    p_items: payload,
+    p_lot_cost: lotCost,
+  });
+  if (error) return { ok: false, error: error.message };
+  const result = data as { inserted: number; ids: string[]; pool_total: number };
+
+  // Best-effort: attach each front photo to its card (order matches payload).
+  for (let i = 0; i < result.ids.length; i++) {
+    await uploadPhoto(supabase, result.ids[i], "front", items[i]?.front);
+  }
+
+  revalidatePath("/cards");
+  // ids in insertion order (matches `items`) — Batch (AI) mode uses them to
+  // stamp the chosen strategy and pair each card with its photo for scanning.
+  return { ok: true, inserted: result.inserted, poolTotal: result.pool_total, ids: result.ids };
+}

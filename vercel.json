@@ -1,0 +1,28 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/price-refresh",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/card-estimates",
+      "schedule": "30 8 * * *"
+    },
+    {
+      "path": "/api/cards/daemon",
+      "schedule": "30 9 * * *"
+    },
+    {
+      "path": "/api/cron/card-alerts",
+      "schedule": "10 11 * * *"
+    },
+    {
+      "path": "/api/ebay/sync",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/card-news",
+      "schedule": "0 13 * * *"
+    }
+  ]
+}

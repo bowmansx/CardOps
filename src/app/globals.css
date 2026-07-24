@@ -1,0 +1,174 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* Legacy dark-inventory tokens (pre-SPEC modules) — pulled onto the house
+     palette: green-black ground, ivory ink, gold accent. */
+  --color-background: #0a140e;
+  --color-foreground: #ede6d2;
+  --color-accent: #c9a227;
+
+  /* ── House Colors theme (Bowman × JGB) ──────────────────────────────
+     Deep forest/navy ground, metallic gold signature, dark panels, ivory
+     text. Money & deadline states keep semantic hues, tuned bright so they
+     read on the dark ground and never muddy the theme green. */
+  --color-paper: #0b1712;    /* page ground — deep pine-black */
+  --color-white: #0f1e17;    /* card / panel surface (overrides Tailwind white) */
+  --color-ink: #ede6d2;      /* warm ivory text */
+  --color-flag: #c9a227;     /* metallic gold — signature + primary actions */
+  --color-hairline: #223229; /* dark green hairline */
+  --color-pos: #43d989;      /* mint — money good */
+  --color-danger: #f26d6d;   /* soft red */
+  --color-warn: #e8994a;     /* copper-amber — deadlines (distinct from gold) */
+
+  --font-sans: var(--font-archivo);
+  --font-mono: var(--font-plex-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+/* Deep-forest Bowman ground. Every stop is a real green — the darkest corner is
+   still forest, never black — with a soft bloom lower-right and a gold whisper. */
+:root {
+  --ground:
+    radial-gradient(1200px 900px at 78% 88%, rgba(22, 96, 68, 0.55), transparent 64%),
+    radial-gradient(820px 620px at 92% 8%, rgba(201, 162, 39, 0.08), transparent 52%),
+    linear-gradient(145deg, #0c2418 0%, #0f3020 46%, #12402a 76%, #0d2619 100%);
+}
+
+body {
+  background: var(--ground);
+  color: var(--color-ink);
+}
+
+/* App pages paint `bg-paper` over the body, so give it the same forest ground —
+   otherwise the flat paper color reads near-black behind the bubbles. */
+.bg-paper {
+  background-image: var(--ground);
+}
+
+/* Every card/box (they all share `bg-white`): a harder JGB gradient interior —
+   navy → blueprint → black with a gold glint — wrapped in a pearl / off-white /
+   light-black gradient edge (padding-box vs border-box keeps the gradient border
+   on the rounded corners). One rule themes every bubble at once. */
+.bg-white {
+  border: 1.5px solid transparent;
+  background:
+    radial-gradient(82% 108% at 4% -8%, rgba(242, 236, 221, 0.22), transparent 44%) padding-box,   /* pearl sheen — top-left */
+    radial-gradient(70% 92% at 100% 106%, rgba(234, 228, 212, 0.14), transparent 46%) padding-box,  /* pearl glow — bottom-right */
+    linear-gradient(158deg, rgba(240, 234, 219, 0.09) 0%, transparent 36%) padding-box,             /* pearl wash across the top */
+    radial-gradient(120% 150% at 96% -12%, rgba(201, 162, 39, 0.12), transparent 44%) padding-box,  /* gold glint */
+    linear-gradient(157deg, #17335230 0%, #10274830 46%, #0c1b3000 78%) padding-box,                /* navy tint (translucent so pearl reads) */
+    linear-gradient(157deg, #14304f 0%, #0f2648 46%, #0b1a2e 78%, #0b1728 100%) padding-box,         /* navy JGB base */
+    linear-gradient(140deg, #f2ecdc 0%, #bdb8a6 26%, #2c312d 56%, #e6e0d0 82%, #3e433d 100%) border-box; /* pearl edge */
+}
+
+/* Every figure, date, and dollar amount: IBM Plex Mono, tabular. */
+.figures {
+  font-family: var(--font-plex-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Gold selection for the luxe feel. */
+::selection {
+  background: rgba(201, 162, 39, 0.30);
+  color: #ffffff;
+}
+
+/* Hide number-input spinners for a cleaner industrial look. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ── FullCalendar (v1 To-Dos) on the House palette ──────────────────────────
+   FullCalendar v6 ships CSS-in-JS with light defaults; retint via its CSS vars
+   plus a few targeted overrides so it reads on the dark JGB card surface. */
+.mo-calendar {
+  --fc-border-color: #223229;              /* hairline */
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: rgba(34, 50, 41, 0.35);
+  --fc-today-bg-color: rgba(201, 162, 39, 0.10);   /* gold whisper on today */
+  --fc-now-indicator-color: #f26d6d;
+  --fc-event-text-color: #0b1712;
+  --fc-highlight-color: rgba(201, 162, 39, 0.18);
+  color: #ede6d2;
+}
+.mo-calendar .fc { height: 100%; }
+.mo-calendar .fc-theme-standard td,
+.mo-calendar .fc-theme-standard th,
+.mo-calendar .fc-scrollgrid { border-color: #223229; }
+.mo-calendar .fc-col-header-cell-cushion,
+.mo-calendar .fc-daygrid-day-number,
+.mo-calendar .fc-timegrid-slot-label-cushion,
+.mo-calendar .fc-list-day-text {
+  color: rgba(237, 230, 210, 0.7);
+  text-decoration: none;
+}
+.mo-calendar .fc-timegrid-axis-cushion { color: rgba(237, 230, 210, 0.5); }
+.mo-calendar .fc-event {
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 1px 2px;
+  cursor: pointer;
+}
+.mo-calendar .fc-event.fc-event-locked { cursor: default; opacity: 0.9; }
+/* A dragged task ghost from the stack */
+.mo-draggable { user-select: none; }
+
+/* Top ticker marquee — continuous scroll, seamless via doubled content. */
+@keyframes mo-ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Brief highlight for a deep-linked radar date (tapped from the ticker). */
+@keyframes mo-focus-flash {
+  0%   { background-color: rgba(201, 162, 39, 0.30); }
+  100% { background-color: rgba(201, 162, 39, 0.10); }
+}
+.mo-focus-flash { animation: mo-focus-flash 2.2s ease-out; }
+
+/* Compact calendar: denser slots so ⅓ the height still shows ~half the hours. */
+.mo-cal-compact .fc-timegrid-slot { height: 0.95em; }
+.mo-cal-compact .fc-timegrid-slot-label-cushion { font-size: 10px; }
+/* Tight day-column headers — the label text already adapts to column width. */
+.mo-cal-compact .fc-col-header-cell-cushion { padding: 2px 1px; font-size: 11px; white-space: nowrap; }
+
+/* Pulsing red glow on the collapsed task group when something is late or due
+   within 2h (Beau, 2026-07-17). */
+@keyframes mo-glow {
+  0%, 100% { box-shadow: 0 0 6px -1px rgba(242, 109, 109, 0.45); }
+  50%      { box-shadow: 0 0 20px 1px rgba(242, 109, 109, 0.85); }
+}
+.mo-urgent-glow {
+  border-color: #f26d6d !important;
+  animation: mo-glow 2s ease-in-out infinite;
+}
+
+/* Big to-do select square: full row height, gray diagonal stripes
+   (Beau, 2026-07-17). Selected = gold fill + check. */
+.mo-select {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(150, 158, 152, 0.28) 0 5px,
+    rgba(150, 158, 152, 0.08) 5px 10px
+  );
+}
+.mo-select-on {
+  background: rgba(201, 162, 39, 0.85);
+}
+
+/* Amber glow — ONLY for the Pending intake queue while it holds items
+   (widget-kickoff §3). Amber = needs triage; red glow = something is late. */
+.mo-pending-glow {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.45);
+}
+
+/* Swipe feedback backdrops behind a row mid-swipe. */
+.mo-swipe-done { background: rgba(67, 217, 137, 0.25); }   /* left = archive */
+.mo-swipe-delete { background: rgba(242, 109, 109, 0.28); } /* right = delete */

@@ -1,0 +1,166 @@
+// The Card API adapter (Beau, 2026-07-21) — realized SOLD sales aggregated across
+// eBay, TCGplayer, Goldin, etc. This is the "base it off eBay's prices" source.
+// Free tier: 5,000 records/day, 3-day lookback. Activates when THECARDAPI_TOKEN is
+// set. Covers every card (sports + TCG), so it's the broad market feed.
+//   docs: https://thecardapi.com/docs  ·  GET /api/v1/market/sales
+import type { PriceSourceAdapter, SourceQuote, CardForPricing, AdapterResult } from "./types";
+
+const BASE = "https://thecardapi.com/api/v1/market";
+
+// One raw sale row from GET /sales (the fields we use).
+export type CardApiSale = {
+  id?: string;
+  platform?: string | null;
+  title?: string | null;
+  sold_at?: string | null;
+  sale_date?: string | null;
+  price?: number | string | null;
+  currency?: string | null;
+  grader?: string | null;
+  grade?: string | number | null;
+  listing_url?: string | null;
+};
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const median = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+// Build the full-text query for a card from its identifying fields.
+export function saleQuery(card: CardForPricing): string {
+  return [card.year, card.set_name, card.player, card.parallel, card.card_number]
+    .map((v) => (v == null ? "" : String(v).trim()))
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 200);
+}
+
+/**
+ * Distill raw sales into ONE market quote matching the card's condition:
+ *   graded → sales at the same grader (and grade, when known); median of those
+ *   raw    → sales with no grader; median of those
+ * The blend then medians this across sources. Returns [] when nothing matches.
+ * Pure — unit-tested; the fetch wrapper does the I/O.
+ */
+export function distillSales(sales: CardApiSale[], card: CardForPricing): SourceQuote[] {
+  const graded = card.condition_type === "graded";
+  const priced = sales
+    .map((s) => ({ ...s, p: Number(s.price) }))
+    .filter((s) => Number.isFinite(s.p) && s.p > 0);
+
+  // STRICT condition match — never blend across graders or grades. A graded card
+  // is priced only off sales at the SAME grader and (when we know it) the SAME
+  // grade; a raw card only off ungraded sales. No exact match → NO quote (an
+  // honest "no comp at this grade" beats a wrong-grade price).
+  const matched = priced.filter((s) => {
+    const hasGrader = !!(s.grader && String(s.grader).trim());
+    if (!graded) return !hasGrader; // raw card → ungraded sales only
+    if (!hasGrader) return false; // graded card → graded sales only
+    if (card.grader && String(s.grader).toUpperCase() !== card.grader.toUpperCase()) return false;
+    if (card.grade != null && Number(s.grade) !== card.grade) return false;
+    return true;
+  });
+  if (matched.length === 0) return [];
+
+  const recent = [...matched].sort((a, b) => String(b.sold_at ?? b.sale_date ?? "").localeCompare(String(a.sold_at ?? a.sale_date ?? "")));
+  const value = round2(median(matched.map((s) => s.p)));
+  const gradeLabel = graded ? `${card.grader ?? "Graded"}${card.grade != null ? " " + card.grade : ""}` : "Ungraded";
+  // Keep a sample of the exact sales behind the median so it can be inspected /
+  // audited on the card page ("show me why this price").
+  const sample = recent.slice(0, 6).map((s) => ({
+    title: s.title ?? null, price: s.p, grader: s.grader ?? null, grade: s.grade ?? null,
+    platform: s.platform ?? null, sold_at: s.sold_at ?? s.sale_date ?? null, url: s.listing_url ?? null,
+  }));
+  return [{
+    source: "thecardapi",
+    kind: "sold",
+    grader: graded ? card.grader ?? null : null,
+    grade: graded ? card.grade ?? null : null,
+    price: value,
+    currency: (recent[0]?.currency as string) ?? "USD",
+    label: `${gradeLabel} · median of ${matched.length}`,
+    url: recent[0]?.listing_url ?? null,
+    product_ref: null,
+    payload: { count: matched.length, platforms: [...new Set(matched.map((s) => s.platform).filter(Boolean))], sample },
+  }];
+}
+
+// Raw-sales fetch for the ESTIMATE engine (the adapter only returns a distilled
+// quote; estimates reason over the underlying sales). allGrades=true pulls every
+// grade (Estimate B wants the whole picture).
+export async function fetchCardApiSales(
+  card: CardForPricing,
+  opts: { limit?: number; allGrades?: boolean } = {},
+): Promise<{ sales: CardApiSale[]; ok: boolean; note?: string }> {
+  const token = process.env.THECARDAPI_TOKEN;
+  if (!token) return { sales: [], ok: false, note: "no THECARDAPI_TOKEN set" };
+  const q = saleQuery(card);
+  if (!q) return { sales: [], ok: true, note: "no fields to search on" };
+  const params = new URLSearchParams({ q, limit: String(Math.min(Math.max(opts.limit ?? 40, 1), 200)) });
+  if (!opts.allGrades && card.condition_type === "graded" && card.grader) params.set("grader", card.grader);
+  if (!opts.allGrades && card.condition_type === "graded" && card.grade != null) params.set("grade", String(card.grade));
+  return runQuery(token, params);
+}
+
+// Fetch sales by a free-text query (comparables — e.g. the same parallel for other
+// players, or the player's broader market).
+export async function fetchCardApiByQuery(q: string, limit = 12): Promise<CardApiSale[]> {
+  const token = process.env.THECARDAPI_TOKEN;
+  const query = q.trim().slice(0, 200);
+  if (!token || !query) return [];
+  const { sales } = await runQuery(token, new URLSearchParams({ q: query, limit: String(Math.min(Math.max(limit, 1), 50)) }));
+  return sales;
+}
+
+async function runQuery(token: string, params: URLSearchParams): Promise<{ sales: CardApiSale[]; ok: boolean; note?: string }> {
+  let r: Response;
+  try {
+    r = await fetch(`${BASE}/sales?${params.toString()}`, { headers: { "x-market-api-key": token, Accept: "application/json" }, cache: "no-store" });
+  } catch (e) {
+    return { sales: [], ok: false, note: e instanceof Error ? e.message : "network error" };
+  }
+  if (r.status === 429 || r.status >= 500) return { sales: [], ok: false, note: `HTTP ${r.status}` };
+  if (!r.ok) return { sales: [], ok: true, note: `HTTP ${r.status}` };
+  const d = (await r.json().catch(() => null)) as { data?: CardApiSale[] } | null;
+  return { sales: d?.data ?? [], ok: true };
+}
+
+export const thecardapi: PriceSourceAdapter = {
+  id: "thecardapi",
+  label: "The Card API · sold",
+  enabled: () => !!process.env.THECARDAPI_TOKEN,
+  handles: () => true, // broad sold-sales aggregator: sports + TCG
+
+  async fetch(card: CardForPricing): Promise<AdapterResult> {
+    const token = process.env.THECARDAPI_TOKEN;
+    if (!token) return { quotes: [], ok: false, matched: false, note: "no THECARDAPI_TOKEN set" };
+    const q = saleQuery(card);
+    if (!q) return { quotes: [], ok: true, matched: false, note: "no fields to search on" };
+
+    const params = new URLSearchParams({ q, limit: "20" });
+    if (card.condition_type === "graded" && card.grader) params.set("grader", card.grader);
+    if (card.condition_type === "graded" && card.grade != null) params.set("grade", String(card.grade));
+
+    let r: Response;
+    try {
+      r = await fetch(`${BASE}/sales?${params.toString()}`, {
+        headers: { "x-market-api-key": token, Accept: "application/json" },
+        cache: "no-store",
+      });
+    } catch (e) {
+      return { quotes: [], ok: false, matched: false, note: e instanceof Error ? e.message : "network error" };
+    }
+    // 429/5xx = transient (don't wipe a prior good quote); other non-OK = clean "no data".
+    if (r.status === 429 || r.status >= 500) return { quotes: [], ok: false, matched: false, note: `The Card API HTTP ${r.status}` };
+    if (!r.ok) return { quotes: [], ok: true, matched: false, note: `The Card API HTTP ${r.status}` };
+
+    const d = (await r.json().catch(() => null)) as { data?: CardApiSale[] } | null;
+    const sales = d?.data ?? [];
+    if (!sales.length) return { quotes: [], ok: true, matched: false, note: "no recent sales matched" };
+
+    const quotes = distillSales(sales, card);
+    return { quotes, ok: true, matched: quotes.length > 0, note: quotes.length ? undefined : "sales found, but none matched the card's condition" };
+  },
+};

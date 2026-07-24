@@ -1,0 +1,47 @@
+// Sales over time (Beau, 2026-07-23). Every observed sale as a dot, plus a gold
+// daily-median line — the price-over-time history we accumulate in card_market_sales
+// from the Card API's rolling window. Server-rendered SVG, no chart lib. Draws
+// nothing until there are ≥2 dated sales.
+import { dailyMedianSeries } from "@/lib/cards/market-sales";
+
+type Sale = { sold_at: string | null; price: number | string; grader?: string | null; grade?: number | null };
+
+const fmtDate = (t: number) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const money = (n: number) => "$" + n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+export function SalesHistoryChart({ sales, className = "" }: { sales: Sale[]; className?: string }) {
+  const pts = sales
+    .map((s) => ({ p: Number(s.price), t: s.sold_at ? new Date(String(s.sold_at).slice(0, 10) + "T00:00:00Z").getTime() : NaN, graded: !!s.grader }))
+    .filter((s) => Number.isFinite(s.p) && s.p > 0 && Number.isFinite(s.t))
+    .sort((a, b) => a.t - b.t);
+  if (pts.length < 2) return null;
+
+  const line = dailyMedianSeries(sales.map((s) => ({ sold_at: s.sold_at, price: s.price })));
+  const W = 320, H = 120, ML = 6, MR = 6, MT = 8, MB = 6;
+  const ts = pts.map((p) => p.t), ps = pts.map((p) => p.p);
+  const t0 = Math.min(...ts), t1 = Math.max(...ts), lo = Math.min(...ps), hi = Math.max(...ps);
+  const pad = Math.max(0.5, (hi - lo) * 0.12);
+  const x = (t: number) => ML + (t1 === t0 ? 0.5 : (t - t0) / (t1 - t0)) * (W - ML - MR);
+  const y = (p: number) => MT + (1 - (p - (lo - pad)) / (hi - lo + 2 * pad)) * (H - MT - MB);
+  const linePath = line
+    .map((d, i) => `${i ? "L" : "M"}${x(new Date(d.date + "T00:00:00Z").getTime()).toFixed(1)},${y(d.price).toFixed(1)}`)
+    .join(" ");
+
+  return (
+    <div className={className}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="sales over time">
+        {line.length >= 2 && (
+          <path d={linePath} fill="none" stroke="var(--color-flag)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        )}
+        {pts.map((p, i) => (
+          <circle key={i} cx={x(p.t)} cy={y(p.p)} r={p.graded ? 2.4 : 2} fill="var(--color-ink)" fillOpacity={p.graded ? 0.5 : 0.3} />
+        ))}
+      </svg>
+      <div className="figures mt-0.5 flex items-center justify-between text-[9px] text-ink/40">
+        <span>{fmtDate(t0)}</span>
+        <span>{pts.length} sales · {money(lo)}–{money(hi)}</span>
+        <span>{fmtDate(t1)}</span>
+      </div>
+    </div>
+  );
+}

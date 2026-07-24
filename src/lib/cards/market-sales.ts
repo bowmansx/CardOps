@@ -1,0 +1,77 @@
+// Observed-sales history (Beau, 2026-07-23). Turns the Card API's raw sales into
+// dedup-keyed rows we accumulate in card_market_sales, and builds a price-over-time
+// series for the card graph. Pure — no I/O.
+import type { CardApiSale } from "./price-sources/thecardapi";
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export type MarketSaleRow = {
+  card_id: string;
+  source: string;
+  external_id: string;
+  title: string | null;
+  price: number;
+  currency: string;
+  grader: string | null;
+  grade: number | null;
+  platform: string | null;
+  sold_at: string | null;
+};
+
+function saleDate(s: CardApiSale): string | null {
+  const raw = String(s.sold_at ?? s.sale_date ?? "");
+  return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : null;
+}
+
+// A stable dedup key: the platform sale id if present, else a hash of the sale's
+// identifying fields (so the same sale isn't stored twice across daily runs).
+export function saleKey(s: CardApiSale): string {
+  if (s.id) return String(s.id);
+  return `${saleDate(s) ?? "x"}:${Number(s.price)}:${String(s.title ?? "").slice(0, 48)}`;
+}
+
+export function saleToRow(cardId: string, s: CardApiSale, source = "thecardapi"): MarketSaleRow | null {
+  const price = Number(s.price);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const grade = s.grade != null && Number.isFinite(Number(s.grade)) ? Number(s.grade) : null;
+  return {
+    card_id: cardId, source, external_id: saleKey(s), title: s.title ?? null,
+    price: round2(price), currency: (s.currency as string) ?? "USD",
+    grader: (s.grader as string | null) ?? null, grade, platform: s.platform ?? null, sold_at: saleDate(s),
+  };
+}
+
+export function salesToRows(cardId: string, sales: CardApiSale[], source = "thecardapi"): MarketSaleRow[] {
+  const rows: MarketSaleRow[] = [];
+  const seen = new Set<string>();
+  for (const s of sales) {
+    const r = saleToRow(cardId, s, source);
+    if (r && !seen.has(r.external_id)) { seen.add(r.external_id); rows.push(r); } // in-batch dedup too
+  }
+  return rows;
+}
+
+// card_market_sales rows → the CardApiSale shape the estimate/summarize helpers read.
+export type StoredSale = { price: number | string; sold_at: string | null; grader: string | null; grade: number | null; platform: string | null; title: string | null };
+export function storedToSales(rows: StoredSale[]): CardApiSale[] {
+  return rows.map((r) => ({ price: r.price, sold_at: r.sold_at, sale_date: r.sold_at, grader: r.grader, grade: r.grade, platform: r.platform, title: r.title }));
+}
+
+// Collapse sales into one point per day (median of that day) for a clean line graph.
+export type HistoryPoint = { date: string; price: number; n: number };
+export function dailyMedianSeries(rows: { sold_at: string | null; price: number | string }[]): HistoryPoint[] {
+  const byDay = new Map<string, number[]>();
+  for (const r of rows) {
+    const d = r.sold_at ? String(r.sold_at).slice(0, 10) : null;
+    const p = Number(r.price);
+    if (!d || !Number.isFinite(p) || p <= 0) continue;
+    (byDay.get(d) ?? byDay.set(d, []).get(d)!).push(p);
+  }
+  return [...byDay.entries()]
+    .map(([date, ps]) => {
+      const s = [...ps].sort((a, b) => a - b);
+      const m = s.length >> 1;
+      return { date, price: round2(s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2), n: s.length };
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
