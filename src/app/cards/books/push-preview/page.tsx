@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { readAllSafe } from "@/lib/supabase/page";
 import { currentRole, hasCardAccess } from "@/lib/cards/roles";
 import { buildPushEntries, type AccountMap, type LedgerRow } from "@/lib/cards/connectors";
+import { releaseClaim } from "./actions";
 import { PushToBooks } from "@/components/cards/PushToBooks";
 
 export const dynamic = "force-dynamic";
@@ -41,8 +42,8 @@ export default async function PushPreviewPage() {
         .order("id", { ascending: true }) // advance halves tie on (source_ref, line)
         .range(from, to)),
     supabase.from("card_account_map").select("business_id, provider, account_key, external_account_id"),
-    readAllSafe<{ business_id: string; reference: string }>((from, to) =>
-      supabase.from("card_push_log").select("business_id, reference")
+    readAllSafe<{ business_id: string; reference: string; status: string; error: string | null; provider: string }>((from, to) =>
+      supabase.from("card_push_log").select("business_id, reference, status, error, provider")
         .order("business_id", { ascending: true }).order("reference", { ascending: true })
         .range(from, to)),
   ]);
@@ -71,12 +72,22 @@ export default async function PushPreviewPage() {
     accountMapFor: (id) => (id ? maps.get(id) : undefined),
   });
 
-  const alreadyPosted = new Set(pushed.map((p) => `${p.business_id}::${p.reference}`));
+  // Status-aware sets: only status='posted' earns the green chip. A stranded
+  // pending/uncertain claim used to render as "posted" forever — the worst
+  // possible lie on a money screen. Any log row still BLOCKS a re-claim
+  // (unique index), so stuck refs are excluded from "ready" too.
+  const alreadyPosted = new Set(pushed.filter((p) => p.status === "posted").map((p) => `${p.business_id}::${p.reference}`));
+  const claimBlocked = new Set(pushed.map((p) => `${p.business_id}::${p.reference}`));
+  const stuck = pushed.filter((p) => p.status === "pending" || p.status === "uncertain");
   const isPosted = (e: (typeof entries)[number]) => !!e.business_id && alreadyPosted.has(`${e.business_id}::${e.reference}`);
-  // What the Post buttons will actually send — excludes anything already posted.
-  const postable = entries.filter(
-    (e) => !!e.external_org_id && e.balanced && e.complete && e.lines.every((l) => l.account_id) && !isPosted(e),
-  ).length;
+  const isStuck = (e: (typeof entries)[number]) =>
+    !!e.business_id && claimBlocked.has(`${e.business_id}::${e.reference}`) && !alreadyPosted.has(`${e.business_id}::${e.reference}`);
+  // What the Post buttons will actually send — excludes posted AND stuck claims.
+  const sendable = (e: (typeof entries)[number]) =>
+    !!e.business_id && !!e.external_org_id && e.balanced && e.complete
+    && e.lines.every((l) => l.account_id)
+    && !claimBlocked.has(`${e.business_id}::${e.reference}`);
+  const postable = entries.filter(sendable).length;
 
   // Per-business readiness, for the Post buttons.
   const perBiz = new Map<string, { code: string; connector: string | null; ready: number; total: number }>();
@@ -85,7 +96,7 @@ export default async function PushPreviewPage() {
     const b = bizById.get(e.business_id);
     const cur = perBiz.get(e.business_id) ?? { code: e.business_code, connector: (b?.connector as string | null) ?? null, ready: 0, total: 0 };
     cur.total += 1;
-    if (!!e.external_org_id && e.balanced && e.complete && e.lines.every((l) => l.account_id) && !isPosted(e)) cur.ready += 1;
+    if (sendable(e)) cur.ready += 1;
     perBiz.set(e.business_id, cur);
   }
 
@@ -147,6 +158,39 @@ export default async function PushPreviewPage() {
           </div>
         )}
 
+        {/* Stuck claims — pending (crashed mid-push) or uncertain (sent, outcome
+            unknown). Each needs a human decision: check the books, then either
+            leave it (it IS posted) or release it to retry. */}
+        {stuck.length > 0 && (
+          <div className="mt-2 space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
+            <div className="text-[11px] font-semibold text-amber-700">
+              {stuck.length} stuck {stuck.length === 1 ? "claim" : "claims"} — verify in the business&apos;s books before releasing:
+            </div>
+            {stuck.map((s) => (
+              <div key={`${s.business_id}::${s.reference}`} className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="figures text-[11px] text-ink/70">{s.reference}</span>
+                  <span className="ml-1.5 rounded bg-amber-500/15 px-1 py-px text-[9px] font-bold text-amber-700">{s.status}</span>
+                  {s.error && <div className="truncate text-[10px] text-ink/45">{s.error}</div>}
+                </div>
+                <form action={releaseClaim}>
+                  <input type="hidden" name="businessId" value={s.business_id} />
+                  <input type="hidden" name="provider" value={s.provider} />
+                  <input type="hidden" name="reference" value={s.reference} />
+                  <button type="submit" className="shrink-0 rounded-lg border border-amber-600/50 px-2 py-1 text-[10px] font-bold text-amber-700 hover:bg-amber-500/10">
+                    Release &amp; retry
+                  </button>
+                </form>
+              </div>
+            ))}
+            <p className="text-[10px] leading-snug text-ink/45">
+              <b>pending</b> = the push crashed before an outcome was recorded. <b>uncertain</b> = sent but Zoho&apos;s
+              answer was lost. If the journal EXISTS in the books, leave it (releasing would post it twice) — it will
+              show as posted once re-marked; if it does NOT exist, release it and Post again.
+            </p>
+          </div>
+        )}
+
         {(businessesWithoutOrg.length > 0 || unmappedAccounts.length > 0) && (
           <div className="mt-2 space-y-2 rounded-xl border border-hairline bg-white p-3">
             <div className="text-[11px] font-semibold text-ink/70">Before these can post:</div>
@@ -177,6 +221,7 @@ export default async function PushPreviewPage() {
                   <span className="text-[11px] font-bold text-ink">{j.business_code}
                     <span className="ml-1.5 font-normal text-ink/45">{j.external_org_id ? `org ${j.external_org_id}` : "no org"}</span>
                     {isPosted(j) && <span className="ml-1.5 rounded bg-pos/12 px-1 py-px text-[9px] font-bold text-pos">posted</span>}
+                    {isStuck(j) && <span className="ml-1.5 rounded bg-amber-500/15 px-1 py-px text-[9px] font-bold text-amber-700">claimed — verify</span>}
                   </span>
                   <span className="figures text-[10px] text-ink/40">{j.date} · {j.reference}</span>
                 </div>

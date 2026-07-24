@@ -43,12 +43,24 @@ async function accessToken(): Promise<string> {
   return data.access_token;
 }
 
+/** Thrown when we KNOW Zoho created nothing: the token refresh failed before
+ *  any request went out, or Zoho answered 4xx (received and rejected). Callers
+ *  doing money writes may safely release their claim and retry — unlike a
+ *  timeout/5xx, where the write may exist on Zoho's side. */
+export class ZohoNotPostedError extends Error {}
+
 /** Authenticated fetch against api_domain with retry/backoff on 429 and one
  *  token re-refresh on 401 (stale memory cache after Zoho-side revocation). */
 export async function zohoFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const url = path.startsWith("http") ? path : `${API}${path}`;
   for (let attempt = 0; ; attempt++) {
-    const token = await accessToken();
+    let token: string;
+    try {
+      token = await accessToken();
+    } catch (e) {
+      // Nothing was sent — a Zoho auth blip must not read as "outcome unknown".
+      throw new ZohoNotPostedError(e instanceof Error ? e.message : "Zoho token refresh failed");
+    }
     const res = await fetch(url, {
       ...init,
       signal: AbortSignal.timeout(15_000),
@@ -66,9 +78,11 @@ export async function zohoFetch<T>(path: string, init?: RequestInit): Promise<T>
     if (res.status === 204) return {} as T;
     const data = (await res.json()) as T;
     if (!res.ok) {
-      throw new Error(
-        `Zoho ${res.status} on ${path}: ${JSON.stringify(data).slice(0, 200)}`,
-      );
+      const msg = `Zoho ${res.status} on ${path}: ${JSON.stringify(data).slice(0, 200)}`;
+      // 4xx = Zoho received and REJECTED it — nothing was created, safe to
+      // retry. 5xx stays ambiguous (the write may exist server-side).
+      if (res.status >= 400 && res.status < 500) throw new ZohoNotPostedError(msg);
+      throw new Error(msg);
     }
     return data;
   }
