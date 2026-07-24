@@ -68,7 +68,8 @@ export default function ImportPage() {
         </header>
         <p className="mt-2 text-sm text-ink/60">
           Columns recognized: player, year, set_name, card_number, parallel, sport_category,
-          condition_type, grader, grade, market_value, status, zone, location_code. SKUs auto-assigned.
+          condition_type, grader, grade, market_value, status (booked/archived — sold rows import as
+          booked; enter the sale through the sell flow), zone, location_code. SKUs auto-assigned.
         </p>
 
         <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />

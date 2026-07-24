@@ -89,7 +89,8 @@ function fields(formData: FormData) {
     grader: str(formData.get("grader")),
     grade: num(formData.get("grade")),
     cert_number: str(formData.get("cert_number")),
-    status: str(formData.get("status")) ?? "booked",
+    // status is deliberately NOT read here: it is a transition, not a field.
+    // Sales go through card_sell/card_unsell; archiving through archiveCard.
     zone: str(formData.get("zone")),
     location_code: str(formData.get("location_code")),
     market_value: num(formData.get("market_value")),
@@ -118,7 +119,7 @@ export async function createCard(formData: FormData) {
     const sku = await nextSku(supabase, cat, year);
     const { data, error } = await supabase
       .from("cards")
-      .insert({ ...row, sku, entity_id: CARD_ENTITY })
+      .insert({ ...row, sku, entity_id: CARD_ENTITY, status: "booked" })
       .select("id")
       .single();
     if (!error) { newId = data.id as string; break; }
@@ -166,11 +167,18 @@ export async function archiveCard(id: string) {
 }
 
 // Basic generic CSV import (generic_full columns). Rows already parsed client-side.
+// CSV status handling: a row may say 'booked' or 'archived'. Anything else —
+// especially 'sold' — imports as 'booked' and is counted in `coerced`: a sold
+// card with no sale record is a lie the books would repeat, so the sale must
+// be entered explicitly through the sell flow after import.
+const IMPORTABLE_STATUSES = new Set(["booked", "archived"]);
+
 export async function importCards(
   rows: Record<string, string>[],
-): Promise<{ ok: boolean; inserted?: number; error?: string }> {
+): Promise<{ ok: boolean; inserted?: number; coerced?: number; error?: string }> {
   const supabase = await authed();
   const nowYear = new Date().getFullYear();
+  let coerced = 0;
   // SKU year matches createCard (the card's own year, not the import date),
   // and the sequence namespace is keyed per (category, year).
   const out: Record<string, unknown>[] = [];
@@ -206,7 +214,12 @@ export async function importCards(
       grader: r.grader?.trim() || null,
       grade: r.grade ? Number(r.grade) || null : null,
       market_value: r.market_value ? Number(r.market_value) || null : null,
-      status: r.status?.trim() || "booked",
+      status: (() => {
+        const s = r.status?.trim() || "booked";
+        if (IMPORTABLE_STATUSES.has(s)) return s;
+        coerced += 1;
+        return "booked";
+      })(),
       zone: r.zone?.trim() || null,
       location_code: r.location_code?.trim() || null,
     });
@@ -215,5 +228,5 @@ export async function importCards(
   const { error } = await supabase.from("cards").insert(out);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/cards");
-  return { ok: true, inserted: out.length };
+  return { ok: true, inserted: out.length, coerced };
 }

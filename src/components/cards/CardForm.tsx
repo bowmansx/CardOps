@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  CATEGORIES, categoryKind, CARD_STATUSES, ZONES, GRADERS, ACQUISITION_METHODS,
+  CATEGORIES, categoryKind, ZONES, GRADERS, ACQUISITION_METHODS,
   PRICING_STRATEGY_OPTIONS, type Card,
 } from "@/lib/cards/types";
 
@@ -177,9 +177,9 @@ export function CardForm({
           </label>
           <label className="block">
             <span className={lblCls}>Status</span>
-            <select name="status" defaultValue={initial?.status ?? "booked"} className={inputCls}>
-              {CARD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            {/* Read-only: status is a transition (sell/unsell/archive/list), not an editable field. */}
+            <input value={initial?.status ?? "booked"} readOnly disabled className={`${inputCls} opacity-60`} />
+            <span className="mt-1 block text-[10px] text-ink/40">Changes via the sell flow, archive, or listing actions.</span>
           </label>
         </div>
         <label className="block">
