@@ -84,3 +84,19 @@ fixes). One entry per decision: what, why, commit.
       rest of the run — the settlement itself stands either way.
 - account-deletion now logs FIRST and acks second: no logged receipt → 5xx →
   eBay redelivers. Previously it acked notices it silently failed to record.
+
+## Item 6 — free gates
+- `npm run check` = types + tests (now 205: +7 readAll contract tests) +
+  forbidden-pattern greps. All green at introduction — a gate that starts red
+  gets ignored.
+- **Lint deferred from the gate**: 30 pre-existing eslint errors (mostly
+  react-hooks) predate this work; `check:lint` exists separately and joins
+  `check` after a cleanup pass. Type-aware no-floating-promises likewise
+  waits for that green baseline.
+- Grep gates (check-forbidden.mjs): fire-and-forget `.then(noop,noop)` writes;
+  raw audit_log inserts outside auditOrThrow; any resurrection of
+  card_pool/use_pool_basis.
+- Honest coverage map: the greps catch the swallow-by-.then class and audit
+  bypass; the readAll test pins the pagination primitive; "awaited but
+  {error} discarded" is NOT machine-catchable here — that class is held by
+  prevention rule 1 and review, not tooling.
