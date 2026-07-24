@@ -1,21 +1,17 @@
 -- ══════════════════════════════════════════════════════════════════════════
--- MONEY-CORE TEST HARNESS — paste-ready, self-contained, ROLLS BACK.
+-- MONEY-CORE TEST HARNESS — paste-ready, self-contained, self-rolling-back.
 --
 -- Run: paste the whole file into the Supabase SQL editor and execute.
--- It creates throwaway rows inside one transaction, exercises the sell/unsell
--- RPCs, the status guards, and the purchase-lot draw/return, prints a
--- PASS/FAIL table, and rolls everything back — nothing persists.
+-- It seeds throwaway rows, exercises card_sell / card_unsell, the status
+-- guards, and the purchase-lot draw/return, then RAISES with a full report —
+-- the raise is what rolls every test row back, so nothing ever persists.
+-- THE RED ERROR BOX IS EXPECTED: read the message inside it.
 --
--- Requires migrations through 20260735000000_purchase_lots.sql.
--- Simulated auth: sets request.jwt.claims the way PostgREST does. NOTE each
--- RPC leaves cardops.in_sell='1' for the rest of the TRANSACTION (harmless in
--- prod where every request is its own transaction) — the harness resets it
--- after every RPC call before testing the guards.
+-- Requires migrations through 20260736000000. Simulated auth: sets
+-- request.jwt.claims the way PostgREST does. The RPCs leave cardops.in_sell
+-- set for the rest of the transaction (harmless in prod where each request is
+-- its own transaction) — the harness resets it after every RPC call.
 -- ══════════════════════════════════════════════════════════════════════════
-begin;
-
-create temp table t_results (n serial, name text, pass boolean, detail text) on commit drop;
-
 do $$
 declare
   v_uid   uuid := gen_random_uuid();
@@ -26,7 +22,12 @@ declare
   v_cnt   int;
   v_total numeric;
   v_n     numeric;
-  v_err   text;
+  v_ok    boolean;
+  v_name  text;
+  v_note  text;
+  v_pass  int := 0;
+  v_fail  int := 0;
+  v_r     text := E'\n';
 begin
   -- ── seed: user, profile, one purchase lot (4 cards, $100), one lot card,
   --         one individual-basis card ────────────────────────────────────────
@@ -47,122 +48,141 @@ begin
   v_out := public.card_sell(v_card, 'test', 50, 5, 0, 0, 'TEST-ORDER-1');
   perform set_config('cardops.in_sell', '', true);
   select remaining_cost, remaining_count into v_total, v_cnt from public.purchase_lots where id = v_lot;
-  insert into t_results (name, pass, detail) values
-    ('sell draws lot basis 25.00',
-     (v_out->>'basis')::numeric = 25.00 and v_total = 75.00 and v_cnt = 3,
-     format('basis=%s lot=%s/%s', v_out->>'basis', v_total, v_cnt));
+  v_name := '1. sell draws lot basis 25.00';
+  v_ok := (v_out->>'basis')::numeric = 25.00 and v_total = 75.00 and v_cnt = 3;
+  v_note := format('basis=%s lot=%s/%s', v_out->>'basis', v_total, v_cnt);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 2. individual-basis card uses its stated cost ─────────────────────────
   v_out := public.card_sell(v_solo, 'test', 30, 0, 0, 0, 'TEST-ORDER-S');
   perform set_config('cardops.in_sell', '', true);
-  insert into t_results (name, pass, detail) values
-    ('no-lot card uses individual_basis',
-     (v_out->>'basis')::numeric = 12.34 and (v_out->>'profit_loss')::numeric = 17.66,
-     format('basis=%s pl=%s', v_out->>'basis', v_out->>'profit_loss'));
+  v_name := '2. no-lot card uses individual_basis';
+  v_ok := (v_out->>'basis')::numeric = 12.34 and (v_out->>'profit_loss')::numeric = 17.66;
+  v_note := format('basis=%s pl=%s', v_out->>'basis', v_out->>'profit_loss');
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 3. selling a sold card refuses ────────────────────────────────────────
+  v_name := '3. double card_sell refused';
   begin
     perform public.card_sell(v_card, 'test', 60, 0, 0, 0, 'TEST-ORDER-2');
-    insert into t_results (name, pass, detail) values ('double card_sell refused', false, 'no exception raised');
+    v_ok := false; v_note := 'no exception raised';
   exception when others then
-    v_err := sqlerrm;
-    perform set_config('cardops.in_sell', '', true);
-    insert into t_results (name, pass, detail) values
-      ('double card_sell refused', v_err like '%already sold%', v_err);
+    v_ok := sqlerrm like '%already sold%'; v_note := sqlerrm;
   end;
+  perform set_config('cardops.in_sell', '', true);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 4. flipping a sold card off sold via UPDATE refuses (the CRITICAL) ────
+  v_name := '4. un-sell via UPDATE blocked';
   begin
     update public.cards set status = 'booked' where id = v_card;
-    insert into t_results (name, pass, detail) values ('un-sell via UPDATE blocked', false, 'update was allowed');
+    v_ok := false; v_note := 'update was allowed';
   exception when others then
-    insert into t_results (name, pass, detail) values
-      ('un-sell via UPDATE blocked', sqlerrm like '%card_sell / card_unsell%', sqlerrm);
+    v_ok := sqlerrm like '%card_sell / card_unsell%'; v_note := sqlerrm;
   end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 5. the OWNER gets no exemption either ─────────────────────────────────
   update public.profiles set role = 'owner' where id = v_uid;
+  v_name := '5. owner un-sell via UPDATE blocked';
   begin
     update public.cards set status = 'booked' where id = v_card;
-    insert into t_results (name, pass, detail) values ('owner un-sell via UPDATE blocked', false, 'update was allowed');
+    v_ok := false; v_note := 'update was allowed';
   exception when others then
-    insert into t_results (name, pass, detail) values
-      ('owner un-sell via UPDATE blocked', sqlerrm like '%card_sell / card_unsell%', sqlerrm);
+    v_ok := sqlerrm like '%card_sell / card_unsell%'; v_note := sqlerrm;
   end;
   update public.profiles set role = 'card_ops' where id = v_uid;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 6. lot balances cannot be edited directly ─────────────────────────────
+  v_name := '6. lot balance edit blocked';
   begin
     update public.purchase_lots set remaining_cost = 0 where id = v_lot;
-    insert into t_results (name, pass, detail) values ('lot balance edit blocked', false, 'update was allowed');
+    v_ok := false; v_note := 'update was allowed';
   exception when others then
-    insert into t_results (name, pass, detail) values ('lot balance edit blocked', true, sqlerrm);
+    v_ok := true; v_note := sqlerrm;
   end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 7. lot metadata stays freely editable ─────────────────────────────────
+  v_name := '7. lot metadata editable';
   begin
     update public.purchase_lots set label = 'Harness lot (renamed)', source = 'LCS' where id = v_lot;
-    insert into t_results (name, pass, detail) values ('lot metadata editable', true, 'label/source updated');
+    v_ok := true; v_note := '';
   exception when others then
-    insert into t_results (name, pass, detail) values ('lot metadata editable', false, sqlerrm);
+    v_ok := false; v_note := sqlerrm;
   end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 8. a card cannot link to another user's lot ───────────────────────────
+  v_name := '8. cross-user lot link blocked';
   begin
-    update public.cards set purchase_lot_id = v_lot where id = v_solo;  -- same user: fine
     insert into public.cards (user_id, sku, player, status, purchase_lot_id)
       values (gen_random_uuid(), 'TST-2026-000009', 'Thief', 'booked', v_lot);
-    insert into t_results (name, pass, detail) values ('cross-user lot link blocked', false, 'insert was allowed');
+    v_ok := false; v_note := 'insert was allowed';
   exception when others then
-    insert into t_results (name, pass, detail) values
-      ('cross-user lot link blocked', sqlerrm like '%different user%', sqlerrm);
+    v_ok := sqlerrm like '%different user%'; v_note := sqlerrm;
   end;
-  update public.cards set purchase_lot_id = null where id = v_solo;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 9. unsell fully reverses: lot restored, sale gone, card booked ────────
   v_out := public.card_unsell(v_card);
   perform set_config('cardops.in_sell', '', true);
   select remaining_cost, remaining_count into v_total, v_cnt from public.purchase_lots where id = v_lot;
   select count(*) into v_n from public.card_sales where card_id = v_card;
-  insert into t_results (name, pass, detail) values
-    ('unsell restores lot + deletes sale',
-     v_total = 100.00 and v_cnt = 4 and v_n = 0
-       and (select status from public.cards where id = v_card) = 'booked',
-     format('lot=%s/%s sales=%s restored=%s', v_total, v_cnt, v_n, v_out->>'restored_basis'));
+  v_name := '9. unsell restores lot + deletes sale';
+  v_ok := v_total = 100.00 and v_cnt = 4 and v_n = 0
+    and (select status from public.cards where id = v_card) = 'booked';
+  v_note := format('lot=%s/%s sales=%s restored=%s', v_total, v_cnt, v_n, v_out->>'restored_basis');
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
-  -- ── 10. cannot sell twice against the same basis: re-sell after reversal is
-  --       a FRESH draw against the restored lot ──────────────────────────────
+  -- ── 10. cannot sell twice against the same basis: re-sell after reversal
+  --       is a FRESH draw against the restored lot ────────────────────────────
   v_out := public.card_sell(v_card, 'test', 80, 0, 0, 0, 'TEST-ORDER-3');
   perform set_config('cardops.in_sell', '', true);
   select count(*) into v_cnt from public.purchase_lot_adjustments
     where card_id = v_card and kind = 'draw';
   select count(*) into v_n from public.card_sales where card_id = v_card;
   select remaining_cost into v_total from public.purchase_lots where id = v_lot;
-  insert into t_results (name, pass, detail) values
-    ('re-sell after unsell = one live sale, one net draw',
-     v_n = 1 and v_cnt = 2  -- two draw rows, but draw#1 carries a correction between
-       and v_total = 75.00, -- net effect: exactly ONE basis drawn from the lot
-     format('sales=%s draws=%s lot_remaining=%s', v_n, v_cnt, v_total));
+  v_name := '10. re-sell after unsell = one live sale, one net draw';
+  v_ok := v_n = 1 and v_cnt = 2 and v_total = 75.00; -- draw#1 carries a correction between
+  v_note := format('sales=%s draws=%s lot_remaining=%s', v_n, v_cnt, v_total);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 11. a card cannot be BORN sold ────────────────────────────────────────
+  v_name := '11. insert status=sold blocked';
   begin
     insert into public.cards (user_id, sku, player, status)
       values (v_uid, 'TST-2026-000003', 'BornSold', 'sold');
-    insert into t_results (name, pass, detail) values ('insert status=sold blocked', false, 'insert was allowed');
+    v_ok := false; v_note := 'insert was allowed';
   exception when others then
-    insert into t_results (name, pass, detail) values
-      ('insert status=sold blocked', sqlerrm like '%cannot be created sold%', sqlerrm);
+    v_ok := sqlerrm like '%cannot be created sold%'; v_note := sqlerrm;
   end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 12. non-sold status moves stay free (listed → booked) ─────────────────
+  v_name := '12. non-sold transitions unaffected';
   begin
     insert into public.cards (user_id, sku, player, status)
       values (v_uid, 'TST-2026-000004', 'Lister', 'listed');
     update public.cards set status = 'booked' where sku = 'TST-2026-000004' and user_id = v_uid;
-    insert into t_results (name, pass, detail) values ('non-sold transitions unaffected', true, 'listed→booked ok');
+    v_ok := true; v_note := '';
   exception when others then
-    insert into t_results (name, pass, detail) values ('non-sold transitions unaffected', false, sqlerrm);
+    v_ok := false; v_note := sqlerrm;
   end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 13. exhausted lot draws $0 basis, never negative ──────────────────────
   perform set_config('cardops.in_sell', '1', true);
@@ -175,13 +195,18 @@ begin
     'test', 10, 0, 0, 0, 'TEST-ORDER-4');
   perform set_config('cardops.in_sell', '', true);
   select remaining_cost, remaining_count into v_total, v_cnt from public.purchase_lots where id = v_lot;
-  insert into t_results (name, pass, detail) values
-    ('exhausted lot draws 0, stays at 0',
-     (v_out->>'basis')::numeric = 0 and v_total = 0 and v_cnt = 0,
-     format('basis=%s lot=%s/%s', v_out->>'basis', v_total, v_cnt));
+  v_name := '13. exhausted lot draws 0, stays at 0';
+  v_ok := (v_out->>'basis')::numeric = 0 and v_total = 0 and v_cnt = 0;
+  v_note := format('basis=%s lot=%s/%s', v_out->>'basis', v_total, v_cnt);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── report + rollback in one move: raising undoes every row above ─────────
+  raise exception using message = format(
+    E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
+    || '%s of 13 PASSED · %s FAILED'
+    || E'%s'
+    || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
+    || '(Raising an exception is how the harness undoes itself. 13 PASS = your money core is verified.)',
+    v_pass, v_fail, v_r);
 end $$;
-
-select n, case when pass then 'PASS' else 'FAIL' end as result, name, detail
-from t_results order by n;
-
-rollback;
