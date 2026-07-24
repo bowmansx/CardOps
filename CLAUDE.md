@@ -81,3 +81,6 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
 - `reference/next-steps.md` — current state, cutover order, open decisions
 - `reference/audit-2026-07-24.md` — the multi-tenancy audit; read before
   touching service-role, SECURITY DEFINER, or books code
+- `reference/foundation-review-2026-07-25.md` — the full-core review: open
+  defects by priority, the test plan, and the blind-spot list; check it before
+  building on sell/books/eBay/cron code
