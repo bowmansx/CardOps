@@ -131,3 +131,17 @@ fixes). One entry per decision: what, why, commit.
   with the push-honesty trio in next-steps.md); sync post-settle reversal,
   getOrders 300-cap redesign, lot-cancel repair, fee allocation remainder —
   behavioral eBay changes, folded into the cutover checklist (item 9).
+
+## Liquidity v1 (design discussed with Beau 2026-07-25, five decisions resolved)
+- Q1 tiers-vs-score → tier label + raw facts (sales/mo, last sale, active
+  months), never a bare 0-100: precision we don't have breeds distrust.
+- Q2 → both readouts: 30-day chance (%) AND expected time to sell.
+- Q3 → slider ±50% default with a ±90% expander toggle.
+- Q4 → SellInputs is a deliberately widenable bag; eBay Browse/Insights and
+  own days-on-market calibration plug in without touching call sites.
+- Q5 → value screen only for v1; browser-list chips later.
+- Player tier v1 = comps across Beau's OWN cards of that player, capped at
+  200 ids (URL limit) with the cap surfaced in the label — honest proxy until
+  player-wide vendor data lands (phase 2, TheCardAPI daily cache).
+- Model floors the "overpayer tail" at 3% so absurd prices show ~tiny-but-
+  nonzero odds instead of zero; refuses to estimate below 2 sales/yr.

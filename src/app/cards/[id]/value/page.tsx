@@ -9,6 +9,9 @@ import { addComp, setStrategy, setManualPrice } from "./actions";
 import { GRADERS } from "@/lib/cards/types";
 import { CompsPaste } from "@/components/cards/CompsPaste";
 import { MultiCasePanel, type PriceCase } from "@/components/cards/MultiCasePanel";
+import { LiquidityPanel, type TierRow } from "@/components/cards/LiquidityPanel";
+import { velocity, tierOf, weightedPrices, matchesExact } from "@/lib/cards/liquidity";
+import { readAllSafe } from "@/lib/supabase/page";
 
 export const dynamic = "force-dynamic";
 const money = (n: number | null | undefined) =>
@@ -129,6 +132,68 @@ export default async function ValuePage({ params }: { params: Promise<{ id: stri
         })()}
 
         <MultiCasePanel cases={cases} />
+
+        {/* Liquidity — how fast it trades at three scopes, and the price
+            slider. Player scope = comps across YOUR cards of this player (an
+            honest, labeled proxy until player-wide vendor data lands). */}
+        {await (async () => {
+          const now = Date.now();
+          const exactComps = comps.filter((c) => matchesExact(card as never, c));
+
+          let playerNote: string | undefined;
+          let playerV = null as ReturnType<typeof velocity> | null;
+          if (card.player) {
+            const pc = await readAllSafe<{ id: string }>((from, to) =>
+              supabase.from("cards").select("id").eq("player", card.player)
+                .order("id", { ascending: true }).range(from, to));
+            // .in() rides the query string — cap the id list and SAY so (rule 10).
+            const ids = pc.rows.map((r) => r.id);
+            const capped = ids.slice(0, 200);
+            let playerComps: Comp[] = [];
+            let err = pc.error;
+            if (capped.length) {
+              const cc = await readAllSafe<Comp>((from, to) =>
+                supabase.from("card_comps")
+                  .select("grader, grade, sale_price, sale_date, source")
+                  .in("card_id", capped)
+                  .order("id", { ascending: true }).range(from, to));
+              err = err ?? cc.error;
+              playerComps = cc.rows;
+            }
+            playerV = velocity(playerComps, now);
+            playerNote = err
+              ? "read failed — reload"
+              : `across ${capped.length}${ids.length > capped.length ? ` of your ${ids.length}` : ""} card${ids.length === 1 ? "" : "s"} of this player`;
+          }
+
+          const vExact = velocity(exactComps, now);
+          const vCard = velocity(comps, now);
+          const exactScope = card.condition_type === "graded" && card.grader
+            ? `This exact card (${card.grader} ${card.grade ?? "?"})`
+            : "This exact card (raw)";
+          const rows: TierRow[] = [
+            { scope: exactScope, tier: tierOf(vExact), v: vExact },
+            { scope: "This card, any grade", tier: tierOf(vCard), v: vCard },
+            ...(playerV ? [{ scope: `Player: ${card.player}`, tier: tierOf(playerV), v: playerV, note: playerNote }] : []),
+          ];
+
+          // Slider basis: exact-grade comps when they carry a real sample,
+          // else all grades of this card — always labeled.
+          const useExact = exactComps.length >= 4 && vExact.perMonth != null;
+          const basis = useExact ? exactComps : comps;
+          const basisV = useExact ? vExact : vCard;
+          return (
+            <LiquidityPanel
+              estimate={market}
+              manualPrice={card.manual_price == null ? null : Number(card.manual_price)}
+              rows={rows}
+              perMonth={basisV.perMonth}
+              weighted={weightedPrices(basis, now)}
+              basisLabel={useExact ? "exact-grade comps" : "all grades of this card"}
+              basisN={basis.filter((c) => c.sale_price != null).length}
+            />
+          );
+        })()}
 
         {/* Sales by grade — first thing after the headline: what actually
             trades, at which grade, by which company, and how it compares to
