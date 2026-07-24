@@ -111,12 +111,16 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
   }
 
   for (const order of ordersRes.orders) {
-    if (order.paymentStatus !== "PAID") continue;
-    // Cancelled order (eBay's eventually-consistent state OR our durable local
-    // marker): never settle it — and if it was ALREADY settled on an earlier
-    // run (cancelled after payment), REVERSE that settlement now. Before this,
-    // a post-settlement refund left basis drawn and phantom revenue forever.
-    if ((order.cancelState && order.cancelState !== "NONE_REQUESTED") || cancelledOrders.has(order.orderId)) {
+    // Cancellation handling runs BEFORE the PAID gate (review 2026-07-25): a
+    // COMPLETED cancellation flips paymentStatus to FULLY_REFUNDED, so gating
+    // on PAID first skipped exactly the orders that most need reversing.
+    //
+    // Reversal fires ONLY on the terminal state. A pending buyer REQUEST
+    // (CANCEL_REQUESTED / IN_PROGRESS) blocks settlement but must never
+    // reverse or blacklist — the seller can still decline and ship, and the
+    // durable marker has no undo path.
+    const terminallyCancelled = order.cancelState === "CANCELED" || cancelledOrders.has(order.orderId);
+    if (terminallyCancelled) {
       const rev = await reverseOrderSettlement(db, order.orderId, sellerId);
       if (rev.reversedCards || rev.reversedLots) {
         reversedCancellations++;
@@ -137,6 +141,13 @@ async function runSync(db: SupabaseClient, access: string, sellerId?: string) {
       failures.push(...rev.problems.map((p) => `${order.orderId}: ${p}`));
       continue;
     }
+    if (order.cancelState && order.cancelState !== "NONE_REQUESTED") {
+      // Pending cancellation request: hold — settle on a later run if the
+      // seller declines, reverse on a later run if it completes.
+      skipped++;
+      continue;
+    }
+    if (order.paymentStatus !== "PAID") continue;
     // Split order-level shipping + the (per-ORDER) fee across lines by item
     // value, cents-exact with the remainder on the last line (rule 12).
     const weights = order.lineItems.map((li) => li.itemCost);

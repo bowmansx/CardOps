@@ -99,6 +99,9 @@ export async function POST(request: Request) {
       rationale: res.rationale, sources: res.sources, credits_spent: credits, model: res.model,
       created_at: row?.created_at ?? null,
     },
+    // A failed cache insert is worth showing: the estimate wasn't stored, so
+    // the daily auto-run will re-select (and re-bill) this card tomorrow.
+    cache_warning: cacheErr ? `Estimate shown but NOT saved (${cacheErr.message}) — not charged; it may re-run tomorrow.` : undefined,
     credits,
     balance: await balanceOf(supabase),
   });

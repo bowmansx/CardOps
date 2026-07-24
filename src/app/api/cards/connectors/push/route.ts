@@ -96,6 +96,7 @@ export async function POST(request: Request) {
   const batch = eligible.slice(0, BATCH);
 
   let posted = 0, skipped = 0, refused = 0, uncertain = 0;
+  let aborted = false;
   const errors: string[] = [];
 
   for (const entry of batch) {
@@ -108,6 +109,7 @@ export async function POST(request: Request) {
     if (claimErr) {
       if (claimErr.code === "23505") { skipped++; continue; } // already claimed/posted
       errors.push(`${entry.reference}: couldn't claim (${claimErr.message}) — stopping.`);
+      aborted = true;
       break; // fail closed rather than post something we can't record
     }
 
@@ -142,6 +144,7 @@ export async function POST(request: Request) {
     skipped_already_posted: skipped,
     refused,
     uncertain,
+    aborted: aborted || undefined,
     not_ready: notReady,
     remaining: Math.max(0, eligible.length - batch.length),
     errors,

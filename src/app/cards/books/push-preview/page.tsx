@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { readAllSafe } from "@/lib/supabase/page";
 import { currentRole, hasCardAccess } from "@/lib/cards/roles";
 import { buildPushEntries, type AccountMap, type LedgerRow } from "@/lib/cards/connectors";
-import { releaseClaim } from "./actions";
+import { releaseClaim, markClaimPosted } from "./actions";
 import { PushToBooks } from "@/components/cards/PushToBooks";
 
 export const dynamic = "force-dynamic";
@@ -173,20 +173,31 @@ export default async function PushPreviewPage() {
                   <span className="ml-1.5 rounded bg-amber-500/15 px-1 py-px text-[9px] font-bold text-amber-700">{s.status}</span>
                   {s.error && <div className="truncate text-[10px] text-ink/45">{s.error}</div>}
                 </div>
-                <form action={releaseClaim}>
-                  <input type="hidden" name="businessId" value={s.business_id} />
-                  <input type="hidden" name="provider" value={s.provider} />
-                  <input type="hidden" name="reference" value={s.reference} />
-                  <button type="submit" className="shrink-0 rounded-lg border border-amber-600/50 px-2 py-1 text-[10px] font-bold text-amber-700 hover:bg-amber-500/10">
-                    Release &amp; retry
-                  </button>
-                </form>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <form action={markClaimPosted}>
+                    <input type="hidden" name="businessId" value={s.business_id} />
+                    <input type="hidden" name="provider" value={s.provider} />
+                    <input type="hidden" name="reference" value={s.reference} />
+                    <button type="submit" className="rounded-lg border border-pos/50 px-2 py-1 text-[10px] font-bold text-pos hover:bg-pos/10">
+                      It&apos;s in the books
+                    </button>
+                  </form>
+                  <form action={releaseClaim}>
+                    <input type="hidden" name="businessId" value={s.business_id} />
+                    <input type="hidden" name="provider" value={s.provider} />
+                    <input type="hidden" name="reference" value={s.reference} />
+                    <button type="submit" className="rounded-lg border border-amber-600/50 px-2 py-1 text-[10px] font-bold text-amber-700 hover:bg-amber-500/10">
+                      Release &amp; retry
+                    </button>
+                  </form>
+                </span>
               </div>
             ))}
             <p className="text-[10px] leading-snug text-ink/45">
               <b>pending</b> = the push crashed before an outcome was recorded. <b>uncertain</b> = sent but Zoho&apos;s
-              answer was lost. If the journal EXISTS in the books, leave it (releasing would post it twice) — it will
-              show as posted once re-marked; if it does NOT exist, release it and Post again.
+              answer was lost. Check the business&apos;s books for the reference: if the journal EXISTS, press
+              &ldquo;It&apos;s in the books&rdquo; (releasing would post it twice); if it does NOT exist, Release &amp; retry.
+              Claims under 10 minutes old can&apos;t be released — a push may still be running.
             </p>
           </div>
         )}

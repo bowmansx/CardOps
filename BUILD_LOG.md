@@ -189,3 +189,39 @@ fixes). One entry per decision: what, why, commit.
   named helper beats scattered eslint-disables.
 - `npm run check` now runs types + LINT + tests + forbidden greps. Remaining
   lint output: 5 warnings (unused disable directives) — cosmetic.
+
+## Adversarial review of my own hardening — confirmed findings, fixed
+The diff-review workflow (22/29 agents completed; 7 died on a session limit)
+CONFIRMED real defects in my own commits. All fixed:
+- **CRITICAL**: the sync's cancel-reversal fired on cancelState !==
+  NONE_REQUESTED — which includes a buyer merely REQUESTING cancellation —
+  and then wrote the permanent ebay_cancelled_orders blacklist. A declined
+  request would have erased settled revenue forever. Now: reversal fires
+  only on terminal CANCELED (or our own durable marker); pending requests
+  hold settlement without reversing or marking.
+- **HIGH**: the PAID gate ran before the cancel branch, so completed
+  cancellations reporting FULLY_REFUNDED never reached the reversal at all.
+  Cancel handling now precedes the payment gate; only SETTLEMENT requires
+  PAID.
+- reverseOrderSettlement now REFUSES to auto-reverse any sale already
+  pushed to the real books (card_push_log check, fail-closed) — a cron must
+  not orphan an external Zoho journal; the problem string names the
+  references to fix manually. Lot resolution is ownership-scoped on the
+  service client.
+- releaseClaim gained a 10-minute age guard (an in-flight push's claim
+  can't be yanked into a double-post) and its missing sibling
+  markClaimPosted ("It's in the books") — the stuck-claim panel now has
+  both recovery paths rule 8 demands.
+- Push route reports aborted claim-write stops; PushToBooks treats
+  aborts/errors as failure (a hard abort rendered as "0 posted" green).
+- Estimate responses surface cache_warning when the estimate wasn't stored
+  (and the client shows it); moversDigest advances movers_seen only after
+  a real delivery, checks its prefs upsert, and its readAll calls got
+  deterministic orders — the same class the review's dead verifiers had
+  queued, confirmed by hand.
+- Hub surfaces getOrders truncation into its errors panel (rule 10 applied
+  to BOTH callers, not one).
+Checked by hand (verifiers lost to the session limit): daemon's
+unconditional cursor stamp on locked cards is intentional rotation; the
+estimates "run lock" concern matches the previously-refuted overlap class
+(daily schedule + 300s cap cannot self-overlap).

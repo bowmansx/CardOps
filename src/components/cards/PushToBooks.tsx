@@ -29,9 +29,12 @@ export function PushToBooks({
       if (d.skipped_already_posted) bits.push(`${d.skipped_already_posted} already there`);
       if (d.refused) bits.push(`${d.refused} refused (retryable)`);
       if (d.uncertain) bits.push(`${d.uncertain} UNCERTAIN — verify in your books before retrying`);
+      if (d.aborted) bits.push("STOPPED EARLY — a claim couldn't be recorded");
       if (d.remaining) bits.push(`${d.remaining} left — run again`);
       setRes({
-        ok: !d.refused && !d.uncertain,
+        // Honest success = nothing refused, nothing uncertain, no abort, and
+        // no error strings at all (a claim-failure abort ships only in errors).
+        ok: !d.refused && !d.uncertain && !d.aborted && !(d.errors?.length),
         text: bits.join(" · ") + (d.errors?.length ? ` — ${d.errors[0]}` : ""),
       });
       router.refresh();

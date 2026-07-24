@@ -39,6 +39,11 @@ export async function GET() {
   ]);
   if (!selling.ok) errors.listings = selling.error;
   if (!ordersRes.ok) errors.orders = ordersRes.error;
+  // Rule 10: a truncated order feed must read as INCOMPLETE, not as covered —
+  // awaiting-shipment and unsettled counts on this screen drive real actions.
+  if (ordersRes.ok && ordersRes.truncated) {
+    errors.orders = `order feed truncated at ${ordersRes.orders.length} — the oldest orders in the 90-day window are missing from these counts`;
+  }
   // Offer eligibility is a bonus feature — swallow into errors quietly.
   if (!eligible.ok) errors.offers = eligible.error;
 

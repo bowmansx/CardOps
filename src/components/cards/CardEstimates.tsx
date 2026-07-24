@@ -64,6 +64,7 @@ export function CardEstimates({
       setEstimates((p) => ({ ...p, [mode]: d.estimate }));
       setBalance(d.balance);
       setOpen(mode);
+      if (d.cache_warning) setErr(d.cache_warning); // estimate shown, storage failed — say so
     } catch (e) { setErr(e instanceof Error ? e.message : "Estimate failed."); } finally { setBusy(null); }
   }
 
