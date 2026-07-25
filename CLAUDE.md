@@ -184,8 +184,10 @@ These govern every new line of code and every fix.
 7. Stamp state only after the effect is confirmed — no notified_at on zero
    deliveries, no credit debit before the row landed, no ok:true after an
    unchecked write.
-8. Money state machines have no dead ends: every claim/pending/uncertain state
-   is visible on some screen and has a recovery path.
+8. No dead ends, server or client: every claim/pending/uncertain state is
+   visible on some screen with a recovery path, and every async handler clears
+   its in-flight flag in `finally` — a rejected promise must never be able to
+   strand a spinner (this stranded five surfaces, 2026-07-25).
 9. Vendor money fields are validated, never defaulted — a missing price is a
    failure, not $0.
 10. Any hard cap returns a `truncated` signal the caller must surface — silent

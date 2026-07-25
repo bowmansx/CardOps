@@ -7,6 +7,7 @@ import { SPORT_CATEGORIES, ZONES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/li
 import { commitIntakeCard, type IntakeInput } from "@/app/cards/intake/actions";
 import { CameraSheet } from "./CameraSheet";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
+import { fitPayload } from "@/lib/cards/payload";
 import { Lightbox } from "./Lightbox";
 
 const CONF = 0.85; // INTAKE_CONFIDENCE_THRESHOLD
@@ -77,23 +78,41 @@ export function FullIntake({
 
   async function save() {
     setErr(null); setBusy("saving");
-    const res = await commitIntakeCard({
-      ...f,
-      // Persist the model's confidence for audit / later re-check.
-      vision_confidence: f.confidences ? { ...f.confidences, overall: f.overall_confidence } : undefined,
-      front: front ?? undefined,
-      back: back ?? undefined,
-      // The uncropped frames, so a crop is never the only record of an edge.
-      front_original: frontOriginal ?? undefined,
-      back_original: backOriginal ?? undefined,
-    });
-    setBusy(null);
-    if (!res.ok) { setErr(res.error ?? "Save failed."); return; }
-    // The card saved but a photo didn't — say so rather than let it surface
-    // later as a listing with no image.
-    if (res.warning) { setErr(res.warning); }
-    setSavedCount((n) => n + 1);
-    reset();
+    try {
+      // Photos travel as base64, which inflates by ~37%. Over the server
+      // action's body limit the request dies in transit — no card, no error,
+      // just a spinner. Shrink to fit rather than let the save fail.
+      const fit = await fitPayload([front, back, frontOriginal, backOriginal]);
+      const [fFront, fBack, fFrontSrc, fBackSrc] = fit.urls;
+      const res = await commitIntakeCard({
+        ...f,
+        // Persist the model's confidence for audit / later re-check.
+        vision_confidence: f.confidences ? { ...f.confidences, overall: f.overall_confidence } : undefined,
+        front: fFront ?? undefined,
+        back: fBack ?? undefined,
+        // The uncropped frames, so a crop is never the only record of an edge.
+        front_original: fFrontSrc ?? undefined,
+        back_original: fBackSrc ?? undefined,
+      });
+      if (!res.ok) { setErr(res.error ?? "Save failed."); return; }
+      // The card saved but a photo didn't — say so rather than let it surface
+      // later as a listing with no image.
+      if (res.warning) { setErr(res.warning); }
+      setSavedCount((n) => n + 1);
+      reset();
+    } catch (e) {
+      // A server action can REJECT — expired session, dropped connection, a
+      // body the platform refused. Without this the button sat on "Saving…"
+      // for ever with nothing said and no way back. Note what is NOT here:
+      // reset(). The photos and every typed field stay exactly as they are, so
+      // the retry costs a tap rather than the whole card.
+      setErr(
+        (e instanceof Error && e.message ? e.message + " — " : "") +
+        "The save didn't go through and nothing was booked. Your photos and details are still here — tap Book card to try again.",
+      );
+    } finally {
+      setBusy(null);
+    }
   }
   function reset() {
     setFront(null); setBack(null); setFrontOriginal(null); setBackOriginal(null);

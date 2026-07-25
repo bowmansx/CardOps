@@ -47,11 +47,22 @@ export default function ImportPage() {
 
   async function commit() {
     setBusy(true); setErr(null);
-    const res = await importCards(rows);
-    setBusy(false);
-    if (!res.ok) { setErr(res.error ?? "Import failed."); return; }
-    setDone(res.inserted ?? 0);
-    setRows([]);
+    try {
+      const res = await importCards(rows);
+      if (!res.ok) { setErr(res.error ?? "Import failed."); return; }
+      setDone(res.inserted ?? 0);
+      setRows([]);
+    } catch (e) {
+      // Rows are kept: a rejection must not make you re-pick the file. A big
+      // CSV can also exceed the action body limit, which rejects rather than
+      // returning — hence the hint.
+      setErr(
+        (e instanceof Error && e.message ? e.message + " — " : "") +
+        "Nothing was imported. If the file is very large, split it and try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

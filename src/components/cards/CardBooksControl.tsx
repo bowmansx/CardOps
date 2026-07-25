@@ -33,17 +33,22 @@ export function CardBooksControl({
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
     setErr(null);
-    const r = await fetch("/api/cards/bulk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: [cardId], patch: body }),
-    });
-    const txt = await r.text();
-    let d: { error?: string };
-    try { d = JSON.parse(txt); } catch { setBusy(false); throw new Error(`Request failed (HTTP ${r.status}).`); }
-    setBusy(false);
-    if (!r.ok) throw new Error(d.error || "Couldn't update.");
-    router.refresh();
+    // finally, not a clear on each exit: a dropped connection rejects fetch
+    // itself, which used to skip every setBusy(false) and strand the control.
+    try {
+      const r = await fetch("/api/cards/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [cardId], patch: body }),
+      });
+      const txt = await r.text();
+      let d: { error?: string };
+      try { d = JSON.parse(txt); } catch { throw new Error(`Request failed (HTTP ${r.status}).`); }
+      if (!r.ok) throw new Error(d.error || "Couldn't update.");
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function setTreatment(next: string) {

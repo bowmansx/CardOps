@@ -7,6 +7,7 @@ import { commitSpeedBatch, applyBatchStrategy, type SpeedItem } from "@/app/card
 import { Lightbox } from "./Lightbox";
 import { CameraSheet, type CapturedShot } from "./CameraSheet";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
+import { fitPayload } from "@/lib/cards/payload";
 
 // Speed Book: front-only rapid capture with NO external API calls (works
 // dormant). New shots inherit the current category/zone defaults. Committing a
@@ -46,15 +47,37 @@ export function SpeedBook({
 
   async function book() {
     setErr(null); setBusy(true);
-    const res = await commitSpeedBatch(items.map(({ front, front_original, sport_category, zone }) => ({ front, front_original, sport_category, zone })), Number(lotCost));
-    if (!res.ok) { setBusy(false); setErr(res.error ?? "Batch failed."); return; }
-    // Stamp the chosen pricing standard across the lot (default column is
-    // 'standard'; this applies whatever was picked).
-    if (res.ids?.length && (strategy !== "standard" || entity || treatment !== "dealer")) await applyBatchStrategy(res.ids, strategy, undefined, entity || undefined, treatment);
-    setBusy(false);
-    if (res.warning) setErr(res.warning); // booked, but say so if a photo didn't store
-    setDone({ n: res.inserted ?? items.length, poolTotal: res.poolTotal });
-    setItems([]); setLotCost(""); setAsking(false);
+    try {
+      // A whole batch of base64 photos is the largest payload the app sends.
+      // Shrink to fit the server action's body limit rather than have the
+      // request die in transit with nothing booked and nothing said.
+      const shots = items.map((i) => i.front);
+      const srcs = items.map((i) => i.front_original ?? null);
+      const fit = await fitPayload([...shots, ...srcs]);
+      const n = items.length;
+      const payload = items.map(({ sport_category, zone }, i) => ({
+        front: fit.urls[i] as string,
+        front_original: fit.urls[n + i] ?? undefined,
+        sport_category, zone,
+      }));
+      const res = await commitSpeedBatch(payload, Number(lotCost));
+      if (!res.ok) { setErr(res.error ?? "Batch failed."); return; }
+      // Stamp the chosen pricing standard across the lot (default column is
+      // 'standard'; this applies whatever was picked).
+      if (res.ids?.length && (strategy !== "standard" || entity || treatment !== "dealer")) await applyBatchStrategy(res.ids, strategy, undefined, entity || undefined, treatment);
+      if (res.warning) setErr(res.warning); // booked, but say so if a photo didn't store
+      setDone({ n: res.inserted ?? items.length, poolTotal: res.poolTotal });
+      setItems([]); setLotCost(""); setAsking(false);
+    } catch (e) {
+      // The batch is NOT cleared: a rejection must never cost you the stack
+      // you just photographed.
+      setErr(
+        (e instanceof Error && e.message ? e.message + " — " : "") +
+        "The batch didn't go through and nothing was booked. Your cards are still here — tap Book to try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (done) {

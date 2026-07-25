@@ -143,6 +143,20 @@ const treatmentOf = (t?: string) => (t && TREATMENTS.includes(t) ? t : "dealer")
 export async function commitIntakeCard(
   input: IntakeInput,
 ): Promise<{ ok: boolean; id?: string; sku?: string; error?: string; warning?: string }> {
+  // A server action that THROWS rejects the client's promise instead of
+  // returning — the caller gets no result to inspect, which is how a save
+  // failure turned into a spinner that never stopped. Every failure in here
+  // comes back as a value the screen can render.
+  try {
+    return await commitIntakeCardInner(input);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "The save failed." };
+  }
+}
+
+async function commitIntakeCardInner(
+  input: IntakeInput,
+): Promise<{ ok: boolean; id?: string; sku?: string; error?: string; warning?: string }> {
   const { supabase } = await authed();
   // Cost is REQUIRED (0 allowed): un-costed cards are how basis silently
   // corrupted under the old global pool. Lot-funded intake comes via Speed Book.
