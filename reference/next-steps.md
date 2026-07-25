@@ -2,12 +2,11 @@
 
 ## ✅ STATE AS OF 2026-07-25 (end of session)
 
-**One migration is waiting to be pasted:** `20260741000000_photo_prefs.sql`
-(P2 — capture settings, presets and defaults). Everything before it is applied,
-deployed and verified.
+**Everything is applied.** One fix is committed but NOT yet deployed — see
+step 0 below.
 
-- **All migrations applied** through `20260740000000` (credit metering, card
-  identities, investor assets, photo provenance + storage).
+- **All migrations applied** through `20260741000000` (credit metering, card
+  identities, investor assets, photo provenance + storage, photo prefs).
 - **Money-core harness: 39 of 39 PASSED** against the live database — basis
   draw, the sold boundary both ways, double-sell refusal, lot balances,
   cross-user isolation, credit FIFO + expiry, identity resolution, shared
@@ -24,11 +23,18 @@ tenant's out-of-possession assets through a view missing `security_invoker`.
 
 ### Next, in order
 
-0. **Paste `supabase/migrations/20260741000000_photo_prefs.sql`**, then re-run
-   the harness — it is now **42** assertions (40–42 cover the crop-margin
-   floor, the burst bound, and the keep-originals audit trail). Until it is
-   pasted, the settings screen falls back to defaults and saving photo settings
-   returns an error; nothing else is affected.
+0. **Merge and deploy `788b757`** — booking a card hangs for ever on
+   "Saving…" in production and no card is created. Photos go to the server
+   action as base64; base64 inflates ~37%; `bodySizeLimit` was unset so Next's
+   1 MB default applied; and 041b0c8 (deployed 13:41 on 2026-07-25) started
+   sending the uncropped originals too, which pushed a single front photo over
+   the cap. The request was refused before the action ran. `save()` had no
+   try/catch, so the 413 rendered as a frozen spinner rather than an error.
+   Fixed by a 4 MB limit, a client-side payload fitter, an action that returns
+   its failures, and `finally` on all five stranded surfaces.
+   Re-run the harness after deploying — it is now **42** assertions (40–42
+   cover the crop-margin floor, the burst bound, and the keep-originals audit
+   trail).
 1. **Put a real box of cards through the scanner.** Everything above was
    groundwork for this. Log where the capture flow actually hurts — that
    friction list is what Wave A gets designed against, per the standing
