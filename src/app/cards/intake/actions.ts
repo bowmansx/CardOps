@@ -290,7 +290,13 @@ export async function applyBatchScan(
   return { ok: true };
 }
 
-export type SpeedItem = { front?: string; sport_category?: string; zone?: string };
+export type SpeedItem = {
+  front?: string;
+  /** The uncropped camera frame behind `front`, when the scanner kept one. */
+  front_original?: string;
+  sport_category?: string;
+  zone?: string;
+};
 
 // Speed Book: rapid front-only batch. GUARDRAIL — a lot cost is REQUIRED so the
 // pool average never gets deflated by $0-basis cards. The pool ledger is written
@@ -298,7 +304,7 @@ export type SpeedItem = { front?: string; sport_category?: string; zone?: string
 export async function commitSpeedBatch(
   items: SpeedItem[],
   lotCost: number,
-): Promise<{ ok: boolean; inserted?: number; poolTotal?: number; ids?: string[]; error?: string }> {
+): Promise<{ ok: boolean; inserted?: number; poolTotal?: number; ids?: string[]; error?: string; warning?: string }> {
   const { supabase } = await authed();
   if (!items.length) return { ok: false, error: "No cards in the batch." };
   if (!(lotCost > 0)) return { ok: false, error: "Enter the lot cost for this batch (required)." };
@@ -319,13 +325,20 @@ export async function commitSpeedBatch(
   if (error) return { ok: false, error: error.message };
   const result = data as { inserted: number; ids: string[]; pool_total: number };
 
-  // Best-effort: attach each front photo to its card (order matches payload).
+  // Attach each front photo to its card (order matches payload), keeping the
+  // uncropped frame alongside it. A photo that fails to store is reported
+  // rather than dropped — the cards are already booked either way.
+  const photoWarnings: string[] = [];
   for (let i = 0; i < result.ids.length; i++) {
-    await uploadPhoto(supabase, result.ids[i], "front", items[i]?.front);
+    const w = await uploadPhoto(supabase, result.ids[i], "front", items[i]?.front, items[i]?.front_original);
+    if (w) photoWarnings.push(`card ${i + 1}: ${w}`);
   }
 
   revalidatePath("/cards");
   // ids in insertion order (matches `items`) — Batch (AI) mode uses them to
   // stamp the chosen strategy and pair each card with its photo for scanning.
-  return { ok: true, inserted: result.inserted, poolTotal: result.pool_total, ids: result.ids };
+  return {
+    ok: true, inserted: result.inserted, poolTotal: result.pool_total, ids: result.ids,
+    ...(photoWarnings.length ? { warning: `${photoWarnings.length} photo(s) not saved: ${photoWarnings.slice(0, 3).join(" · ")}` } : {}),
+  };
 }
