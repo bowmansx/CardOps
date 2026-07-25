@@ -367,12 +367,121 @@ begin
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
+  -- ══ investor assets (migration 20260739) ════════════════════════════════
+  -- A FRESH, UNSOLD card. Do not reuse v_solo here: it was sold in test 2, so
+  -- any status change on it is refused by the sold-boundary guard — which
+  -- would make the pledged-collateral test below pass without ever exercising
+  -- the guard it claims to test.
+  insert into public.cards (user_id, sku, player, status, individual_basis)
+    values (v_uid, 'TST-2026-000007', 'AssetCard', 'booked', 1000.00)
+    returning id into v_solo;
+
+  -- ── 25. tax_bucket cannot be changed by a plain UPDATE ────────────────────
+  v_name := '25. tax_bucket reclass refused as a field edit';
+  begin
+    update public.cards set tax_bucket = 'dealer' where id = v_solo;
+    v_ok := false; v_note := 'plain update was allowed';
+  exception when others then
+    v_ok := true; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 26. reclass via the RPC works and demands a reason ────────────────────
+  v_name := '26. reclass needs a reason, then records one';
+  begin
+    begin
+      perform public.card_reclass_tax_bucket(v_solo, 'dealer', '   ');
+      v_ok := false; v_note := 'empty reason accepted';
+    exception when others then
+      v_out := public.card_reclass_tax_bucket(v_solo, 'dealer', 'moved to flip inventory');
+      select tax_bucket_source into v_note from public.cards where id = v_solo;
+      v_ok := (v_out->>'to') = 'dealer' and v_note = 'explicit_override';
+      v_note := format('to=%s source=%s', v_out->>'to', v_note);
+    end;
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 27. a move out of possession demands an expected return date ──────────
+  v_name := '27. consignment without a due date is refused';
+  begin
+    perform public.card_move_asset(v_solo, 'at_auction_house_on_consignment', 'Goldin');
+    v_ok := false; v_note := 'accepted with no expected_back';
+  exception when others then
+    v_ok := true; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 28. a valid move writes the chain-of-custody row ──────────────────────
+  v_name := '28. move records custody, card state follows';
+  begin
+    perform public.card_move_asset(v_solo, 'out_for_crossover', 'PSA', null,
+                                   (current_date + 90), 'TRK1', 100.00, 'harness');
+    select count(*) into v_cnt from public.card_custody_log
+     where card_id = v_solo and to_state = 'out_for_crossover';
+    select asset_state into v_note from public.cards where id = v_solo;
+    v_ok := v_cnt = 1 and v_note = 'out_for_crossover';
+    v_note := format('log_rows=%s state=%s', v_cnt, v_note);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 29. the custody log is append-only ────────────────────────────────────
+  v_name := '29. custody log refuses edits and deletes';
+  begin
+    update public.card_custody_log set counterparty = 'edited' where card_id = v_solo;
+    v_ok := false; v_note := 'update was allowed';
+  exception when others then
+    v_ok := true; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 30. pledged collateral cannot be listed or sold ───────────────────────
+  v_name := '30. pledged asset refuses listing/sale';
+  begin
+    perform public.card_move_asset(v_solo, 'pledged_as_collateral', 'Lender', null, (current_date + 30));
+    begin
+      update public.cards set status = 'listed' where id = v_solo;
+      v_ok := false; v_note := 'listing a pledged asset was allowed';
+    exception when others then
+      v_ok := true; v_note := sqlerrm;
+    end;
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 31. a documented asset cannot be deleted out from under its evidence ──
+  v_name := '31. delete refused while documents exist';
+  begin
+    insert into public.card_documents (card_id, user_id, proves, kind, path)
+      values (v_solo, v_uid, 'basis', 'appraisal', 'harness/doc.pdf');
+    begin
+      delete from public.cards where id = v_solo;
+      v_ok := false; v_note := 'card with evidence was deleted';
+    exception when others then
+      v_ok := true; v_note := sqlerrm;
+    end;
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 24 PASSED · %s FAILED'
+    || '%s of 31 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 24 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 31 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;

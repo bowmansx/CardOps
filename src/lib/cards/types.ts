@@ -36,6 +36,36 @@ export const SPORT_CATEGORIES: string[] = CATEGORIES.map((c) => c.key);
 export const CARD_STATUSES = [
   "intake", "review", "booked", "listed", "sold", "hold", "graded_out", "archived",
 ] as const;
+// Tax classification. THREE values, not two: `hobby` is not a softer `investment`
+// — it decides whether a LOSS is deductible at all (§183 disallows hobby losses,
+// §165(c)(2) allows investment ones). Collapsing them would quietly change the
+// answer to a question the IRS asks.
+export const TAX_BUCKETS = ["investment", "dealer", "hobby"] as const;
+export type TaxBucket = (typeof TAX_BUCKETS)[number];
+
+// Physical disposition of an asset, orthogonal to the sales funnel `status`.
+// A vaulted asset is not "hold" — it has a funnel position AND a location.
+export const ASSET_STATES = [
+  "in_my_possession", "at_appraisal", "out_for_crossover",
+  "at_auction_house_on_consignment", "vaulted", "pledged_as_collateral",
+  "crossover_failed",
+] as const;
+export type AssetState = (typeof ASSET_STATES)[number];
+
+// States that mean the asset is out of your hands and must carry a return date.
+export const ASSET_STATES_REQUIRING_RETURN: readonly AssetState[] = [
+  "at_appraisal", "out_for_crossover", "at_auction_house_on_consignment",
+  "pledged_as_collateral", "crossover_failed",
+];
+
+// What a document proves. This is what turns a folder of PDFs into an evidence
+// packet — and what lets the app say "your basis has no supporting document".
+export const DOCUMENT_PROVES = [
+  "basis", "reported_value", "grade", "insured_value", "custody", "title",
+  "provenance", "other",
+] as const;
+export type DocumentProves = (typeof DOCUMENT_PROVES)[number];
+
 export const ZONES = ["GR", "RP", "BULK", "LIST", "HOLD"] as const;
 export const GRADERS = ["PSA", "BGS", "SGC", "CGC", "HGA", "ISA", "GMA", "OTHER"] as const;
 export const ACQUISITION_METHODS = [
@@ -59,6 +89,14 @@ export type Card = {
   // The shared print identity this card resolves to (set by DB trigger).
   // Null when the card is too sparse to fingerprint — no player and no set.
   identity_id: string | null;
+  // Tax classification: recorded, never determined by the app. Inherited from
+  // the purchase lot at creation; changed only via card_reclass_tax_bucket.
+  tax_bucket: TaxBucket | null;
+  tax_bucket_source: "lot_default" | "explicit_override" | null;
+  tax_bucket_set_at: string | null;
+  tax_bucket_reason: string | null;
+  // Physical disposition, ORTHOGONAL to `status`. Null for ordinary inventory.
+  asset_state: AssetState | null;
   is_rookie: boolean | null;
   is_auto: boolean | null;
   is_relic: boolean | null;
