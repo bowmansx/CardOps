@@ -26,20 +26,19 @@ tenant's out-of-possession assets through a view missing `security_invoker`.
 
 ### Next, in order
 
-0. **Merge and deploy [PR #3](https://github.com/bowmansx/CardOps/pull/3).**
-   Two things are waiting in it, and the first is a live outage:
-   - **Booking a card hangs for ever on "Saving…"** in production and no card
-     is created. Photos go to the server action as base64; base64 inflates
-     ~37%; `bodySizeLimit` was unset so Next's 1 MB default applied; and
-     041b0c8 (deployed 13:41 on 2026-07-25) started sending the uncropped
-     originals too, pushing a single front photo over the cap. The request was
-     refused before the action ran. `save()` had no try/catch, so the 413
-     rendered as a frozen spinner rather than an error. Fixed by a 4 MB limit,
-     a client-side payload fitter, an action that returns its failures, and
-     `finally` on all five stranded surfaces.
-   - **Cost basis is optional now**, with an editable breakdown. The schema for
-     it is already live; until the code deploys, the new columns simply sit
-     unused.
+0. **Paste `supabase/migrations/20260743000000_photo_bucket_limits.sql`**, then
+   merge the direct-upload PR. Photos now go straight from the browser to
+   Supabase Storage; only paths reach the server. That removed the accidental
+   size ceiling the server-action body limit used to provide, so this migration
+   puts a real one on the bucket (25 MB, images only) and adds
+   `card_photo_orphans()` for the sweep below.
+
+   **Known gap, deliberately not built:** nothing DELETES an orphaned object.
+   If an upload lands and the recording call fails, the app now says so and
+   offers Retry photos — but bytes already abandoned stay in the bucket,
+   invisible to `user_storage_usage` (which sums `card_photos.bytes`). Run
+   `select * from card_photo_orphans();` occasionally. A real sweeper wants to
+   run as a cron, and crons are still fenced off by the cutover interlock.
 
 1. **Put a real box of cards through the scanner.** Everything above was
    groundwork for this. Log where the capture flow actually hurts — that

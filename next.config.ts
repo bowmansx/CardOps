@@ -13,13 +13,12 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   experimental: {
-    // Intake posts card photos to a SERVER ACTION as base64 data URLs, and
-    // base64 inflates by ~37%. Next's default cap is 1 MB — a front and back
-    // pair at 1600px/q0.85 lands either side of that, so saves failed with a
-    // 413 the client never saw (the action never ran, so no card was created
-    // and no error came back). 4 MB is just under Vercel's own 4.5 MB request
-    // ceiling; the client also shrinks anything over CAP before sending, so
-    // this is the backstop, not the plan.
+    // Card photos no longer travel through server actions at all — the browser
+    // uploads them straight to Supabase Storage and only the paths are posted
+    // (that is what fixed booking a card hanging for ever on "Saving…"). This
+    // limit still matters for the actions that DO carry bulk: CSV import, and
+    // any future one. Next's default is 1 MB; 4 MB sits just under Vercel's
+    // own 4.5 MB request ceiling.
     serverActions: { bodySizeLimit: "4mb" },
   },
   async headers() {

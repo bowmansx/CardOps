@@ -6,8 +6,10 @@ import { SPORT_CATEGORIES, ZONES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/t
 import { commitSpeedBatch, applyBatchStrategy, type SpeedItem } from "@/app/cards/intake/actions";
 import { Lightbox } from "./Lightbox";
 import { CameraSheet, type CapturedShot } from "./CameraSheet";
+import { recordCardPhotos } from "@/app/cards/intake/actions";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
-import { fitPayload } from "@/lib/cards/payload";
+import { uploadCardPhotos, type PhotoShot } from "@/lib/cards/upload";
+import { createClient } from "@/lib/supabase/client";
 
 // Speed Book: front-only rapid capture with NO external API calls (works
 // dormant). New shots inherit the current category/zone defaults. Committing a
@@ -31,7 +33,10 @@ export function SpeedBook({
   const [lotCost, setLotCost] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState<{ n: number; poolTotal?: number } | null>(null);
+  // `problems` rides ALONG with the done state. It used to go into `err`,
+  // which the success screen never renders — so a whole batch of photos could
+  // fail and the user would see an unqualified "Booked 40 cards."
+  const [done, setDone] = useState<{ n: number; poolTotal?: number; problems?: string[] } | null>(null);
   const [view, setView] = useState<string | null>(null);
 
   // Speed Book now uses the same in-app scanner as the other intake paths, so
@@ -47,34 +52,83 @@ export function SpeedBook({
 
   async function book() {
     setErr(null); setBusy(true);
+    // The cards and the purchase lot land ATOMICALLY at commitSpeedBatch.
+    // Everything after that runs against records that already exist, so a
+    // failure there may never be reported as "nothing was booked" - that reads
+    // as an invitation to tap Book again, and speed_book_commit has no
+    // idempotency key, so a second tap writes a SECOND lot and a second set of
+    // cards. Basis would silently double.
+    let committed = false;
+    const problems: string[] = [];
     try {
-      // A whole batch of base64 photos is the largest payload the app sends.
-      // Shrink to fit the server action's body limit rather than have the
-      // request die in transit with nothing booked and nothing said.
-      const shots = items.map((i) => i.front);
-      const srcs = items.map((i) => i.front_original ?? null);
-      const fit = await fitPayload([...shots, ...srcs]);
-      const n = items.length;
-      const payload = items.map(({ sport_category, zone }, i) => ({
-        front: fit.urls[i] as string,
-        front_original: fit.urls[n + i] ?? undefined,
-        sport_category, zone,
-      }));
-      const res = await commitSpeedBatch(payload, Number(lotCost));
+      // Identity fields only - a 40-card stack is now no larger on the wire
+      // than a single card. The photos follow, straight from the browser.
+      const res = await commitSpeedBatch(
+        items.map(({ sport_category, zone }) => ({ sport_category, zone })),
+        Number(lotCost),
+      );
       if (!res.ok) { setErr(res.error ?? "Batch failed."); return; }
+      committed = true;
+
       // Stamp the chosen pricing standard across the lot (default column is
       // 'standard'; this applies whatever was picked).
-      if (res.ids?.length && (strategy !== "standard" || entity || treatment !== "dealer")) await applyBatchStrategy(res.ids, strategy, undefined, entity || undefined, treatment);
-      if (res.warning) setErr(res.warning); // booked, but say so if a photo didn't store
-      setDone({ n: res.inserted ?? items.length, poolTotal: res.poolTotal });
+      if (res.ids?.length && (strategy !== "standard" || entity || treatment !== "dealer")) {
+        const applied = await applyBatchStrategy(res.ids, strategy, undefined, entity || undefined, treatment);
+        // Checked, not fired and forgotten: a failure here silently reverts the
+        // picked tax treatment and owning business to their defaults.
+        if (!applied.ok) problems.push(`pricing standard / business not applied: ${applied.error ?? "unknown error"}`);
+      }
+
+      // Photos, per card. The cards are booked; a failure here costs an image,
+      // never the booking, so it is collected and reported.
+      const ids = res.ids ?? [];
+      if (ids.length) {
+        const { data: { user } } = await createClient().auth.getUser();
+        if (!user) {
+          problems.push("your session ended before the photos uploaded");
+        } else {
+          for (let i = 0; i < ids.length; i++) {
+            const it = items[i];
+            if (!it?.front) continue;
+            const shots: PhotoShot[] = [];
+            let srcIndex: number | undefined;
+            if (it.front_original) { srcIndex = 0; shots.push({ dataUrl: it.front_original, kind: "front", variant: "original" }); }
+            shots.push({
+              dataUrl: it.front, kind: "front",
+              variant: it.front_original ? "processed" : "original",
+              derivedFromIndex: srcIndex,
+              cropGeometry: it.front_original
+                ? { margin_pct: photoPrefs.auto_crop === "tight" ? 0 : photoPrefs.crop_margin_pct, deskewed: false }
+                : null,
+            });
+            const up = await uploadCardPhotos(user.id, ids[i], shots);
+            if (up.failures.length) problems.push(`card ${i + 1}: ${up.failures.join("; ")}`);
+            if (up.photos.length) {
+              const rec = await recordCardPhotos(ids[i], up.photos);
+              if (!rec.ok) problems.push(`card ${i + 1}: ${rec.error}`);
+              else if (rec.warning) problems.push(`card ${i + 1}: ${rec.warning}`);
+            }
+          }
+        }
+      }
+      if (res.warning) problems.push(res.warning);
+
+      // Problems travel WITH the done state. Putting them in `err` meant they
+      // rendered on a panel the success screen replaces - set, then invisible.
+      setDone({ n: res.inserted ?? items.length, poolTotal: res.poolTotal, problems });
       setItems([]); setLotCost(""); setAsking(false);
     } catch (e) {
-      // The batch is NOT cleared: a rejection must never cost you the stack
-      // you just photographed.
-      setErr(
-        (e instanceof Error && e.message ? e.message + " — " : "") +
-        "The batch didn't go through and nothing was booked. Your cards are still here — tap Book to try again.",
-      );
+      const why = e instanceof Error && e.message ? e.message : "the connection dropped";
+      if (committed) {
+        // The cards ARE booked. Land on the done screen saying what is missing.
+        problems.push(why);
+        setDone({ n: items.length, poolTotal: undefined, problems });
+        setItems([]); setLotCost(""); setAsking(false);
+      } else {
+        // The batch is NOT cleared: a rejection must never cost you the stack
+        // you just photographed.
+        setErr(`${why} - the batch didn't go through and nothing was booked. Your cards are still here - tap Book to try again.`);
+      }
     } finally {
       setBusy(false);
     }
@@ -85,7 +139,22 @@ export function SpeedBook({
       <div className="mt-8 rounded-2xl border border-pos/30 bg-pos/5 p-6 text-center">
         <CheckCircle2 size={40} className="mx-auto text-pos" />
         <p className="mt-3 font-bold text-ink">Booked {done.n} cards.</p>
-        {done.poolTotal != null && <p className="figures mt-1 text-xs text-ink/60">Pool total now ${done.poolTotal.toFixed(2)}</p>}
+        {done.poolTotal != null && <p className="figures mt-1 text-xs text-ink/60">Lot cost ${done.poolTotal.toFixed(2)}</p>}
+        {!!done.problems?.length && (
+          <div className="mt-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-left">
+            <p className="text-[11px] font-bold text-amber-800">
+              The cards are booked, but {done.problems.length} thing{done.problems.length === 1 ? "" : "s"} didn&apos;t finish:
+            </p>
+            <ul className="mt-1 space-y-0.5 text-[11px] text-amber-800">
+              {done.problems.slice(0, 6).map((p, i) => <li key={i}>· {p}</li>)}
+              {done.problems.length > 6 && <li>· …and {done.problems.length - 6} more</li>}
+            </ul>
+            <p className="mt-1.5 text-[10px] text-amber-800/80">
+              Speed Book cards carry no name or number, so a card with no photo is hard to identify later —
+              find them under Cards and re-shoot before the pile grows.
+            </p>
+          </div>
+        )}
         <button onClick={() => setDone(null)} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-flag px-5 py-3 font-bold text-white active:scale-95">
           <Zap size={17} /> New batch
         </button>

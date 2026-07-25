@@ -6,6 +6,7 @@ import { Camera, Zap, X, CheckCircle2, Loader2, Sparkles } from "lucide-react";
 import { SPORT_CATEGORIES, ZONES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import {
   commitSpeedBatch,
+  recordCardPhotos,
   applyBatchStrategy,
   applyBatchScan,
   type SpeedItem,
@@ -13,6 +14,8 @@ import {
 } from "@/app/cards/intake/actions";
 import { CameraSheet } from "./CameraSheet";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
+import { uploadCardPhotos } from "@/lib/cards/upload";
+import { createClient } from "@/lib/supabase/client";
 import { Lightbox } from "./Lightbox";
 
 type Phase = "setup" | "booking" | "scanning" | "done";
@@ -101,7 +104,10 @@ export function BatchIntake({
     setPhase("booking");
     let booked = false; // did the atomic commit succeed? (governs error recovery)
     try {
-      const payload = items.map(({ front, sport_category, zone }) => ({ front, sport_category, zone }));
+      // Identity fields only: the photos go straight from the browser to
+      // storage once the cards exist, so batch size no longer decides whether
+      // the request fits inside the server-action body limit.
+      const payload = items.map(({ sport_category, zone }) => ({ sport_category, zone }));
       const res = await commitSpeedBatch(payload, Number(lotCost));
       if (!res.ok) {
         setErr(res.error ?? "Batch failed.");
@@ -116,6 +122,28 @@ export function BatchIntake({
       if (ids.length) {
         const applied = await applyBatchStrategy(ids, strategy, storage, entity || undefined, treatment);
         if (!applied.ok) setErr("Booked, but couldn't apply the pricing standard / storage — set them on the review pile.");
+      }
+
+      // Photos, per card. The cards are already booked, so a failure here
+      // costs an image and is reported — it never unwinds the batch.
+      if (ids.length) {
+        const { data: { user } } = await createClient().auth.getUser();
+        const misses: string[] = [];
+        for (let i = 0; i < ids.length && user; i++) {
+          const front = items[i]?.front;
+          if (!front) continue;
+          const up = await uploadCardPhotos(user.id, ids[i], [{ dataUrl: front, kind: "front", variant: "original" }]);
+          if (up.failures.length) misses.push(`card ${i + 1}: ${up.failures.join("; ")}`);
+          if (up.photos.length) {
+            const rec = await recordCardPhotos(ids[i], up.photos);
+            if (!rec.ok) misses.push(`card ${i + 1}: ${rec.error}`);
+            // A partial record is ok:true WITH a warning - reading only !ok
+            // threw away the news that a photo never made it into the table.
+            else if (rec.warning) misses.push(`card ${i + 1}: ${rec.warning}`);
+          }
+        }
+        if (!user) misses.push("your session ended before the photos uploaded");
+        if (misses.length) setErr(`Booked. ${misses.length} photo problem(s): ${misses.slice(0, 3).join(" · ")}`);
       }
 
       // Background AI pass: sequential so the phone stays responsive; each card
