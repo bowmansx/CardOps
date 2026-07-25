@@ -33,7 +33,9 @@ function Toggle({ on, set, label }: { on: boolean; set: (v: boolean) => void; la
 export function CardEstimates({
   cardId, aiOn, initial, initialBalance,
 }: {
-  cardId: string; aiOn: boolean; initial: Record<string, Estimate>; initialBalance: number;
+  // initialBalance is null when the balance couldn't be read — shown as "—",
+  // never as 0 credits (rule 4).
+  cardId: string; aiOn: boolean; initial: Record<string, Estimate>; initialBalance: number | null;
 }) {
   const [estimates, setEstimates] = useState<Record<string, Estimate>>(initial ?? {});
   const [balance, setBalance] = useState(initialBalance);
@@ -65,9 +67,12 @@ export function CardEstimates({
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Estimate failed.");
       setEstimates((p) => ({ ...p, [mode]: d.estimate }));
-      setBalance(d.balance);
+      setBalance(d.balance ?? null);
       setOpen(mode);
-      if (d.cache_warning) setErr(d.cache_warning); // estimate shown, storage failed — say so
+      // Estimate shown but something money-shaped went wrong — say so rather
+      // than leaving a silent divergence (rules 4/8).
+      if (d.cache_warning) setErr(d.cache_warning);
+      else if (d.debit_warning) setErr(d.debit_warning);
     } catch (e) { setErr(e instanceof Error ? e.message : "Estimate failed."); } finally { setBusy(null); }
   }
 
@@ -77,7 +82,9 @@ export function CardEstimates({
         <h2 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/50">
           <Brain size={13} className="text-flag" /> CardOps Estimated Price
         </h2>
-        <span className="figures inline-flex items-center gap-1 text-[10px] text-ink/45"><Coins size={11} /> {balance} credits</span>
+        <span className="figures inline-flex items-center gap-1 text-[10px] text-ink/45" title={balance === null ? "Balance couldn't be read" : undefined}>
+          <Coins size={11} /> {balance === null ? "—" : balance} credits
+        </span>
       </div>
 
       {/* Cost dials — the user controls their spend */}

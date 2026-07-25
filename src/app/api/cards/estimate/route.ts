@@ -24,10 +24,17 @@ const EST_COLS = "mode, value, low, high, confidence, rationale, sources, credit
 const EST_MODES = ["standard_plus", "all_sales_plus"] as const;
 export const CARD_COLS = "id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, market_value, manual_price";
 
-// Balance via the SQL aggregate (credit_balance() = sum for auth.uid()), not a
-// client-side sum of the whole append-only ledger. Degrades to 0 pre-migration.
-async function balanceOf(supabase: Awaited<ReturnType<typeof createClient>>): Promise<number> {
-  const { data } = await supabase.rpc("credit_balance");
+// Balance via the SQL aggregate (credit_balance() = unexpired remainders for
+// auth.uid()), not a client-side sum of the whole append-only ledger.
+// Returns NULL when the read fails: a money figure renders complete or flagged,
+// never 0-as-fact (rule 4). The function itself coalesces an empty ledger to 0,
+// so a 0 from a successful call is a real zero.
+async function balanceOf(supabase: Awaited<ReturnType<typeof createClient>>): Promise<number | null> {
+  const { data, error } = await supabase.rpc("credit_balance");
+  if (error) {
+    console.error(`[credits] balance unreadable: ${error.message}`);
+    return null;
+  }
   return Number(data ?? 0);
 }
 
@@ -111,6 +118,10 @@ export async function POST(request: Request) {
         credits_spent: credits, model: res.model, created_by: user.id,
       }).select("id, created_at").maybeSingle()
     : { data: null, error: null };
+  // Track whether the debit ACTUALLY landed. Telemetry must record what hit
+  // the ledger, not what we meant to charge — otherwise the owner's $/credit
+  // divides real dollars by credits that were never billed.
+  let debitFailed = false;
   if (svc && credits > 0 && !cacheErr) {
     // FIFO draw from the soonest-expiring grants; records a shortfall rather
     // than refusing (the compute already happened — the gate above is where
@@ -118,12 +129,16 @@ export async function POST(request: Request) {
     const { error: debErr } = await svc.rpc("credit_spend", {
       p_user: user.id, p_amount: credits, p_reason: `estimate:${mode}`, p_ref: body.cardId,
     });
-    if (debErr) console.error(`estimate ${body.cardId}: stored but credits not debited (${debErr.message})`);
+    if (debErr) {
+      debitFailed = true;
+      console.error(`estimate ${body.cardId}: stored but credits not debited (${debErr.message})`);
+    }
   }
+  const charged = !cacheErr && !debitFailed ? credits : 0;
   if (svc) {
     await recordAiUsage(svc, {
       userId: user.id, feature: `estimate:${mode}`, model: res.model,
-      usage: res.usage, creditsCharged: cacheErr ? 0 : credits, ref: body.cardId,
+      usage: res.usage, creditsCharged: charged, ref: body.cardId,
     });
   }
 
@@ -136,6 +151,9 @@ export async function POST(request: Request) {
     // A failed cache insert is worth showing: the estimate wasn't stored, so
     // the daily auto-run will re-select (and re-bill) this card tomorrow.
     cache_warning: cacheErr ? `Estimate shown but NOT saved (${cacheErr.message}) — not charged; it may re-run tomorrow.` : undefined,
+    // A failed debit is a money state the user must be able to see, not a
+    // line in a server log nobody reads (rule 8).
+    debit_warning: debitFailed ? "Estimate saved, but your credits could not be debited — this run is unbilled." : undefined,
     credits,
     balance: await balanceOf(supabase),
   });

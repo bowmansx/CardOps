@@ -17,7 +17,8 @@ import { grantTestCredits, setEnforcement } from "./actions";
 export const dynamic = "force-dynamic";
 
 type UsageRow = {
-  feature: string; model: string; input_tokens: number; output_tokens: number;
+  user_id: string; vendor: string; cost_model: string; feature: string;
+  units: number; input_tokens: number; output_tokens: number;
   cache_write_tokens: number; cache_read_tokens: number;
   cost_usd: number | null; credits_charged: number;
 };
@@ -34,8 +35,9 @@ export default async function CreditsPage() {
   const svc = createServiceClient();
 
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: balanceData } = await supabase.rpc("credit_balance");
-  const balance = Number(balanceData ?? 0);
+  // null when unreadable — never rendered as "0 credits" (rule 4).
+  const { data: balanceData, error: balErr } = await supabase.rpc("credit_balance");
+  const balance = balErr ? null : Number(balanceData ?? 0);
 
   // Aggregates read COMPLETE or flagged (rules 4/5) — a margin computed from a
   // truncated read would be a lie with decimals.
@@ -43,14 +45,23 @@ export default async function CreditsPage() {
   let usageTruncated = false;
   let enforcement = false;
   let ledger: LedgerRow[] = [];
+  let fixedMonthly = 0;
   if (svc) {
     const res = await readAll<UsageRow>(
-      (from, to) => svc.from("ai_usage")
-        .select("feature, model, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, cost_usd, credits_charged")
+      (from, to) => svc.from("usage_events")
+        .select("user_id, vendor, cost_model, feature, units, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, cost_usd, credits_charged")
         .order("id", { ascending: true }).range(from, to),
       100_000,
     ).catch(() => ({ rows: [] as UsageRow[], truncated: true }));
     usage = res.rows; usageTruncated = res.truncated;
+
+    // Fixed monthly floor — the subscription costs that exist whether or not
+    // anyone runs anything. These belong in a PLAN FEE, not in per-call
+    // credits: recovering a fixed cost per call underprices at low volume and
+    // overcharges at high volume.
+    const { data: svcRows } = await svc
+      .from("service_config").select("key, enabled, monthly_cost_est").eq("enabled", true);
+    fixedMonthly = (svcRows ?? []).reduce((s, r) => s + Number(r.monthly_cost_est ?? 0), 0);
 
     const { data: flag } = await svc
       .from("service_config").select("enabled").eq("key", "credit_enforcement").maybeSingle();
@@ -65,22 +76,46 @@ export default async function CreditsPage() {
     }
   }
 
-  // Per-feature rollup. Unpriced rows (no rate for the model) are counted and
-  // flagged, never folded in as $0.
-  const byFeature = new Map<string, { runs: number; credits: number; cost: number; unpriced: number; tokens: number }>();
+  // Per-feature rollup. A null cost_usd means two different things and must
+  // not be averaged together: on a METERED vendor it's a missing rate (flag
+  // it); on a SUBSCRIPTION vendor it's correct by design (the real cost is the
+  // monthly fee, recovered in the plan fee, not per call).
+  const byFeature = new Map<string, {
+    vendor: string; costModel: string; runs: number; units: number;
+    credits: number; pricedCredits: number; cost: number; unpriced: number; tokens: number;
+  }>();
   for (const u of usage) {
-    const f = byFeature.get(u.feature) ?? { runs: 0, credits: 0, cost: 0, unpriced: 0, tokens: 0 };
+    const key = `${u.vendor}::${u.feature}`;
+    const f = byFeature.get(key) ?? {
+      vendor: u.vendor, costModel: u.cost_model, runs: 0, units: 0,
+      credits: 0, pricedCredits: 0, cost: 0, unpriced: 0, tokens: 0,
+    };
     f.runs += 1;
+    f.units += u.units;
     f.credits += u.credits_charged;
     f.tokens += u.input_tokens + u.output_tokens + u.cache_write_tokens + u.cache_read_tokens;
-    if (u.cost_usd == null) f.unpriced += 1; else f.cost += Number(u.cost_usd);
-    byFeature.set(u.feature, f);
+    if (u.cost_usd != null) {
+      f.cost += Number(u.cost_usd);
+      // $/credit must divide priced cost by the credits from THOSE SAME runs.
+      // Counting every run's credits against only the priced runs' dollars
+      // understates cost per credit — i.e. flatters the margin (the exact
+      // number this screen exists to get right).
+      f.pricedCredits += u.credits_charged;
+    } else if (u.cost_model === "metered") f.unpriced += 1;
+    byFeature.set(key, f);
   }
   const features = [...byFeature.entries()].sort((a, b) => b[1].cost - a[1].cost);
   const totals = features.reduce(
     (t, [, f]) => ({ runs: t.runs + f.runs, credits: t.credits + f.credits, cost: t.cost + f.cost, unpriced: t.unpriced + f.unpriced }),
     { runs: 0, credits: 0, cost: 0, unpriced: 0 },
   );
+
+  // Cost to serve OTHERS vs your own consumption. Same events, split by who
+  // spent them — your own usage is a business expense, not a cost of serving
+  // customers, and pooling the two makes unit economics fiction.
+  const mine = usage.filter((u) => u.user_id === user?.id);
+  const theirs = usage.filter((u) => u.user_id !== user?.id);
+  const sumCost = (rows: UsageRow[]) => rows.reduce((s, r) => s + Number(r.cost_usd ?? 0), 0);
 
   return (
     <main className="w-full flex-1 bg-paper text-ink" style={{ colorScheme: "dark" }}>
@@ -107,12 +142,21 @@ export default async function CreditsPage() {
         <section className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded border border-ink/10 bg-ink/5 p-3">
             <div className="text-[11px] uppercase tracking-wide text-ink/50">Your balance</div>
-            <div className="mt-1 text-xl font-bold">{balance.toLocaleString()} credits</div>
+            <div className="mt-1 text-xl font-bold">
+              {balance === null ? <span className="text-amber-300">unavailable</span> : `${balance.toLocaleString()} credits`}
+            </div>
+            {balance === null && <div className="text-[11px] text-amber-300">balance couldn&apos;t be read — not zero</div>}
           </div>
           <div className="rounded border border-ink/10 bg-ink/5 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-ink/50">Measured AI cost (all-time)</div>
-            <div className="mt-1 text-xl font-bold">{usd(totals.cost)}</div>
-            {totals.unpriced > 0 && <div className="text-[11px] text-amber-300">+ {totals.unpriced} unpriced run{totals.unpriced === 1 ? "" : "s"} (no rate for model)</div>}
+            <div className="text-[11px] uppercase tracking-wide text-ink/50">Marginal cost (all-time)</div>
+            <div className="mt-1 text-xl font-bold">
+              {/* $0.00 is only a fact when at least one run was actually priced. */}
+              {totals.runs > 0 && totals.cost === 0 && totals.unpriced > 0
+                ? <span className="text-amber-300">unpriced</span>
+                : usd(totals.cost)}
+            </div>
+            <div className="text-[11px] text-ink/45">scales with use → credits</div>
+            {totals.unpriced > 0 && <div className="text-[11px] text-amber-300">+ {totals.unpriced} unpriced run{totals.unpriced === 1 ? "" : "s"} (no rate for model) — excluded, not counted as $0</div>}
           </div>
           <div className="rounded border border-ink/10 bg-ink/5 p-3">
             <div className="text-[11px] uppercase tracking-wide text-ink/50">Enforcement</div>
@@ -122,6 +166,34 @@ export default async function CreditsPage() {
                 {enforcement ? "Switch to shadow mode" : "Turn enforcement on"}
               </button>
             </form>
+          </div>
+        </section>
+
+        {/* The fixed / marginal split — the structural answer to "how do I
+            separate my expenses from users' usage". */}
+        <section className="mt-6 rounded border border-ink/10 bg-ink/5 p-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/60">Two kinds of expense</h2>
+          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-ink/50">Fixed floor / month</div>
+              <div className="text-lg font-bold">{usd(fixedMonthly)}</div>
+              <p className="mt-1 text-xs text-ink/50">
+                Enabled subscriptions (Services page). Exists whether or not anyone runs anything —
+                recover it in a <strong>plan fee</strong>, not per call.
+              </p>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-ink/50">Marginal, all-time</div>
+              <div className="text-lg font-bold">{usd(totals.cost)}</div>
+              <p className="mt-1 text-xs text-ink/50">
+                Pay-per-use vendors. Scales with usage — this is what <strong>credits</strong> cover.
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 border-t border-ink/10 pt-2 text-xs text-ink/55">
+            Cost to serve others: <strong>{usd(sumCost(theirs))}</strong> across {theirs.length} run{theirs.length === 1 ? "" : "s"}
+            {" · "}Your own consumption: <strong>{usd(sumCost(mine))}</strong> across {mine.length} run{mine.length === 1 ? "" : "s"}
+            <span className="block text-ink/40">Your own usage is a business expense, not a cost of serving customers — kept separate so unit economics stay honest.</span>
           </div>
         </section>
 
@@ -135,7 +207,8 @@ export default async function CreditsPage() {
               <table className="w-full text-sm">
                 <thead className="bg-ink/5 text-left text-[11px] uppercase tracking-wide text-ink/50">
                   <tr>
-                    <th className="px-3 py-2">Feature</th>
+                    <th className="px-3 py-2">Vendor · feature</th>
+                    <th className="px-3 py-2">Cost shape</th>
                     <th className="px-3 py-2 text-right">Runs</th>
                     <th className="px-3 py-2 text-right">Tokens</th>
                     <th className="px-3 py-2 text-right">Credits charged</th>
@@ -144,14 +217,19 @@ export default async function CreditsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {features.map(([name, f]) => (
-                    <tr key={name} className="border-t border-ink/10">
-                      <td className="px-3 py-2 font-mono text-xs">{name}{f.unpriced > 0 ? <span className="ml-1 text-amber-300" title="runs with no rate on file">⚠{f.unpriced}</span> : null}</td>
+                  {features.map(([key, f]) => (
+                    <tr key={key} className="border-t border-ink/10">
+                      <td className="px-3 py-2 font-mono text-xs">{key.replace("::", " · ")}{f.unpriced > 0 ? <span className="ml-1 text-amber-300" title="metered runs with no rate on file">⚠{f.unpriced}</span> : null}</td>
+                      <td className="px-3 py-2 text-xs text-ink/60">{f.costModel}</td>
                       <td className="px-3 py-2 text-right">{f.runs}</td>
-                      <td className="px-3 py-2 text-right">{f.tokens.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">{f.tokens > 0 ? f.tokens.toLocaleString() : "—"}</td>
                       <td className="px-3 py-2 text-right">{f.credits.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right">{usd(f.cost)}</td>
-                      <td className="px-3 py-2 text-right">{f.credits > 0 ? usd(f.cost / f.credits) : "—"}</td>
+                      <td className="px-3 py-2 text-right">{f.costModel === "metered" ? usd(f.cost) : <span className="text-ink/40" title="fixed monthly fee — see the floor above">in floor</span>}</td>
+                      <td className="px-3 py-2 text-right">
+                        {f.costModel === "metered" && f.pricedCredits > 0
+                          ? <span title={f.unpriced > 0 ? `over ${f.runs - f.unpriced} priced run(s); ${f.unpriced} unpriced excluded` : undefined}>{usd(f.cost / f.pricedCredits)}</span>
+                          : "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

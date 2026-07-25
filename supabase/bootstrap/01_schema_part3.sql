@@ -569,29 +569,74 @@ alter table public.audit_log add constraint audit_log_actor_check
 -- file's balance function uses.
 -- ══════════════════════════════════════════════════════════════════════════
 
--- ── A. AI cost telemetry ───────────────────────────────────────────────────
--- One row per model call. cost_usd is NULL when the model has no rate on
--- file — an unknown price is flagged, never defaulted to $0 (rule 9).
-create table if not exists public.ai_usage (
+-- ── A. Usage telemetry — every metered vendor call, not just AI ────────────
+--
+-- ONE table, because users spend ONE currency. But vendor expenses have three
+-- different COST SHAPES, and conflating them produces nonsense numbers:
+--
+--   'metered'      Anthropic tokens, Ximilar per-call. The dollar cost of a
+--                  single call is known at call time -> cost_usd is real.
+--   'subscription' PriceCharting, TheCardAPI. Flat monthly fee + quota: the
+--                  marginal cost of one more call is $0 until the cap, then a
+--                  step function. cost_usd is NULL by design — the true cost
+--                  is the monthly fee ALLOCATED across the units actually
+--                  consumed (see the usage_month_cost view below), which is a
+--                  month-end number, not a call-time one.
+--   'free'         Scryfall, eBay. No dollars; the scarce thing is quota.
+--                  Metered anyway so a runaway loop is visible before it
+--                  becomes a rate-limit outage.
+--
+-- So: ALWAYS record units; record dollars only where dollars are knowable.
+-- cost_usd NULL therefore means "not directly attributable" — read alongside
+-- cost_model, never silently treated as $0 (rule 9).
+create table if not exists public.usage_events (
   id bigint generated always as identity primary key,
   user_id uuid not null,
+  vendor text not null,                -- 'anthropic' | 'thecardapi' | 'pricecharting' | 'ximilar' | 'ebay' | 'scryfall'
+  cost_model text not null default 'metered',
   feature text not null,               -- mirrors the ledger reason, e.g. 'estimate:standard_plus'
-  model text not null,
+  model text,                          -- AI model id; null for non-AI vendors
+  units integer not null default 1,    -- quota units consumed (1 = one call)
   input_tokens integer not null default 0,
   output_tokens integer not null default 0,
   cache_write_tokens integer not null default 0,
   cache_read_tokens integer not null default 0,
-  cost_usd numeric(12, 6),             -- computed at write time from src/lib/ai/rates.ts; null = unpriced
+  cost_usd numeric(12, 6),             -- metered vendors only; null elsewhere BY DESIGN
   credits_charged integer not null default 0, -- 0 when the run wasn't billed (e.g. estimate not stored)
   ref uuid,                            -- card id / job id
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint usage_events_cost_model_chk check (cost_model in ('metered', 'subscription', 'free'))
 );
-create index if not exists ai_usage_created_idx on public.ai_usage (created_at desc);
-create index if not exists ai_usage_user_idx on public.ai_usage (user_id, created_at desc);
+create index if not exists usage_events_created_idx on public.usage_events (created_at desc);
+create index if not exists usage_events_user_idx on public.usage_events (user_id, created_at desc);
+create index if not exists usage_events_vendor_idx on public.usage_events (vendor, created_at desc);
 
 -- Service-role writes only; the owner margin screen reads via the service
 -- client. RLS on with no policies = closed to every non-service caller.
-alter table public.ai_usage enable row level security;
+alter table public.usage_events enable row level security;
+
+-- Month-end allocation: a subscription's fee spread across the units it
+-- actually served that month. This is the ONLY honest per-call cost for a
+-- fixed-fee vendor, and it falls as volume rises — which is the whole point
+-- of watching it. Metered vendors report their real summed dollars instead.
+create or replace view public.usage_month_cost as
+select
+  date_trunc('month', u.created_at) as month,
+  u.vendor,
+  u.cost_model,
+  count(*)                          as calls,
+  sum(u.units)                      as units,
+  sum(u.credits_charged)            as credits_charged,
+  sum(u.cost_usd)                   as direct_cost_usd,
+  count(*) filter (where u.cost_usd is null and u.cost_model = 'metered') as unpriced_calls,
+  case when u.cost_model = 'subscription'
+    then (select sc.monthly_cost_est from public.service_config sc where sc.key = u.vendor)
+  end                               as monthly_fee_usd,
+  case when u.cost_model = 'subscription' and sum(u.units) > 0
+    then (select sc.monthly_cost_est from public.service_config sc where sc.key = u.vendor) / sum(u.units)
+  end                               as allocated_cost_per_unit
+from public.usage_events u
+group by 1, 2, 3;
 
 -- ── B. credit_ledger v2 ────────────────────────────────────────────────────
 alter table public.credit_ledger
@@ -607,6 +652,21 @@ alter table public.credit_ledger
 do $$
 declare v_user uuid; v_owe int; r record;
 begin
+  -- RE-ENTRY GUARD. Every other statement in this file is deliberately
+  -- re-runnable (if not exists / or replace / on conflict) because migrations
+  -- here are pasted by hand and files get re-pasted. This block is the one
+  -- destructive statement: it re-applies each user's ENTIRE lifetime spend
+  -- against their grant remainders, so a second run would silently debit
+  -- already-reconciled spends again (1000-grant with 700 left and 300 spent
+  -- becomes 400, then 100, then 0) with no error and no log. Bail out unless
+  -- there is genuinely pre-v2 data to convert.
+  if not exists (
+    select 1 from public.credit_ledger
+    where (delta < 0 and kind <> 'spend') or (delta > 0 and remaining is null)
+  ) then
+    return; -- already migrated (or an empty ledger) — nothing to backfill
+  end if;
+
   update public.credit_ledger set kind = 'spend', remaining = null
     where delta < 0 and kind <> 'spend';
   update public.credit_ledger set remaining = delta

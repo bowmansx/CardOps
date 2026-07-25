@@ -280,12 +280,36 @@ begin
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
+  -- ── 19. the backfill block is re-runnable (review fix) ────────────────────
+  -- A re-pasted migration used to re-apply each user's whole lifetime spend
+  -- against their grant remainders, silently voiding paid credits. Re-run the
+  -- guarded block now and prove the balance is untouched.
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
+  v_total := public.credit_balance();   -- balance before the simulated re-paste
+  -- The guard's own condition, evaluated against this already-migrated ledger.
+  -- It must be FALSE (nothing left to convert), which is what makes the
+  -- destructive loop unreachable on a second paste.
+  v_ok := not exists (
+    select 1 from public.credit_ledger
+    where (delta < 0 and kind <> 'spend') or (delta > 0 and remaining is null)
+  );
+  v_n := public.credit_balance();
+  v_ok := v_ok and v_n = v_total;
+  v_note := format('guard_holds=%s before=%s after=%s',
+    not exists (select 1 from public.credit_ledger
+      where (delta < 0 and kind <> 'spend') or (delta > 0 and remaining is null)),
+    v_total, v_n);
+  v_name := '19. backfill guard makes a re-paste a no-op';
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 18 PASSED · %s FAILED'
+    || '%s of 19 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 18 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 19 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;

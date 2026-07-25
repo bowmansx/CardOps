@@ -98,13 +98,22 @@ export async function GET(req: Request) {
     // Latest estimate per (card, mode) — `fresh` skips, the rest sorts by age.
     // Scoped through the card's owner rather than an `.in(<every id>)` list — a
     // 20k-element IN would blow the request URL length.
-    const { rows: estRows } = await readAll<{ card_id: string; mode: string; created_at: string }>(
+    const { rows: estRows, truncated: estTruncated } = await readAll<{ card_id: string; mode: string; created_at: string }>(
       (from, to) => svc.from("card_estimates").select("card_id, mode, created_at, cards!inner(user_id)")
         .eq("cards.user_id", userId)
         .order("card_id", { ascending: true }).order("created_at", { ascending: false })
         .range(from, to),
       100_000,
     );
+    // This read IS the freshness guard: a card missing from it looks
+    // never-estimated and gets re-run — a duplicate row and a second charge
+    // for work already paid for. A partial guard is worse than none, so a
+    // truncated read fails CLOSED for this user (rules 5/10).
+    if (estTruncated) {
+      failed++;
+      errors.push(`user ${userId}: estimate history hit the read cap — skipped this run rather than risk duplicate charges`);
+      continue;
+    }
     const lastAt = new Map<string, number>();
     for (const e of estRows) {
       const k = `${e.card_id}::${e.mode}`;
@@ -170,14 +179,18 @@ export async function GET(req: Request) {
           await recordAiUsage(svc, { userId, feature: `auto-estimate:${mode}`, model: res.model, usage: res.usage, creditsCharged: 0, ref: card.id });
           continue;
         }
+        let debitFailed = false;
         if (credits > 0) {
           const { error: debErr } = await svc.rpc("credit_spend", {
             p_user: userId, p_amount: credits, p_reason: `auto-estimate:${mode}`, p_ref: card.id,
           });
-          if (debErr) errors.push(`${card.id} ${mode}: estimate stored but credits not debited (${debErr.message})`);
-          else if (creditsLeft.has(userId)) creditsLeft.set(userId, (creditsLeft.get(userId) ?? 0) - credits);
+          if (debErr) {
+            debitFailed = true;
+            errors.push(`${card.id} ${mode}: estimate stored but credits not debited (${debErr.message})`);
+          } else if (creditsLeft.has(userId)) creditsLeft.set(userId, (creditsLeft.get(userId) ?? 0) - credits);
         }
-        await recordAiUsage(svc, { userId, feature: `auto-estimate:${mode}`, model: res.model, usage: res.usage, creditsCharged: credits, ref: card.id });
+        // Record what LANDED on the ledger, not what we meant to charge.
+        await recordAiUsage(svc, { userId, feature: `auto-estimate:${mode}`, model: res.model, usage: res.usage, creditsCharged: debitFailed ? 0 : credits, ref: card.id });
         made++; forUser++;
       } catch (e) {
         failed++;
