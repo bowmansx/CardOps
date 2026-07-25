@@ -81,14 +81,21 @@ export function FullIntake({
       vision_confidence: f.confidences ? { ...f.confidences, overall: f.overall_confidence } : undefined,
       front: front ?? undefined,
       back: back ?? undefined,
+      // The uncropped frames, so a crop is never the only record of an edge.
+      front_original: frontOriginal ?? undefined,
+      back_original: backOriginal ?? undefined,
     });
     setBusy(null);
     if (!res.ok) { setErr(res.error ?? "Save failed."); return; }
+    // The card saved but a photo didn't — say so rather than let it surface
+    // later as a listing with no image.
+    if (res.warning) { setErr(res.warning); }
     setSavedCount((n) => n + 1);
     reset();
   }
   function reset() {
-    setFront(null); setBack(null); setF({}); setAiOff(false); setStep("capture"); setErr(null);
+    setFront(null); setBack(null); setFrontOriginal(null); setBackOriginal(null);
+    setF({}); setAiOff(false); setStep("capture");
   }
 
   const conf = (f.confidences ?? {}) as Record<string, number>;

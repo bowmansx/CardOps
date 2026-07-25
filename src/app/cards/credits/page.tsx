@@ -28,6 +28,11 @@ type LedgerRow = {
 };
 
 const usd = (n: number) => `$${n.toFixed(n < 0.1 ? 4 : 2)}`;
+const mb = (bytes: number) => {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.max(0, Math.round(bytes / 1024))} KB`;
+};
 
 export default async function CreditsPage() {
   if ((await currentRole()) !== "owner") redirect("/cards");
@@ -46,6 +51,7 @@ export default async function CreditsPage() {
   let enforcement = false;
   let ledger: LedgerRow[] = [];
   let fixedMonthly = 0;
+  let storage: { bytes: number; objects: number } | null = null;
   if (svc) {
     const res = await readAll<UsageRow>(
       (from, to) => svc.from("usage_events")
@@ -62,6 +68,15 @@ export default async function CreditsPage() {
     const { data: svcRows } = await svc
       .from("service_config").select("key, enabled, monthly_cost_est").eq("enabled", true);
     fixedMonthly = (svcRows ?? []).reduce((s, r) => s + Number(r.monthly_cost_est ?? 0), 0);
+
+    // Storage is the SECOND meter beside credits, and the one that recurs
+    // forever: credits measure compute you chose to spend, bytes measure a bill
+    // that arrives every month whether or not anyone opens the app.
+    if (user) {
+      const { data: su } = await svc
+        .from("user_storage_usage").select("bytes, objects").eq("user_id", user.id).maybeSingle();
+      storage = su ? { bytes: Number(su.bytes ?? 0), objects: Number(su.objects ?? 0) } : { bytes: 0, objects: 0 };
+    }
 
     const { data: flag } = await svc
       .from("service_config").select("enabled").eq("key", "credit_enforcement").maybeSingle();
@@ -139,7 +154,7 @@ export default async function CreditsPage() {
         )}
 
         {/* Status strip */}
-        <section className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <section className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded border border-ink/10 bg-ink/5 p-3">
             <div className="text-[11px] uppercase tracking-wide text-ink/50">Your balance</div>
             <div className="mt-1 text-xl font-bold">
@@ -157,6 +172,14 @@ export default async function CreditsPage() {
             </div>
             <div className="text-[11px] text-ink/45">scales with use → credits</div>
             {totals.unpriced > 0 && <div className="text-[11px] text-amber-300">+ {totals.unpriced} unpriced run{totals.unpriced === 1 ? "" : "s"} (no rate for model) — excluded, not counted as $0</div>}
+          </div>
+          <div className="rounded border border-ink/10 bg-ink/5 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-ink/50">Storage used</div>
+            <div className="mt-1 text-xl font-bold">{storage ? mb(storage.bytes) : "—"}</div>
+            <div className="text-[11px] text-ink/45">
+              {storage ? `${storage.objects.toLocaleString()} file${storage.objects === 1 ? "" : "s"}` : "not measured"}
+              {" · "}recurs monthly
+            </div>
           </div>
           <div className="rounded border border-ink/10 bg-ink/5 p-3">
             <div className="text-[11px] uppercase tracking-wide text-ink/50">Enforcement</div>

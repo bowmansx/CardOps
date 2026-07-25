@@ -476,12 +476,68 @@ begin
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
+  -- ══ storage metering (migration 20260740) ═══════════════════════════════
+  -- Storage is the second meter beside credits; it must be measured from the
+  -- first photo, because the history is unrecoverable if it starts late.
+
+  -- ── 32. a photo's bytes land on the owner's rollup ────────────────────────
+  v_name := '32. photo bytes roll up to the owner';
+  begin
+    insert into public.cards (user_id, sku, player, status, individual_basis)
+      values (v_uid, 'TST-2026-000008', 'PhotoCard', 'booked', 1.00)
+      returning id into v_card;
+    insert into public.card_photos (card_id, kind, variant, bucket, path, bytes)
+      values (v_card, 'front', 'original', 'card-photos', 'x/a.jpg', 1000);
+    insert into public.card_photos (card_id, kind, variant, bucket, path, bytes)
+      values (v_card, 'front', 'processed', 'card-photos', 'x/b.jpg', 400);
+    select bytes, objects into v_total, v_cnt from public.user_storage_usage where user_id = v_uid;
+    v_ok := v_total = 1400 and v_cnt = 2;
+    v_note := format('bytes=%s objects=%s (want 1400/2)', v_total, v_cnt);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 33. deleting a photo gives the bytes back, and never goes negative ────
+  v_name := '33. rollup decrements on delete, floors at zero';
+  begin
+    delete from public.card_photos where card_id = v_card;
+    select bytes, objects into v_total, v_cnt from public.user_storage_usage where user_id = v_uid;
+    v_ok := v_total = 0 and v_cnt = 0;
+    v_note := format('bytes=%s objects=%s (want 0/0)', v_total, v_cnt);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 34. a crop points back at the frame it came from ──────────────────────
+  -- Provenance is the whole defence against "did the crop hide that corner?".
+  v_name := '34. derivative records its source frame';
+  begin
+    insert into public.card_photos (card_id, kind, variant, bucket, path, bytes)
+      values (v_card, 'front', 'original', 'card-photos', 'x/src.jpg', 900)
+      returning id into v_solo;
+    insert into public.card_photos (card_id, kind, variant, bucket, path, bytes, derived_from, crop_geometry)
+      values (v_card, 'front', 'processed', 'card-photos', 'x/crop.jpg', 300, v_solo,
+              jsonb_build_object('margin_pct', 0.04, 'deskewed', false));
+    select count(*) into v_cnt from public.card_photos
+     where derived_from = v_solo and (crop_geometry->>'margin_pct')::numeric = 0.04;
+    v_ok := v_cnt = 1;
+    v_note := format('linked_derivatives=%s', v_cnt);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 31 PASSED · %s FAILED'
+    || '%s of 34 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 31 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 34 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;
