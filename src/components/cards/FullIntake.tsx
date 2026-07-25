@@ -33,6 +33,9 @@ export function FullIntake({
   const [busy, setBusy] = useState<null | "scanning" | "saving">(null);
   const [err, setErr] = useState<string | null>(null);
   const [aiOff, setAiOff] = useState(false);
+  // The full uncropped frames. A crop must never be the only record of an edge.
+  const [frontOriginal, setFrontOriginal] = useState<string | null>(null);
+  const [backOriginal, setBackOriginal] = useState<string | null>(null);
   const [f, setF] = useState<Fields>({});
   const [savedCount, setSavedCount] = useState(0);
 
@@ -178,6 +181,18 @@ export function FullIntake({
                 <button type="button" onClick={() => setCam(kind)} className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-flag">
                   <Camera size={10} /> Retake {kind}
                 </button>
+                {/* The uncropped frame, when the camera took one. Lets you check
+                    with your own eyes that the crop didn't clip a corner —
+                    which is the only reason auto-crop is safe to trust. */}
+                {(kind === "front" ? frontOriginal : backOriginal) && (
+                  <button
+                    type="button"
+                    onClick={() => setView((kind === "front" ? frontOriginal : backOriginal) as string)}
+                    className="mt-0.5 block w-full text-[10px] text-ink/45 underline underline-offset-2"
+                  >
+                    uncropped
+                  </button>
+                )}
               </div>
             ))}
             <div className="ml-auto flex flex-col items-end gap-1.5">
@@ -281,8 +296,16 @@ export function FullIntake({
           key={cam} // remount per shot → fresh camera stream for the back (day-review fix)
           title={`Photograph the ${cam}`}
           onClose={() => setCam(null)}
-          onCapture={(url) => {
+          onCapture={(shot) => {
+            const url = shot.url;
             const kind = cam;
+            // Keep the uncropped frame alongside the framed one. Persisting it
+            // needs the card_photos columns from DESIGN_PHOTO_SYSTEM §4 — until
+            // then it is held here rather than silently thrown away.
+            if (shot.original) {
+              if (kind === "front") setFrontOriginal(shot.original);
+              else setBackOriginal(shot.original);
+            }
             // Retake from the REVIEW screen: just swap the photo — never
             // wipe the user's field edits with an auto re-scan (they can
             // tap "Re-read (AI)" if they want fresh extraction).

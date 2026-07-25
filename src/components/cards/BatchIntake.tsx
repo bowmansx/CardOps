@@ -82,7 +82,8 @@ export function BatchIntake({
     finally { activeRef.current--; const n = waitRef.current.shift(); if (n) n(); }
   }
 
-  function addShot(url: string) {
+  function addShot(shot: { url: string }) {
+    const url = shot.url;
     setItems((xs) => [...xs, { front: url, thumb: url, sport_category: category || undefined, zone }]);
     // Kick off the AI read now, in the background.
     if (!preRef.current.has(url)) {
