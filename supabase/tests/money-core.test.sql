@@ -304,12 +304,75 @@ begin
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
+  -- ══ card identity layer (migration 20260738) ════════════════════════════
+
+  -- ── 20. the same card, entered messily, resolves to ONE identity ──────────
+  -- This is the whole premise: if formatting splits an identity, every owner
+  -- goes back to a cold start and we pay the vendor twice for one answer.
+  v_name := '20. messy duplicates share one identity';
+  v_ok := public.resolve_card_identity('Football', 2020, 'Panini Prizm', 'Justin Herbert', '325', 'Silver')
+        = public.resolve_card_identity('football', 2020, '  panini  prizm ', 'JUSTIN HERBERT', '#325', 'silver!');
+  v_note := format('fp=%s', public.card_fingerprint('Football', 2020, 'Panini Prizm', 'Justin Herbert', '325', 'Silver'));
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 21. a real difference stays a DIFFERENT identity ──────────────────────
+  -- The opposite failure: over-merging would pool a base card's sales with its
+  -- parallel and quietly corrupt both prices.
+  v_name := '21. parallel is not merged into the base card';
+  v_ok := public.resolve_card_identity('Football', 2020, 'Panini Prizm', 'Justin Herbert', '325', 'Silver')
+       <> public.resolve_card_identity('Football', 2020, 'Panini Prizm', 'Justin Herbert', '325', null);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || E'\n'; end if;
+
+  -- ── 22. a card too sparse to identify gets NO identity ────────────────────
+  v_name := '22. no player and no set resolves to null';
+  v_ok := public.resolve_card_identity('Football', 2020, null, null, '325', 'Silver') is null;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || E'\n'; end if;
+
+  -- ── 23. inserting a card attaches its identity automatically ──────────────
+  -- Via trigger, so intake / CSV import / Speed Book / manual entry can't
+  -- forget to do it.
+  v_name := '23. card insert resolves identity by trigger';
+  begin
+    insert into public.cards (user_id, sku, player, year, set_name, card_number, parallel, sport_category, status, individual_basis)
+      values (v_uid, 'TST-2026-000006', 'Justin Herbert', 2020, 'Panini Prizm', '325', 'Silver', 'Football', 'booked', 0);
+    select identity_id into v_card from public.cards where sku = 'TST-2026-000006' and user_id = v_uid;
+    v_ok := v_card is not null
+        and v_card = public.resolve_card_identity('Football', 2020, 'Panini Prizm', 'Justin Herbert', '325', 'Silver');
+    v_note := format('identity=%s', v_card);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 24. deleting a card must NOT destroy shared market history ────────────
+  -- The old schema cascaded: one owner deleting their copy wiped the history
+  -- every other owner depends on.
+  v_name := '24. market history survives a card deletion';
+  begin
+    insert into public.card_market_sales (identity_id, card_id, source, external_id, price, sold_at)
+      values (v_card, (select id from public.cards where sku = 'TST-2026-000006' and user_id = v_uid),
+              'harness', 'sale-1', 42.00, current_date);
+    delete from public.cards where sku = 'TST-2026-000006' and user_id = v_uid;
+    select count(*) into v_cnt from public.card_market_sales
+     where identity_id = v_card and external_id = 'sale-1';
+    v_ok := v_cnt = 1;
+    v_note := format('rows_after_delete=%s (want 1)', v_cnt);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 19 PASSED · %s FAILED'
+    || '%s of 24 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 19 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 24 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;

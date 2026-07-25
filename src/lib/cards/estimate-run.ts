@@ -24,7 +24,9 @@ const Schema = z.object({
   rationale: z.string().describe("2-4 sentences: what the sales show, and the player/market factors behind this number; call out thin or stale data"),
 });
 
-export type EstimateCard = CardForPricing & { market_value: number | null; manual_price: number | null };
+export type EstimateCard = CardForPricing & {
+  market_value: number | null; manual_price: number | null; identity_id?: string | null;
+};
 export type EstimateMode = "standard_plus" | "all_sales_plus";
 
 export type EstimateOutcome =
@@ -45,7 +47,13 @@ export async function runEstimate(
     fetchCardApiSales(c, { allGrades: mode === "all_sales_plus", limit: mode === "all_sales_plus" ? 100 : 40 }),
     db.from("card_comps").select("sale_price, sale_date, grader, grade, source, listing_url").eq("card_id", c.id).order("sale_date", { ascending: false }).limit(mode === "all_sales_plus" ? 200 : 60),
     db.from("card_source_quotes").select("source, kind, price, grade, grader, label").eq("card_id", c.id),
-    db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("card_id", c.id).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80),
+    // Read the SHARED identity history, not just this copy's — that's the whole
+    // point of the identity layer: a card added today inherits every day of
+    // market history anyone has collected for it. Falls back to the card's own
+    // rows when it's too sparse to fingerprint.
+    c.identity_id
+      ? db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("identity_id", c.identity_id).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80)
+      : db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("card_id", c.id).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80),
   ]);
   const own = summarizeSales([...ownRes.sales, ...compsAsSales(compRows ?? []), ...storedToSales(histRows ?? [])]);
 

@@ -72,6 +72,29 @@ see 20260734/20260735 migrations). The paste-ready money-core test harness
 lives at `supabase/tests/money-core.test.sql` — run it after any change to
 sell/unsell/lot SQL.
 
+## Card identity: market data is SHARED, not per-tenant (2026-07-25)
+
+`card_identities` is a canonical catalog of cards AS PRINTED — one row per
+real-world card, shared across every tenant, keyed by a deterministic
+`card_fingerprint()`. `cards.identity_id` is set by a **trigger**, so every
+intake path (Speed Book, CSV import, manual form, anything added later) gets
+one without remembering to ask.
+
+- **`card_market_sales` belongs to the identity, not to a card.** Twenty owners
+  of the same card share one accumulated history and one vendor fetch;
+  `card_id` is provenance only, is nullable, and no longer cascades — deleting
+  a card must never destroy history other owners depend on.
+- **Grade is NOT in the fingerprint.** Identity is the print; grader/grade are
+  properties of a copy and of each observed sale. The pricing code filters
+  sales to the card's condition. Adding grade would re-fragment exactly what
+  this unifies.
+- **Normalization lives in SQL only.** Never mirror `card_fingerprint()` in
+  TypeScript — two implementations drift, and a drifted fingerprint silently
+  splits one identity into two, restoring the cold start it exists to prevent.
+- The price-refresh cron fetches **once per identity** and applies the result
+  to every owner's card separately (each copy's condition takes a different
+  quote from the same sales). Dedupe the fetch, never the apply.
+
 ## The two recurring bug classes (see reference/audit-2026-07-24.md)
 
 1. **Service-role and SECURITY DEFINER code bypasses RLS entirely.** Crons run

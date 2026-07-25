@@ -23,7 +23,7 @@ export const maxDuration = 300;
 const PER_USER = 20;   // cards touched per user per run
 const GLOBAL = 80;     // total estimates per run
 const STALE_DAYS = 14; // refresh an estimate older than this
-const CARD_COLS = "id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, market_value, manual_price";
+const CARD_COLS = "id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, market_value, manual_price, identity_id";
 
 const MODES: Record<string, EstimateMode[]> = {
   A: ["standard_plus"],

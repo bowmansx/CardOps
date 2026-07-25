@@ -22,7 +22,7 @@ export const maxDuration = 60;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EST_COLS = "mode, value, low, high, confidence, rationale, sources, credits_spent, model, created_at";
 const EST_MODES = ["standard_plus", "all_sales_plus"] as const;
-export const CARD_COLS = "id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, market_value, manual_price";
+export const CARD_COLS = "id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, market_value, manual_price, identity_id";
 
 // Balance via the SQL aggregate (credit_balance() = unexpired remainders for
 // auth.uid()), not a client-side sum of the whole append-only ledger.

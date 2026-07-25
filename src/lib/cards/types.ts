@@ -56,6 +56,9 @@ export type Card = {
   language: string | null;
   brand: string | null;
   storage_location: string | null;
+  // The shared print identity this card resolves to (set by DB trigger).
+  // Null when the card is too sparse to fingerprint — no player and no set.
+  identity_id: string | null;
   is_rookie: boolean | null;
   is_auto: boolean | null;
   is_relic: boolean | null;

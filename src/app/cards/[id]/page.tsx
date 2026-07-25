@@ -45,7 +45,12 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
   const { data: priceHist } = await supabase
     .from("card_price_history").select("price, ts").eq("card_id", id).order("ts", { ascending: true }).limit(200);
   const { data: mktSales } = await supabase
-    .from("card_market_sales").select("sold_at, price, grader, grade").eq("card_id", id).order("sold_at", { ascending: true }).limit(500);
+    // Shared identity history when we can fingerprint the card, so the chart
+    // shows every sale anyone has collected for it — not just the ones observed
+    // since this copy was added.
+    .from("card_market_sales").select("sold_at, price, grader, grade")
+    .eq(c.identity_id ? "identity_id" : "card_id", c.identity_id ?? id)
+    .order("sold_at", { ascending: true }).limit(500);
   const { data: srcQuotes } = await supabase
     .from("card_source_quotes")
     .select("source, kind, grader, grade, price, currency, label, url, fetched_at")
