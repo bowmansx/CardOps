@@ -127,6 +127,19 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
 
 ## Working rules
 
+- **Diff every spec against the repo before implementing it.** A spec written
+  without reading the code states hypotheses, not facts — features it asks for
+  may already exist, columns it invents may collide with existing ones under a
+  different name, and documents it cites may not be in the repo. Verify each
+  claim, then SAY which ones were wrong before building. (Standing rule after
+  the Wave A spec, 2026-07-25, proposed rebuilding Speed Book, a second
+  `tax_bucket`, and cited a `VALUATION_ENGINE.md` that wasn't here.)
+- **Tax classification is recorded, never determined.** The app stores Beau's
+  classification and his stated reason, with the timestamp and an append-only
+  trail. It never presents itself as making the investment/dealer/hobby call —
+  that test is per-property and belongs to Beau and his CPA. Same posture as
+  the tax advisor: bookkeeping hygiene and flags to raise, never filing or tax
+  advice.
 - Money-critical and outward-facing writes are gated on Beau's explicit
   decision. Nothing posts to real books automatically or from a cron.
 - Never commit API keys — `THECARDAPI_TOKEN` and friends are Vercel env vars
