@@ -125,16 +125,21 @@ export default async function CardsPage({ searchParams }: { searchParams: Promis
   let individualBasis = 0;
   const bannerPage = await readAllSafe<{
     market_value: number | null; manual_price: number | null;
-    purchase_lot_id: string | null; individual_basis: number | null;
+    purchase_lot_id: string | null; individual_basis: number | null; basis_items_total: number | null;
   }>((from, to) => supabase
     .from("cards")
-    .select("market_value, manual_price, purchase_lot_id, individual_basis")
+    .select("market_value, manual_price, purchase_lot_id, individual_basis, basis_items_total")
     .not("status", "in", "(archived,sold)")
     .order("id", { ascending: true })
     .range(from, to));
   for (const v of bannerPage.rows) {
     marketValue += Number((v.manual_price ?? v.market_value) ?? 0);
+    // Acquisition: lot cards are covered by poolTotal below; only the
+    // lot-less ones carry their own figure here.
     if (!v.purchase_lot_id) individualBasis += Number(v.individual_basis ?? 0);
+    // Cost lines sit on the CARD, so every card contributes them regardless of
+    // how it was funded.
+    individualBasis += Number(v.basis_items_total ?? 0);
   }
   // A failed read renders as "—", never as $0 / −100% presented as fact.
   const bannerPartial = !!(bannerPage.error || lotsPage.error);

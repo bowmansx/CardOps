@@ -59,8 +59,28 @@ A card's cost basis has exactly two sources — no third path:
   by `card_unsell` via the append-only `purchase_lot_adjustments` trail.
   A purchase lot = one purchase EVENT (cost, date, source, tax bucket) —
   it answers "which purchase, what cost". Speed Book creates one per batch.
-- **No lot** → `individual_basis`, which is REQUIRED at create/intake
-  (explicit $0 allowed). CSV import defaults it to 0.
+- **No lot** → `individual_basis`, the acquisition cost. OPTIONAL since
+  2026-07-25 and defaulting to 0 — but `cards.basis_entered` records whether a
+  figure was ever STATED, so an un-costed card is findable and flagged instead
+  of reading as free. Never present a basis of 0 as fact when
+  `basis_entered` is false. (CSV import used to write NULL despite this doc
+  claiming 0; it now writes 0 and sets the flag honestly.)
+
+On top of either source sit **cost lines** — `card_basis_items`, capitalized
+costs incurred AFTER acquisition (grading, appraisal, sales tax, shipping in,
+plus user-defined kinds). This is a third CATEGORY, not a third source:
+
+- `total basis = (lot average OR individual_basis) + cards.basis_items_total`,
+  and `basis_items_total` is a trigger-maintained cache with exactly one
+  writer. Screens read the cache; `card_sell` re-reads the rows.
+- A lot-funded card may carry cost lines; the lot's own balance never moves for
+  them, so `Σ(draws) = lot.total_cost` still holds.
+- Partition reports by SOURCE (`cardAcquisitionBasis` + `cardCostLines`), never
+  by `purchase_lot_id` — branching on the lot id counts a lot card's cost lines
+  in both buckets.
+- **A sold card's basis is locked.** Profit is recorded at sale and may already
+  be posted to real books; un-sell, edit, re-sell. A restatement flow with a
+  books-drift flag is deliberately NOT built yet.
 
 The old global `card_pool` (average of everything ever pooled, default-on) is
 GONE — it couldn't answer the audit question and let unfunded cards dilute
@@ -184,8 +204,10 @@ These govern every new line of code and every fix.
 7. Stamp state only after the effect is confirmed — no notified_at on zero
    deliveries, no credit debit before the row landed, no ok:true after an
    unchecked write.
-8. Money state machines have no dead ends: every claim/pending/uncertain state
-   is visible on some screen and has a recovery path.
+8. No dead ends, server or client: every claim/pending/uncertain state is
+   visible on some screen with a recovery path, and every async handler clears
+   its in-flight flag in `finally` — a rejected promise must never be able to
+   strand a spinner (this stranded five surfaces, 2026-07-25).
 9. Vendor money fields are validated, never defaulted — a missing price is a
    failure, not $0.
 10. Any hard cap returns a `truncated` signal the caller must surface — silent

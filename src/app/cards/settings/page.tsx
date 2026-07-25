@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
 import { cardOpsPrefs } from "@/lib/cards/settings";
 import { CardOpsSettings } from "@/components/cards/CardOpsSettings";
+import { PhotoSettings } from "@/components/cards/PhotoSettings";
+import { normalizePhotoPrefs } from "@/lib/cards/photo-prefs";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +18,15 @@ export default async function CardSettingsPage() {
   const { data } = await supabase.from("user_settings").select("prefs").eq("user_id", user!.id).maybeSingle();
   const prefs = cardOpsPrefs(data?.prefs as Record<string, unknown> | null);
 
+  // Photo prefs live on card_user_prefs (own-row RLS). A missing row or an
+  // unapplied migration both degrade to the documented defaults rather than
+  // breaking the settings screen.
+  const { data: photoRow } = await supabase
+    .from("card_user_prefs")
+    .select("capture_mode, photo_quality, auto_snap, burst_count, auto_crop, crop_margin_pct, keep_originals, default_template")
+    .maybeSingle();
+  const photoPrefs = normalizePhotoPrefs(photoRow as Record<string, unknown> | null);
+
   return (
     <main className="w-full flex-1 bg-paper text-ink" style={{ colorScheme: "dark" }}>
       <div className="mx-auto w-full max-w-md px-4 pb-24">
@@ -27,6 +38,7 @@ export default async function CardSettingsPage() {
           <Link href="/cards" className="text-xs text-ink/50 underline-offset-4 hover:text-ink hover:underline">← Cards</Link>
         </header>
         <CardOpsSettings initial={prefs} />
+        <PhotoSettings initial={photoPrefs} />
       </div>
     </main>
   );

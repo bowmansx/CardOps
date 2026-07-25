@@ -1,42 +1,63 @@
 # CardOps — where things stand and what's left
 
-## ⚠ READ FIRST (2026-07-25, end of session)
+## ✅ STATE AS OF 2026-07-25 (end of session)
 
-**1. Turn on "AI card scan (Anthropic)" in More → Services.** This is why a
-scanned card filled in nothing. `service_config` seeds every service DISABLED,
-and the new Supabase project was bootstrapped fresh, so the AI kill-switch came
-up off. Every AI path is gated on it and fails closed on purpose (they spend
-real money). The other toggles seeded off too — check them while you're there.
+**The database is fully applied and verified. The code is not deployed** —
+PR #3 is open and unmerged; see step 0.
 
-**2. Paste queue — FOUR migrations, in order, then the harness:**
+- **All migrations applied** through `20260742000000` (credit metering, card
+  identities, investor assets, photo provenance + storage, photo prefs, cost
+  basis lines).
+- **Money-core harness: 48 of 48 PASSED** against the live database — basis
+  draw, the sold boundary both ways, double-sell refusal, lot balances,
+  cross-user isolation, credit FIFO + expiry, identity resolution, shared
+  history surviving deletion, custody guards, storage rollup, RLS shape,
+  the photo-prefs guards, and the cost-basis layer (full draw, sold lock,
+  single cache writer, cache-follows-CRUD, negative floor, unstated-vs-zero).
+- **PR #2 merged**; `main` is deployed with the camera work.
+- **AI card scan is ON** in Services and verified end-to-end.
 
-| # | File | What it adds |
-|---|---|---|
-| 1 | `20260737000000_credit_metering.sql` | credit ledger v2, AI cost telemetry |
-| 2 | `20260738000000_card_identities.sql` | shared card identity + market data |
-| 3 | `20260739000000_investor_assets.sql` | Wave B: asset record, documents, custody |
-| 4 | `20260740000000_photo_provenance_storage.sql` | photo provenance + storage metering |
+Migrations 2–4 were adversarially reviewed *before* pasting (40 agents, 36
+candidates, 18 refuted, 8 distinct defects fixed in place — commit `17b8118`).
+Two would have silently voided the identity layer: a PARTIAL unique index that
+made every upsert fail 42P10 behind a swallowed error, and RLS that left shared
+history unreadable by everyone but one arbitrary owner. A third leaked every
+tenant's out-of-possession assets through a view missing `security_invoker`.
 
-Then `supabase/tests/money-core.test.sql` → expect **39 of 39 PASSED**.
+### Next, in order
 
-> Migrations 2–4 were adversarially reviewed before pasting (40 agents, 36
-> candidates, 18 refuted, 8 distinct defects fixed in place — see commit
-> `17b8118`). Two would have silently voided the identity layer: a partial
-> unique index that made every upsert fail 42P10 behind a swallowed error, and
-> RLS that left shared history unreadable by everyone but one arbitrary owner.
-> A third leaked every tenant's out-of-possession assets through a view with no
-> `security_invoker`. **AI card scan was switched ON in Services on 2026-07-25
-> and verified end-to-end** — the scan route reaches Anthropic and returns a
-> parsed card.
+0. **Merge and deploy [PR #3](https://github.com/bowmansx/CardOps/pull/3).**
+   Two things are waiting in it, and the first is a live outage:
+   - **Booking a card hangs for ever on "Saving…"** in production and no card
+     is created. Photos go to the server action as base64; base64 inflates
+     ~37%; `bodySizeLimit` was unset so Next's 1 MB default applied; and
+     041b0c8 (deployed 13:41 on 2026-07-25) started sending the uncropped
+     originals too, pushing a single front photo over the cap. The request was
+     refused before the action ran. `save()` had no try/catch, so the 413
+     rendered as a frozen spinner rather than an error. Fixed by a 4 MB limit,
+     a client-side payload fitter, an action that returns its failures, and
+     `finally` on all five stranded surfaces.
+   - **Cost basis is optional now**, with an editable breakdown. The schema for
+     it is already live; until the code deploys, the new columns simply sit
+     unused.
 
-**3. Merge PR #2** (github.com/bowmansx/CardOps/pull/2) — it carries everything.
+1. **Put a real box of cards through the scanner.** Everything above was
+   groundwork for this. Log where the capture flow actually hurts — that
+   friction list is what Wave A gets designed against, per the standing
+   agreement not to design the intake loop from imagination.
+2. **Re-add the businesses** (AF, HOP) — that setup lived in the old database.
+3. **Connect Zoho books** (§1 below) once the businesses exist.
 
-**4. Decisions blocking work:** off-site backup destination (R2 / Drive / S3)
-— gates seeding the Mantle; credits org- or user-scoped; and
-`VALUATION_ENGINE.md` still isn't in the repo (blocks Wave B3's discovery-plan
-display).
+### Decisions still open (not blocking)
 
-Design docs written and awaiting go: `DESIGN_WAVE_B.md` (schema BUILT, UI not),
+- Off-site backup destination (R2 / Drive / S3) — **gates seeding the Mantle**,
+  because losing evidence documents is the catastrophic failure for an asset
+  whose value lives in its paperwork.
+- Credits org-scoped or user-scoped — changes the money core, cheap now.
+- `VALUATION_ENGINE.md` still isn't in the repo (blocks Wave B3's
+  discovery-plan display).
+
+Design docs awaiting go: `DESIGN_WAVE_B.md` (schema BUILT, UI not),
 `DESIGN_WAVE_C.md` (org tenancy, design only), `DESIGN_PHOTO_SYSTEM.md`
 (templates, quality presets, quotas — measurement built, policy not).
 

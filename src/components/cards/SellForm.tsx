@@ -79,6 +79,7 @@ export function SellForm({
   async function submit() {
     setErr(null);
     setBusy(true);
+    try {
     const res = await sellCard(id, {
       platform: f.platform,
       sale_price: num(f.sale_price),
@@ -90,9 +91,19 @@ export function SellForm({
         ? { title: f.listing_title.trim() || null, description: f.listing_desc.trim() || null }
         : null,
     });
-    setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
     setDone(res);
+    } catch (e) {
+      // Rule 8: a money state machine may not dead-end. A rejection here used
+      // to freeze the button, leaving you unable to tell whether the sale
+      // recorded. Say plainly that it did not, and check before retrying.
+      setErr(
+        (e instanceof Error && e.message ? e.message + " — " : "") +
+        "The sale was not recorded. Check the card before trying again.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (done) {

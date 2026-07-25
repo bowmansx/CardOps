@@ -18,6 +18,8 @@ import { parseStoredIntel } from "@/lib/cards/card-intel-schema";
 import { EbayListPanel } from "@/components/cards/EbayListPanel";
 import { CardStatusControl } from "@/components/cards/CardStatusControl";
 import { CardBooksControl } from "@/components/cards/CardBooksControl";
+import { BasisBreakdown } from "@/components/cards/BasisBreakdown";
+import { lotAverages, cardAcquisitionBasis } from "@/lib/cards/basis";
 import { MarketBySource } from "@/components/cards/MarketBySource";
 import { currentRole } from "@/lib/cards/roles";
 import { suggestedListPrice } from "@/lib/cards/valuation";
@@ -37,6 +39,15 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
   if (!data) notFound();
   const c = data as Card;
   const role = await currentRole();
+  // Acquisition half of the basis: the lot's CURRENT average, or the stated
+  // figure. The cost lines that sit on top are loaded by the breakdown itself.
+  const { data: lotRow } = c.purchase_lot_id
+    ? await supabase.from("purchase_lots").select("id, remaining_cost, remaining_count").eq("id", c.purchase_lot_id).maybeSingle()
+    : { data: null };
+  const acquisition = cardAcquisitionBasis(
+    c as unknown as { purchase_lot_id: string | null; individual_basis: number | null },
+    lotAverages(lotRow ? [lotRow as { id: string; remaining_cost: number | null; remaining_count: number | null }] : []),
+  );
   // Each card user has their own businesses (RLS-scoped) — not owner-gated.
   const entities =
     (await supabase.from("card_businesses").select("id, short_code, name").eq("active", true).order("short_code")).data ?? [];
@@ -100,7 +111,7 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
     ["Parallel", c.parallel ?? "—"],
     ["Team", c.team ?? "—"],
     ["Condition", c.condition_type === "graded" ? `${c.grader ?? ""} ${c.grade ?? ""}${c.cert_number ? ` · cert ${c.cert_number}` : ""}` : "Raw"],
-    ["Basis", c.purchase_lot_id ? "Purchase lot" : `Individual ${money(c.individual_basis)}`],
+    ["Acquisition", c.purchase_lot_id ? `Purchase lot ${money(acquisition)}` : money(c.individual_basis)],
     ["Market value", money(c.market_value)],
     ["Manual price", money(c.manual_price)],
     ["Strategy", c.pricing_strategy],
@@ -134,6 +145,17 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
             <img src={qr} alt="QR" className="h-24 w-24 rounded border border-hairline bg-white" />
             <div className="figures mt-1 text-[10px] text-ink/40">scan → card</div>
           </div>
+        </div>
+
+        {/* Total Cost Basis, expandable into the lines that make it up. */}
+        <div className="mt-4">
+          <BasisBreakdown
+            cardId={c.id}
+            acquisition={acquisition}
+            fromLot={!!c.purchase_lot_id}
+            basisEntered={(c as unknown as { basis_entered?: boolean | null }).basis_entered !== false}
+            sold={c.status === "sold"}
+          />
         </div>
 
         {/* THE PRICE BLOCK (Beau, 2026-07-19): the money answer belongs on

@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
 import { readAllSafe } from "@/lib/supabase/page";
-import { lotAverages, cardBasis } from "@/lib/cards/basis";
+import { lotAverages, cardBasis, cardAcquisitionBasis, cardCostLines } from "@/lib/cards/basis";
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 import { requestNowMs } from "@/lib/now";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +28,7 @@ type SaleRow = {
 type OpenCard = {
   sport_category: string | null; status: string; condition_type: string | null;
   manual_price: number | null; market_value: number | null;
-  purchase_lot_id: string | null; individual_basis: number | null; listed_at: string | null;
+  purchase_lot_id: string | null; individual_basis: number | null; basis_items_total: number | null; listed_at: string | null;
 };
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -73,7 +75,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       .select("platform, sale_price, fees, shipping_income, shipping_cost, net_proceeds, basis_drawn, profit_loss, sold_at, cards ( sport_category, player, set_name, listed_at )")
       .order("sold_at", { ascending: false }).order("id", { ascending: true }).range(from, to)),
     readAllSafe<OpenCard>((from, to) => supabase.from("cards")
-      .select("sport_category, status, condition_type, manual_price, market_value, purchase_lot_id, individual_basis, listed_at")
+      .select("sport_category, status, condition_type, manual_price, market_value, purchase_lot_id, individual_basis, basis_items_total, listed_at")
       .not("status", "in", "(sold,archived)").order("id", { ascending: true }).range(from, to)),
     readAllSafe<{ id: string; remaining_cost: number | null; remaining_count: number | null }>((from, to) =>
       supabase.from("purchase_lots").select("id, remaining_cost, remaining_count")
@@ -128,18 +130,22 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 function Overview({ sales, open, lots }: { sales: SaleRow[]; open: OpenCard[]; lots: { id: string; remaining_cost: number | null; remaining_count: number | null }[] }) {
   const unrealizedValue = open.reduce((s, c) => s + num(c.manual_price ?? c.market_value), 0);
   const avgByLot = lotAverages(lots);
-  const individualBasis = open.reduce((s, c) => s + (c.purchase_lot_id ? 0 : num(c.individual_basis)), 0);
+  // Partition by SOURCE, never by `purchase_lot_id`: a lot card can now carry
+  // cost lines too, and branching on the lot id would count those in both
+  // buckets. acquisition + costLines === Sum(cardBasis), by construction.
   const openPooledCount = open.filter((c) => c.purchase_lot_id).length;
-  const openPoolBasis = Math.round(open.reduce((s, c) => s + (c.purchase_lot_id ? cardBasis(c, avgByLot) : 0), 0) * 100) / 100;
-  const openBasis = openPoolBasis + individualBasis;
+  const acquisitionBasis = round2(open.reduce((s, c) => s + cardAcquisitionBasis(c, avgByLot), 0));
+  const costLinesBasis = round2(open.reduce((s, c) => s + cardCostLines(c), 0));
+  const openBasis = round2(open.reduce((s, c) => s + cardBasis(c, avgByLot), 0));
   const years = [...new Set(sales.map((s) => s.sold_at.slice(0, 4)))].sort().reverse();
 
   return (
     <>
       <Card title="On the shelf (unrealized)">
         <Line label={`Inventory value · ${open.length} cards`} value={money(unrealizedValue)} strong />
-        <Line label={`Purchase-lot basis (${openPooledCount} lot cards)`} value={money(openPoolBasis)} />
-        {individualBasis > 0 && <Line label="Individually-based cards basis" value={money(individualBasis)} />}
+        <Line label={`Acquisition cost (${openPooledCount} of ${open.length} from purchase lots)`} value={money(acquisitionBasis)} />
+        {costLinesBasis !== 0 && <Line label="Cost lines (grading, tax, shipping in…)" value={money(costLinesBasis)} />}
+        <Line label="Total cost basis" value={money(openBasis)} />
         <Line label="Unrealized gain if sold at value" value={money(unrealizedValue - openBasis)} tone={unrealizedValue - openBasis >= 0 ? "pos" : "neg"} />
       </Card>
       {years.length === 0 && <Empty text="No settled sales yet — sell something first. 🎯" />}

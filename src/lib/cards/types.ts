@@ -113,6 +113,10 @@ export type Card = {
   pricing_strategy: string;
   purchase_lot_id: string | null;
   individual_basis: number | null;
+  /** Trigger-maintained sum of card_basis_items. Never written directly. */
+  basis_items_total: number | null;
+  /** False = no cost basis was ever stated. Keeps 0 from reading as fact. */
+  basis_entered: boolean | null;
   acquisition_method: string | null;
   acquisition_source: string | null;
   notes: string | null;

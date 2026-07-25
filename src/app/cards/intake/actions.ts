@@ -128,7 +128,7 @@ export type IntakeInput = {
   grader?: string; grade?: string; cert_number?: string;
   zone?: string; location_code?: string; pricing_strategy?: string;
   entity_id?: string; tax_treatment?: string;
-  cost?: string; // REQUIRED (validated in commitIntakeCard): what was paid, 0 allowed
+  cost?: string; // OPTIONAL: acquisition cost. Blank = not stated (basis_entered false).
   vision_confidence?: unknown;
   front?: string; back?: string;
   // The uncropped camera frames behind `front`/`back`, when the in-app camera
@@ -143,12 +143,29 @@ const treatmentOf = (t?: string) => (t && TREATMENTS.includes(t) ? t : "dealer")
 export async function commitIntakeCard(
   input: IntakeInput,
 ): Promise<{ ok: boolean; id?: string; sku?: string; error?: string; warning?: string }> {
+  // A server action that THROWS rejects the client's promise instead of
+  // returning — the caller gets no result to inspect, which is how a save
+  // failure turned into a spinner that never stopped. Every failure in here
+  // comes back as a value the screen can render.
+  try {
+    return await commitIntakeCardInner(input);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "The save failed." };
+  }
+}
+
+async function commitIntakeCardInner(
+  input: IntakeInput,
+): Promise<{ ok: boolean; id?: string; sku?: string; error?: string; warning?: string }> {
   const { supabase } = await authed();
-  // Cost is REQUIRED (0 allowed): un-costed cards are how basis silently
-  // corrupted under the old global pool. Lot-funded intake comes via Speed Book.
-  const cost = Number(input.cost);
-  if (input.cost == null || input.cost === "" || !Number.isFinite(cost) || cost < 0) {
-    return { ok: false, error: "Cost is required — enter 0 for a free card." };
+  // Cost is OPTIONAL and defaults to 0 (Beau, 2026-07-25) — scanning a card
+  // should never stop because you haven't looked up what you paid. A figure you
+  // DID state is marked as stated, so an unpriced card can be found and filled
+  // in later instead of quietly reading as free.
+  const stated = input.cost != null && String(input.cost).trim() !== "";
+  const cost = stated ? Number(input.cost) : 0;
+  if (stated && (!Number.isFinite(cost) || cost < 0)) {
+    return { ok: false, error: "That cost doesn't look like a number." };
   }
   const category = input.sport_category?.trim() || null;
   const year = input.year && Number.isFinite(Number(input.year)) ? Number(input.year) : new Date().getFullYear();
@@ -177,6 +194,7 @@ export async function commitIntakeCard(
     pricing_strategy: input.pricing_strategy?.trim() || "standard",
     vision_confidence: input.vision_confidence ?? null,
     individual_basis: cost,
+    basis_entered: stated,
     status: "booked",
     entity_id: await resolveEntityId(supabase, input.entity_id),
     // Tax treatment is an owner decision (drives the owner-only books); staff default to dealer.
@@ -307,7 +325,11 @@ export async function commitSpeedBatch(
 ): Promise<{ ok: boolean; inserted?: number; poolTotal?: number; ids?: string[]; error?: string; warning?: string }> {
   const { supabase } = await authed();
   if (!items.length) return { ok: false, error: "No cards in the batch." };
-  if (!(lotCost > 0)) return { ok: false, error: "Enter the lot cost for this batch (required)." };
+  // The RPC itself allows 0 ("0 allowed for a free lot"); the UI was stricter
+  // than the rule it was enforcing.
+  if (!Number.isFinite(lotCost) || lotCost < 0) {
+    return { ok: false, error: "Enter the lot cost for this batch (0 is fine for a free lot)." };
+  }
 
   // Atomic: the RPC inserts every card + writes the append-only pool ledger +
   // increments the pool inside ONE locked transaction. Either the whole lot
@@ -323,7 +345,9 @@ export async function commitSpeedBatch(
     p_lot_cost: lotCost,
   });
   if (error) return { ok: false, error: error.message };
-  const result = data as { inserted: number; ids: string[]; pool_total: number };
+  // The RPC returns lot_cost, not pool_total — reading the wrong key meant
+  // poolTotal was ALWAYS undefined and the confirmation screen showed nothing.
+  const result = data as { inserted: number; ids: string[]; lot_id: string; lot_cost: number };
 
   // Attach each front photo to its card (order matches payload), keeping the
   // uncropped frame alongside it. A photo that fails to store is reported
@@ -338,7 +362,7 @@ export async function commitSpeedBatch(
   // ids in insertion order (matches `items`) — Batch (AI) mode uses them to
   // stamp the chosen strategy and pair each card with its photo for scanning.
   return {
-    ok: true, inserted: result.inserted, poolTotal: result.pool_total, ids: result.ids,
+    ok: true, inserted: result.inserted, poolTotal: result.lot_cost, ids: result.ids,
     ...(photoWarnings.length ? { warning: `${photoWarnings.length} photo(s) not saved: ${photoWarnings.slice(0, 3).join(" · ")}` } : {}),
   };
 }

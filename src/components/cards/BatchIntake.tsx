@@ -12,6 +12,7 @@ import {
   type IntakeInput,
 } from "@/app/cards/intake/actions";
 import { CameraSheet } from "./CameraSheet";
+import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
 import { Lightbox } from "./Lightbox";
 
 type Phase = "setup" | "booking" | "scanning" | "done";
@@ -33,6 +34,7 @@ export function BatchIntake({
   strategies?: { key: string; label: string }[];
   entities?: { id: string; short_code: string; name: string }[];
 }) {
+  const photoPrefs = usePhotoPrefs();
   const [category, setCategory] = useState<string>("");
   const [zone, setZone] = useState<string>("BULK");
   const [strategy, setStrategy] = useState<string>("standard");
@@ -318,7 +320,9 @@ export function BatchIntake({
 
       {cam && (
         <CameraSheet
+          prefs={photoPrefs}
           title="Batch scan — front of each card"
+          shotLabel="front"
           multi
           onClose={() => setCam(false)}
           onCapture={addShot}

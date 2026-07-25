@@ -7,10 +7,16 @@
 -- the raise is what rolls every test row back, so nothing ever persists.
 -- THE RED ERROR BOX IS EXPECTED: read the message inside it.
 --
--- Requires migrations through 20260737000000. Simulated auth: sets
--- request.jwt.claims the way PostgREST does. The RPCs leave cardops.in_sell
--- set for the rest of the transaction (harmless in prod where each request is
--- its own transaction) — the harness resets it after every RPC call.
+-- Requires migrations through 20260742000000. Simulated auth: sets
+-- request.jwt.claims the way PostgREST does.
+--
+-- TRANSITION GUCs: card_sell, card_move_asset and card_reclass_tax_bucket each
+-- set a cardops.in_* flag so their own writes pass the guards. Those flags
+-- outlive the call for the rest of the TRANSACTION — harmless in production,
+-- where every request is its own transaction, but this whole harness is one
+-- transaction, so a flag left set silently disables the very guard the next
+-- assertion is testing. THE HARNESS RESETS EACH FLAG AFTER EVERY RPC CALL.
+-- Assertions 35 and 36 failed on the first live run for exactly this reason.
 -- ══════════════════════════════════════════════════════════════════════════
 do $$
 declare
@@ -26,6 +32,10 @@ declare
   v_name  text;
   v_note  text;
   v_n2    uuid;
+  -- Photo ids get their OWN variable. Borrowing v_solo for one cost assertions
+  -- 35 and 36 their meaning: they updated `where id = <a photo id>`, matched no
+  -- rows, raised nothing, and reported the guard as missing.
+  v_photo uuid;
   v_pass  int := 0;
   v_fail  int := 0;
   v_r     text := E'\n';
@@ -415,6 +425,7 @@ begin
       v_ok := false; v_note := 'empty reason accepted';
     exception when others then
       v_out := public.card_reclass_tax_bucket(v_solo, 'dealer', 'moved to flip inventory');
+      perform set_config('cardops.in_reclass', '', true);
       select tax_bucket_source into v_note from public.cards where id = v_solo;
       v_ok := (v_out->>'to') = 'dealer' and v_note = 'explicit_override';
       v_note := format('to=%s source=%s', v_out->>'to', v_note);
@@ -441,6 +452,7 @@ begin
   begin
     perform public.card_move_asset(v_solo, 'out_for_crossover', 'PSA', null,
                                    (current_date + 90), 'TRK1', 100.00, 'harness');
+    perform set_config('cardops.in_move', '', true);
     select count(*) into v_cnt from public.card_custody_log
      where card_id = v_solo and to_state = 'out_for_crossover';
     select asset_state into v_note from public.cards where id = v_solo;
@@ -467,6 +479,7 @@ begin
   v_name := '30. pledged asset refuses listing/sale';
   begin
     perform public.card_move_asset(v_solo, 'pledged_as_collateral', 'Lender', null, (current_date + 30));
+    perform set_config('cardops.in_move', '', true);
     begin
       update public.cards set status = 'listed' where id = v_solo;
       v_ok := false; v_note := 'listing a pledged asset was allowed';
@@ -547,12 +560,12 @@ begin
   begin
     insert into public.card_photos (card_id, kind, variant, bucket, path, bytes)
       values (v_card, 'front', 'original', 'card-photos', 'x/src.jpg', 900)
-      returning id into v_solo;
+      returning id into v_photo;
     insert into public.card_photos (card_id, kind, variant, bucket, path, bytes, derived_from, crop_geometry)
-      values (v_card, 'front', 'processed', 'card-photos', 'x/crop.jpg', 300, v_solo,
+      values (v_card, 'front', 'processed', 'card-photos', 'x/crop.jpg', 300, v_photo,
               jsonb_build_object('margin_pct', 0.04, 'deskewed', false));
     select count(*) into v_cnt from public.card_photos
-     where derived_from = v_solo and (crop_geometry->>'margin_pct')::numeric = 0.04;
+     where derived_from = v_photo and (crop_geometry->>'margin_pct')::numeric = 0.04;
     v_ok := v_cnt = 1;
     v_note := format('linked_derivatives=%s', v_cnt);
   exception when others then
@@ -568,10 +581,22 @@ begin
   -- calls: clear the state, then sell.
   v_name := '35. asset_state refuses a field edit';
   begin
-    update public.cards set asset_state = 'vaulted' where id = v_solo;
-    v_ok := false; v_note := 'plain update was allowed';
+    -- Prove the target EXISTS first. A zero-row update raises nothing, which
+    -- is indistinguishable from "the guard is missing" — that is exactly how
+    -- this assertion lied on its first run.
+    select count(*) into v_cnt from public.cards where id = v_solo;
+    if v_cnt <> 1 then
+      v_ok := false; v_note := 'test target missing — assertion would be vacuous';
+    else
+      begin
+        update public.cards set asset_state = 'vaulted' where id = v_solo;
+        v_ok := false; v_note := 'plain update was allowed';
+      exception when others then
+        v_ok := sqlerrm ilike '%custody transition%'; v_note := sqlerrm;
+      end;
+    end if;
   exception when others then
-    v_ok := true; v_note := sqlerrm;
+    v_ok := false; v_note := sqlerrm;
   end;
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
@@ -579,10 +604,19 @@ begin
   -- ── 36. the tax-bucket REASON is guarded, not just the value ──────────────
   v_name := '36. tax_bucket provenance columns are guarded';
   begin
-    update public.cards set tax_bucket_reason = 'rewritten' where id = v_solo;
-    v_ok := false; v_note := 'reason was editable';
+    select count(*) into v_cnt from public.cards where id = v_solo;
+    if v_cnt <> 1 then
+      v_ok := false; v_note := 'test target missing — assertion would be vacuous';
+    else
+      begin
+        update public.cards set tax_bucket_reason = 'rewritten' where id = v_solo;
+        v_ok := false; v_note := 'reason was editable';
+      exception when others then
+        v_ok := sqlerrm ilike '%classification%'; v_note := sqlerrm;
+      end;
+    end if;
   exception when others then
-    v_ok := true; v_note := sqlerrm;
+    v_ok := false; v_note := sqlerrm;
   end;
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
@@ -643,12 +677,190 @@ begin
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
+  -- ══ photo preferences (migration 20260741) ══════════════════════════════
+
+  -- ── 40. a zero crop margin is refused at the database ─────────────────────
+  -- Zero puts the card's real edge ON the image boundary, which is the exact
+  -- misrepresentation the margin exists to prevent. TypeScript floors it; this
+  -- pins that a direct write can't get around that.
+  v_name := '40. crop margin cannot be set to zero';
+  begin
+    insert into public.card_user_prefs (user_id) values (v_uid)
+      on conflict (user_id) do nothing;
+    begin
+      update public.card_user_prefs set crop_margin_pct = 0 where user_id = v_uid;
+      v_ok := false; v_note := 'a zero margin was accepted';
+    exception when check_violation then
+      v_ok := true; v_note := 'refused, as it should be';
+    end;
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 41. burst count stays inside 1..5 ─────────────────────────────────────
+  -- An unbounded burst is a way to spend someone's storage quota by accident.
+  v_name := '41. burst count is bounded';
+  begin
+    begin
+      update public.card_user_prefs set burst_count = 50 where user_id = v_uid;
+      v_ok := false; v_note := 'a 50-frame burst was accepted';
+    exception when check_violation then
+      v_ok := true; v_note := 'refused, as it should be';
+    end;
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 42. turning originals off is recorded ─────────────────────────────────
+  -- It is the one setting that can quietly destroy evidence: with it off, a
+  -- crop becomes the only record of a card's edges. Allowed, but never silent.
+  v_name := '42. keep_originals change writes an audit row';
+  begin
+    select count(*) into v_cnt from public.audit_log
+     where action = 'photo_prefs.keep_originals' and target = v_uid::text;
+    update public.card_user_prefs set keep_originals = false where user_id = v_uid;
+    select count(*) into v_n from public.audit_log
+     where action = 'photo_prefs.keep_originals' and target = v_uid::text;
+    v_ok := v_n = v_cnt + 1;
+    v_note := format('audit rows before=%s after=%s (want +1)', v_cnt, v_n);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ══ cost-basis lines (migration 20260742) ═══════════════════════════════
+
+  -- ── 43. a cost line adds to basis and card_sell draws the TOTAL ───────────
+  -- Without this the breakdown is decoration: you record $60 of grading and
+  -- still book profit as if the card only cost what you paid for it.
+  v_name := '43. card_sell draws acquisition + cost lines';
+  begin
+    insert into public.cards (user_id, sku, player, status, individual_basis)
+      values (v_uid, 'TST-2026-000020', 'BasisCard', 'booked', 40.00)
+      returning id into v_n2;
+    insert into public.card_basis_items (card_id, user_id, kind_key, label, amount)
+      values (v_n2, v_uid, 'grading_fee', 'Grading fee', 25.00);
+    select basis_items_total into v_total from public.cards where id = v_n2;
+    v_out := public.card_sell(v_n2, 'test', 200, 0, 0, 0, 'TEST-ORDER-B1');
+    perform set_config('cardops.in_sell', '', true);
+    v_ok := v_total = 25.00
+        and (v_out->>'basis')::numeric = 65.00
+        and (v_out->>'profit_loss')::numeric = 135.00;
+    v_note := format('cache=%s basis=%s pl=%s (want 25.00 / 65.00 / 135.00)',
+                     v_total, v_out->>'basis', v_out->>'profit_loss');
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
+  -- ── 44. a sold card's basis is locked ─────────────────────────────────────
+  -- Profit is already recorded in card_sales and may already be posted to real
+  -- books; moving basis afterwards rewrites history in silence.
+  v_name := '44. cost lines refused on a sold card';
+  begin
+    insert into public.card_basis_items (card_id, user_id, kind_key, label, amount)
+      values (v_n2, v_uid, 'appraisal_fee', 'Appraisal', 10.00);
+    v_ok := false; v_note := 'a cost line was accepted on a sold card';
+  exception when others then
+    v_ok := sqlerrm like '%sold%'; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
+  -- ── 45. the cached total has exactly one writer ───────────────────────────
+  v_name := '45. basis_items_total cannot be written directly';
+  begin
+    insert into public.cards (user_id, sku, player, status, individual_basis)
+      values (v_uid, 'TST-2026-000021', 'CacheCard', 'booked', 5.00)
+      returning id into v_n2;
+    begin
+      update public.cards set basis_items_total = 999 where id = v_n2;
+      v_ok := false; v_note := 'a direct write to the cache was allowed';
+    exception when others then
+      v_ok := sqlerrm like '%maintained from card_basis_items%'; v_note := sqlerrm;
+    end;
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
+  -- ── 46. deleting a line puts the cache back ───────────────────────────────
+  v_name := '46. cache follows insert, update and delete';
+  begin
+    insert into public.card_basis_items (card_id, user_id, kind_key, label, amount)
+      values (v_n2, v_uid, 'sales_tax', 'Sales tax paid', 8.00) returning id into v_photo;
+    update public.card_basis_items set amount = 12.00 where id = v_photo;
+    select basis_items_total into v_total from public.cards where id = v_n2;
+    delete from public.card_basis_items where id = v_photo;
+    select basis_items_total into v_n from public.cards where id = v_n2;
+    v_ok := v_total = 12.00 and v_n = 0;
+    v_note := format('after update=%s after delete=%s (want 12.00 / 0)', v_total, v_n);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
+  -- ── 47. total basis cannot be driven negative ─────────────────────────────
+  -- Credit lines (a refunded grading fee) are legitimate; a card that cost
+  -- less than nothing is not.
+  v_name := '47. a credit line cannot make basis negative';
+  begin
+    insert into public.card_basis_items (card_id, user_id, kind_key, label, amount)
+      values (v_n2, v_uid, 'other', 'Refund', -50.00);
+    v_ok := false; v_note := 'basis was allowed to go negative';
+  exception when others then
+    v_ok := sqlerrm like '%negative%'; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
+  -- ── 48. an un-costed card is FLAGGED, not silently free ───────────────────
+  -- Cost is optional now. That is only safe while "I didn't say" stays
+  -- distinguishable from "it genuinely cost nothing" (prevention rule 4).
+  v_name := '48. basis_entered separates unstated from zero';
+  begin
+    insert into public.cards (user_id, sku, player, status)
+      values (v_uid, 'TST-2026-000022', 'UnpricedCard', 'booked')
+      returning id into v_n2;
+    select case when basis_entered then 1 else 0 end into v_cnt from public.cards where id = v_n2;
+    insert into public.cards (user_id, sku, player, status, individual_basis)
+      values (v_uid, 'TST-2026-000023', 'FreeCard', 'booked', 0)
+      returning id into v_photo;
+    select case when basis_entered then 1 else 0 end into v_n from public.cards where id = v_photo;
+    v_ok := v_cnt = 0 and v_n = 1;
+    v_note := format('unpriced entered=%s (want 0) · explicit-zero entered=%s (want 1)', v_cnt, v_n);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 39 PASSED · %s FAILED'
+    || '%s of 48 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 39 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 48 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;

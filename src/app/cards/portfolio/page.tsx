@@ -58,14 +58,17 @@ export default async function PortfolioPage() {
   // Today's live total (paged) — so the newest point is current, not stale.
   const livePage = await readAllSafe<{
     market_value: number | null; manual_price: number | null;
-    purchase_lot_id: string | null; individual_basis: number | null;
+    purchase_lot_id: string | null; individual_basis: number | null; basis_items_total: number | null;
   }>((from, to) => supabase
-    .from("cards").select("market_value, manual_price, purchase_lot_id, individual_basis")
+    .from("cards").select("market_value, manual_price, purchase_lot_id, individual_basis, basis_items_total")
     .not("status", "in", "(archived,sold)").order("id", { ascending: true }).range(from, to));
   let marketValue = 0, individualBasis = 0;
   for (const r of livePage.rows) {
     marketValue += Number((r.manual_price ?? r.market_value) ?? 0);
     if (!r.purchase_lot_id) individualBasis += Number(r.individual_basis ?? 0);
+    // Cost lines belong to the card, not the lot — lotRemainingTotal() knows
+    // only about acquisition.
+    individualBasis += Number(r.basis_items_total ?? 0);
   }
   const livepartial = !!(livePage.error || lotsPage.error);
   const todayCost = lotRemainingTotal(lotsPage.rows) + individualBasis;

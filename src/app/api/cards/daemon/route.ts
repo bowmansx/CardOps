@@ -190,10 +190,10 @@ async function snapshotUser(
 
     const { rows: vrows, truncated } = await readAll<{
       market_value: number | null; manual_price: number | null;
-      purchase_lot_id: string | null; individual_basis: number | null;
+      purchase_lot_id: string | null; individual_basis: number | null; basis_items_total: number | null;
     }>(
       (from, to) => svc.from("cards")
-        .select("market_value, manual_price, purchase_lot_id, individual_basis")
+        .select("market_value, manual_price, purchase_lot_id, individual_basis, basis_items_total")
         .eq("user_id", uid).not("status", "in", "(archived,sold)")
         .order("id", { ascending: true }).range(from, to),
       SNAPSHOT_MAX,
@@ -204,6 +204,9 @@ async function snapshotUser(
     for (const v of vrows) {
       marketValue += Number((v.manual_price ?? v.market_value) ?? 0);
       if (!v.purchase_lot_id) individualBasis += Number(v.individual_basis ?? 0);
+      // Cost lines ride on the card whatever funded it, so lotTotal alone
+      // would understate the snapshot by every grading fee ever recorded.
+      individualBasis += Number(v.basis_items_total ?? 0);
       count++;
     }
     const costBasis = lotTotal + individualBasis;
