@@ -50,6 +50,13 @@ export async function listStorageLocations(): Promise<string[]> {
     return [];
   }
 }
+/** A CSV basis cell, coerced. Anything unusable becomes 0 and is reported as
+ *  NOT stated, so an unreadable column can never masquerade as a free card. */
+function importBasis(v: string | undefined): number {
+  const b = v == null || v.trim() === "" ? null : Number(v);
+  return b != null && Number.isFinite(b) && b >= 0 && b <= 10_000_000 ? b : 0;
+}
+
 function num(v: FormDataEntryValue | null): number | null {
   if (v == null || v.toString().trim() === "") return null;
   const n = Number(v);
@@ -117,11 +124,13 @@ function validateFields(f: ReturnType<typeof fields>): void {
 export async function createCard(formData: FormData) {
   const supabase = await authed();
   const f = fields(formData);
-  // Cost is REQUIRED at create (0 is fine for gifts/pulls): a card without a
-  // stated basis is the never-funded-pool trap all over again.
-  if (f.individual_basis == null) {
-    throw new Error("Cost basis is required — enter 0 for a free card.");
-  }
+  // Cost is OPTIONAL (Beau, 2026-07-25) and defaults to 0 — booking a card
+  // should never be blocked on a number you don't have yet. The old hard
+  // requirement existed to stop un-costed cards becoming the never-funded-pool
+  // trap; `basis_entered` does that job now WITHOUT the friction, by keeping
+  // "I didn't say" distinguishable from "it genuinely cost nothing".
+  const basisStated = f.individual_basis != null;
+  if (!basisStated) f.individual_basis = 0;
   validateFields(f);
   const year = f.year ?? new Date().getFullYear();
   const cat = catCode(f.sport_category);
@@ -135,7 +144,7 @@ export async function createCard(formData: FormData) {
     const sku = await nextSku(supabase, cat, year);
     const { data, error } = await supabase
       .from("cards")
-      .insert({ ...row, sku, entity_id: CARD_ENTITY, status: "booked" })
+      .insert({ ...row, sku, entity_id: CARD_ENTITY, status: "booked", basis_entered: basisStated })
       .select("id")
       .single();
     if (!error) { newId = data.id as string; break; }
@@ -151,13 +160,18 @@ export async function updateCard(id: string, formData: FormData) {
   const supabase = await authed();
   const f = fields(formData);
   validateFields(f);
+  // An empty basis box means "leave it alone", NOT "set it to nothing". The
+  // form makes the field optional when editing, and a blanket update of every
+  // field turned that into a silent wipe of a card's cost basis.
+  const patch: Record<string, unknown> = { ...f, updated_at: new Date().toISOString() };
+  if (f.individual_basis == null) delete patch.individual_basis;
   let { error } = await supabase
     .from("cards")
-    .update({ ...f, updated_at: new Date().toISOString() })
+    .update(patch)
     .eq("id", id);
   if (error && NEW_COLS.test(error.message)) {
     // Pre-migration fallback: new columns not applied yet.
-    const f2: Record<string, unknown> = { ...f };
+    const f2: Record<string, unknown> = { ...patch };
     stripNewCols(f2);
     ({ error } = await supabase
       .from("cards")
@@ -240,6 +254,11 @@ export async function importCards(
       })(),
       zone: r.zone?.trim() || null,
       location_code: r.location_code?.trim() || null,
+      // CLAUDE.md said import defaults basis to 0; the code set nothing at all,
+      // so every imported card carried NULL and every sum coalesced it to 0 —
+      // indistinguishable from a genuinely free card. Now it says which it is.
+      individual_basis: importBasis(r.individual_basis),
+      basis_entered: importBasis(r.individual_basis) > 0 || /^\s*0/.test(r.individual_basis ?? ""),
     });
   }
   if (out.length === 0) return { ok: false, error: "No rows to import." };

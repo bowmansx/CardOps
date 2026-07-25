@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { currentRole } from "@/lib/cards/roles";
 import { PostToLedger } from "@/components/cards/PostToLedger";
 import { readAllSafe } from "@/lib/supabase/page";
-import { lotAverages, cardBasis } from "@/lib/cards/basis";
+import { lotAverages, cardAcquisitionBasis, cardCostLines, type BasisCard } from "@/lib/cards/basis";
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +71,7 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
     readAllSafe<Record<string, unknown>>((from, to) =>
       supabase
         .from("cards")
-        .select("id, entity_id, purchase_lot_id, individual_basis, market_value, manual_price, tax_treatment")
+        .select("id, entity_id, purchase_lot_id, individual_basis, basis_items_total, market_value, manual_price, tax_treatment")
         .not("status", "in", "(archived,sold)")
         .order("id", { ascending: true })
         .range(from, to)),
@@ -106,9 +106,14 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
     const a = get((c.entity_id as string) ?? null);
     a.invCount += 1;
     a.invMarket += Number((c.manual_price ?? c.market_value) ?? 0);
-    const cb = cardBasis(c as { purchase_lot_id: string | null; individual_basis: number | null }, avgByLot);
-    if (c.purchase_lot_id) a.invBasisPooled += cb;
-    else a.invBasisIndiv += cb;
+    // Acquisition splits by funding source; cost lines always sit on the card
+    // itself, so a lot card's grading fee lands in the individual bucket rather
+    // than inflating what the lot is recorded as having funded.
+    const card = c as BasisCard & { purchase_lot_id: string | null };
+    const acq = cardAcquisitionBasis(card, avgByLot);
+    if (card.purchase_lot_id) a.invBasisPooled += acq;
+    else a.invBasisIndiv += acq;
+    a.invBasisIndiv += cardCostLines(card);
     const t = (c.tax_treatment as string) ?? "dealer";
     if (t in treatmentTally) treatmentTally[t] += 1;
   }

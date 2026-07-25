@@ -137,8 +137,12 @@ export function CardForm({
         ) : null}
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className={lblCls}>Cost basis $ {initial ? "" : "(required — 0 for a free card)"}</span>
-            <input name="individual_basis" type="number" step="0.01" min="0" required={!initial}
+            <span className={lblCls}>
+              Total Cost Basis $ <span className="font-normal normal-case tracking-normal text-ink/40">
+                {initial ? "— leave blank to keep it as it is" : "— optional; add grading and other costs on the card page"}
+              </span>
+            </span>
+            <input name="individual_basis" type="number" step="0.01" min="0"
               defaultValue={initial?.individual_basis ?? ""} className={inputCls + " figures"} />
           </label>
           <label className="block">

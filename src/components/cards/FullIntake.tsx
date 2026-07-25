@@ -269,7 +269,11 @@ export function FullIntake({
             <Field label="Location" k="location_code" f={f} set={set} />
           </div>
           <label className="block">
-            <span className={lbl}>Cost $ — what you paid for THIS card (required; 0 for a free card)</span>
+            <span className={lbl}>
+              Total Cost Basis $ <span className="font-normal normal-case tracking-normal text-ink/40">
+                — optional. Grading, tax and other costs go on the card page after booking.
+              </span>
+            </span>
             <input
               type="number" step="0.01" min="0" inputMode="decimal"
               value={f.cost ?? ""}
