@@ -46,6 +46,7 @@ export function BatchIntake({
   const [phase, setPhase] = useState<Phase>("setup");
   const [scanDone, setScanDone] = useState(0);
   const [scanFail, setScanFail] = useState(0);
+  const [aiOff, setAiOff] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [booked, setBooked] = useState<{ n: number; poolTotal?: number } | null>(null);
   const abortRef = useRef(false);
@@ -59,12 +60,16 @@ export function BatchIntake({
   const preRef = useRef(new Map<string, Promise<IntakeInput | null>>());
   const [preDone, setPreDone] = useState<Set<string>>(new Set()); // urls whose pre-read finished
 
+  // "AI is off" and "the scan failed" both used to land here as a bare null,
+  // so a whole batch could come back needing manual entry with no clue that a
+  // single toggle was the cause. Record the reason once.
   async function scanFront(url: string): Promise<IntakeInput | null> {
     try {
       const r = await fetch("/api/cards/intake/scan", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ front: url }),
       });
       const d = await r.json();
+      if (d?.aiOff) { setAiOff(true); return null; }
       return r.ok && d.card ? (d.card as IntakeInput) : null;
     } catch {
       return null;
@@ -179,13 +184,21 @@ export function BatchIntake({
                 </>
               ) : (
                 <>
-                  <Sparkles size={15} className="text-pos" />
+                  <Sparkles size={15} className={aiOff ? "text-ink/40" : "text-pos"} />
                   AI filled {scanDone} of {total}
                   {scanFail > 0 ? ` (${scanFail} need manual details)` : ""} — they&apos;re in the
                   <Link href="/cards?status=review" className="ml-1 font-bold text-flag underline underline-offset-2">review pile</Link>.
                 </>
               )}
             </div>
+            {/* One toggle explains a whole batch of "needs manual details" —
+                say so instead of letting it read as an AI that just failed. */}
+            {aiOff && phase !== "scanning" && (
+              <div className="mx-auto mt-2 max-w-sm rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-800">
+                Nothing was auto-filled because <strong>AI card scan is off</strong>.{" "}
+                <Link href="/cards/services" className="underline underline-offset-2">Turn it on in Services</Link>, then use “Re-read (AI)” on the cards in the review pile.
+              </div>
+            )}
             {phase === "scanning" && (
               <>
                 <div className="mx-auto h-1.5 w-56 overflow-hidden rounded-full bg-ink/10">

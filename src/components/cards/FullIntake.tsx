@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Camera, Loader2, CheckCircle2, ScanLine, RotateCcw, AlertTriangle } from "lucide-react";
 import { SPORT_CATEGORIES, ZONES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import { commitIntakeCard, type IntakeInput } from "@/app/cards/intake/actions";
@@ -50,8 +51,18 @@ export function FullIntake({
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Scan failed.");
-      if (d.aiOff) { setAiOff(true); setF({}); }
-      else setF({ ...d.card });
+      if (d.aiOff) {
+        // The server tells us WHY and we used to throw it away, so "Re-read
+        // (AI)" looked like a dead button. A fail-closed path the user can't
+        // see is indistinguishable from a broken one (rules 4 and 8).
+        setAiOff(true);
+        setErr(d.message ?? "AI scan is off — fill the card in manually.");
+        setF({});
+      } else {
+        setAiOff(false);
+        setErr(null);
+        setF({ ...d.card });
+      }
       setStep("review");
     } catch (e) { setErr(e instanceof Error ? e.message : "Scan failed."); }
     finally { setBusy(null); }
@@ -144,6 +155,16 @@ export function FullIntake({
               ? <span className="figures rounded bg-ink/10 px-1.5 py-0.5 text-[10px] font-semibold text-ink/50">manual</span>
               : <span className="figures rounded bg-pos/15 px-1.5 py-0.5 text-[10px] font-semibold text-pos">AI-filled</span>}
           </div>
+
+          {/* "manual" alone doesn't say WHY or what to do about it. When the
+              kill-switch is the reason, say so and link to the fix — otherwise
+              re-reading just re-renders the same grey chip forever. */}
+          {aiOff && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-800">
+              AI scan is <strong>off</strong>, so nothing was filled in and <em>Re-read (AI)</em> can&apos;t do anything.
+              {" "}<Link href="/cards/services" className="underline underline-offset-2">Turn on “AI card scan (Anthropic)” in Services</Link>, then re-read.
+            </div>
+          )}
 
           {/* Photos: tap a thumbnail for full-screen + zoom; Retake swaps the
               shot without touching your field edits. */}
