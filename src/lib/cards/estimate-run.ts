@@ -12,6 +12,7 @@ import type { CardForPricing } from "@/lib/cards/price-sources/types";
 import { summarizeSales, comparableQueries, buildEstimateDigest, compsAsSales, groundPrice, medianOf, type SalesStats } from "@/lib/cards/estimate";
 import { storedToSales } from "@/lib/cards/market-sales";
 import type { EstimateConfig } from "@/lib/cards/credits";
+import type { AiTokens } from "@/lib/ai/rates";
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -27,8 +28,8 @@ export type EstimateCard = CardForPricing & { market_value: number | null; manua
 export type EstimateMode = "standard_plus" | "all_sales_plus";
 
 export type EstimateOutcome =
-  | { ok: true; value: number; low: number; high: number; confidence: string; rationale: string; sources: unknown; model: string }
-  | { ok: false; error: string; status: number };
+  | { ok: true; value: number; low: number; high: number; confidence: string; rationale: string; sources: unknown; model: string; usage: AiTokens }
+  | { ok: false; error: string; status: number; usage?: AiTokens };
 
 export async function runEstimate(
   db: SupabaseClient,
@@ -79,6 +80,7 @@ export async function runEstimate(
       : "IGNORE any template price. Derive a fair current market price purely from ALL the sales evidence, comparables, and conditions — this card may sell rarely, so the real price can differ from a simple average.";
 
   let parsed: z.infer<typeof Schema> | undefined;
+  let usage: AiTokens = { input_tokens: 0, output_tokens: 0 };
   try {
     const msg = await anthropic.messages.parse({
       model: config.ai === "deep" ? MODEL : HAIKU_MODEL,
@@ -93,11 +95,19 @@ export async function runEstimate(
       output_config: { format: zodOutputFormat(Schema) },
     });
     parsed = msg.parsed_output ?? undefined;
+    usage = {
+      input_tokens: msg.usage.input_tokens,
+      output_tokens: msg.usage.output_tokens,
+      cache_creation_input_tokens: msg.usage.cache_creation_input_tokens,
+      cache_read_input_tokens: msg.usage.cache_read_input_tokens,
+    };
   } catch (e) {
     console.error("[cards/estimate] AI failed:", e);
     return { ok: false, error: "Estimate failed — try again.", status: 502 };
   }
-  if (!parsed) return { ok: false, error: "Couldn't produce an estimate.", status: 422 };
+  // Tokens were consumed even when nothing parseable came back — carry usage
+  // so the caller's telemetry counts the cost of the failure too.
+  if (!parsed) return { ok: false, error: "Couldn't produce an estimate.", status: 422, usage };
 
   // Ground the output so a thin read (or an injected title) can't free-float.
   let value = Math.round(parsed.value * 100) / 100;
@@ -123,6 +133,7 @@ export async function runEstimate(
     confidence: parsed.confidence,
     rationale: parsed.rationale,
     model: config.ai === "deep" ? MODEL : HAIKU_MODEL,
+    usage,
     sources: {
       own, comparables, config,
       guides: guidesCond.length ? guidesCond : guidesAll,

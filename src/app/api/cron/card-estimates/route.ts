@@ -13,6 +13,9 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { readAll } from "@/lib/supabase/page";
 import { estimateCost, normalizeEstimate } from "@/lib/cards/credits";
 import { runEstimate, type EstimateCard, type EstimateMode } from "@/lib/cards/estimate-run";
+import { recordAiUsage } from "@/lib/ai/usage";
+import { creditEnforcement, creditAvailable } from "@/lib/ai/credit-gate";
+import { MODEL, HAIKU_MODEL } from "@/lib/anthropic";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -59,6 +62,12 @@ export async function GET(req: Request) {
   let made = 0, skipped = 0, failed = 0;
   let deadlineHit = false;
   const errors: string[] = [];
+
+  // Enforcement gate: read the flag once, then track each user's remaining
+  // credits locally so an empty balance skips their queue instead of burning
+  // AI calls that can't be paid for. Shadow mode (flag off) gates nothing.
+  const enforced = await creditEnforcement(svc);
+  const creditsLeft = new Map<string, number>();
 
   for (const p of prefs) {
     if (made >= GLOBAL || deadlineHit) break;
@@ -135,9 +144,20 @@ export async function GET(req: Request) {
 
       const config = normalizeEstimate({ mode, ai });
       const { credits } = estimateCost(config);
+      if (enforced && credits > 0) {
+        if (!creditsLeft.has(userId)) creditsLeft.set(userId, await creditAvailable(svc, userId));
+        if ((creditsLeft.get(userId) ?? 0) < credits) {
+          errors.push(`user ${userId}: out of credits — remaining estimates skipped`);
+          break;
+        }
+      }
       try {
         const res = await runEstimate(svc, card as unknown as EstimateCard, mode, config);
-        if (!res.ok) { failed++; errors.push(`${card.id} ${mode}: ${res.error}`); continue; }
+        if (!res.ok) {
+          failed++; errors.push(`${card.id} ${mode}: ${res.error}`);
+          if (res.usage) await recordAiUsage(svc, { userId, feature: `auto-estimate:${mode}`, model: ai === "deep" ? MODEL : HAIKU_MODEL, usage: res.usage, creditsCharged: 0, ref: card.id });
+          continue;
+        }
         // Row first, debit second (rule 7): a failed insert must not charge
         // credits for an estimate that doesn't exist.
         const { error: insErr } = await svc.from("card_estimates").insert({
@@ -145,12 +165,19 @@ export async function GET(req: Request) {
           confidence: res.confidence, rationale: res.rationale, sources: res.sources,
           credits_spent: credits, model: res.model, created_by: userId,
         });
-        if (insErr) { failed++; errors.push(`${card.id} ${mode}: estimate not stored (${insErr.message}) — not charged`); continue; }
-        if (credits > 0) {
-          const { error: debErr } = await svc.from("credit_ledger")
-            .insert({ user_id: userId, delta: -credits, reason: `auto-estimate:${mode}`, ref: card.id });
-          if (debErr) errors.push(`${card.id} ${mode}: estimate stored but credits not debited (${debErr.message})`);
+        if (insErr) {
+          failed++; errors.push(`${card.id} ${mode}: estimate not stored (${insErr.message}) — not charged`);
+          await recordAiUsage(svc, { userId, feature: `auto-estimate:${mode}`, model: res.model, usage: res.usage, creditsCharged: 0, ref: card.id });
+          continue;
         }
+        if (credits > 0) {
+          const { error: debErr } = await svc.rpc("credit_spend", {
+            p_user: userId, p_amount: credits, p_reason: `auto-estimate:${mode}`, p_ref: card.id,
+          });
+          if (debErr) errors.push(`${card.id} ${mode}: estimate stored but credits not debited (${debErr.message})`);
+          else if (creditsLeft.has(userId)) creditsLeft.set(userId, (creditsLeft.get(userId) ?? 0) - credits);
+        }
+        await recordAiUsage(svc, { userId, feature: `auto-estimate:${mode}`, model: res.model, usage: res.usage, creditsCharged: credits, ref: card.id });
         made++; forUser++;
       } catch (e) {
         failed++;

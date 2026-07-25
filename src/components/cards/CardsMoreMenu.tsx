@@ -37,6 +37,7 @@ export function CardsMoreMenu({ isOwner }: { isOwner: boolean }) {
           ["Reports", "/cards/reports"],
           ["Settings", "/cards/settings"],
           ["Services", "/cards/services"],
+          ["Credits", "/cards/credits"],
         ] as [string, string][])
       : []),
   ];

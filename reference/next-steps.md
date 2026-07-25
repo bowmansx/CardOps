@@ -62,6 +62,47 @@ Left over from the split, non-urgent:
 - VAPID/push, THECARDAPI, ANTHROPIC, ZOHO env vars were untouched by the
   split — they don't reference Supabase.
 
+## 1c. Credit metering — SHADOW MODE (built 2026-07-25)
+
+The business model Beau chose: users buy computation credits on the WEBSITE
+(not in-app — avoids Apple's 15–30% on digital goods; the PWA has no such
+constraint anyway) and spend them on metered AI work. Built now so pricing is
+set from data, not guesses. Nothing is user-visible or enforced yet.
+
+**Decisions locked:**
+- Retail price (credits) is DECOUPLED from measured cost (dollars). Reprice
+  retail without redefining what a credit is.
+- Flat per-operation pricing. Prompt-cache savings are margin, not a variable
+  discount — a run that costs 9 credits one day and 4 the next is worse for
+  the user than a stable number. Cache the SHARED prefix (rubric/instructions)
+  only, never one user's card data.
+- Plan grants EXPIRE at period end; purchased top-ups do NOT. Spending draws
+  the soonest-expiring bucket first, so nothing evaporates that could have
+  been used. (Rollover cap of 1× allowance / 30d is the intended plan shape —
+  the schema supports it; the granting job that applies it comes with billing.)
+
+**What exists (migration `20260737000000_credit_metering.sql`):**
+- `ai_usage` — real tokens + computed dollar cost per AI run (service-role
+  only). Unknown model ⇒ `cost_usd` null and FLAGGED, never $0.
+- `credit_ledger` v2 — `kind` / `expires_at` / `remaining` / `shortfall`.
+- `credit_balance()` v2 (unexpired remainders), `credit_grant()` (owner or
+  service role), `credit_spend()` (FIFO by expiry, service role).
+- `/cards/credits` (owner-only) — $/credit per feature, enforcement toggle,
+  test grants, recent ledger.
+- Harness extended to **18 assertions** (14–18 cover grants, FIFO draw,
+  expiry, shortfall, and non-owner refusal).
+
+**Why `credit_spend` never refuses:** by the time it runs the compute already
+happened (rule 7 orders the effect before the charge). Refusing there would
+hide a real cost; it records a `shortfall` instead. Refusal lives in app code
+BEFORE the AI call, gated on the `credit_enforcement` service_config flag
+(currently OFF = shadow mode).
+
+**Before charging anyone:** watch `$ / credit` on `/cards/credits` across real
+usage, then set prices. Then Stripe checkout → `credit_grant` (with the same
+idempotency discipline as the Zoho push — double-crediting a payment is the
+mirror image of double-posting a journal), then flip enforcement on.
+
 ## 2. Still dark until you act
 
 - **eBay.** The OAuth RuName is registered with eBay against

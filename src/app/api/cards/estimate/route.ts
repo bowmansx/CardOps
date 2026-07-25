@@ -12,6 +12,9 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { currentRole, hasCardAccess } from "@/lib/cards/roles";
 import { estimateCost, normalizeEstimate, type EstimateConfig } from "@/lib/cards/credits";
 import { runEstimate, type EstimateCard } from "@/lib/cards/estimate-run";
+import { recordAiUsage } from "@/lib/ai/usage";
+import { creditEnforcement, creditAvailable } from "@/lib/ai/credit-gate";
+import { MODEL, HAIKU_MODEL } from "@/lib/anthropic";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -73,8 +76,29 @@ export async function POST(request: Request) {
   const { data: card } = await supabase.from("cards").select(CARD_COLS).eq("id", body.cardId).maybeSingle();
   if (!card) return NextResponse.json({ error: "Card not found." }, { status: 404 });
 
+  // Enforcement gate BEFORE the AI call (spend-after-effect means the refusal
+  // has to happen here, not in credit_spend). Off = shadow mode, no gate.
+  if (svc && credits > 0 && (await creditEnforcement(svc))) {
+    const available = await creditAvailable(svc, user.id);
+    if (available < credits) {
+      return NextResponse.json(
+        { error: `Not enough credits — this estimate costs ${credits}, you have ${available}.`, balance: available },
+        { status: 402 },
+      );
+    }
+  }
+
   const res = await runEstimate(supabase, card as unknown as EstimateCard, mode, config);
-  if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status });
+  if (!res.ok) {
+    // The failed call still consumed tokens — measure it, charge nothing.
+    if (svc && res.usage) {
+      await recordAiUsage(svc, {
+        userId: user.id, feature: `estimate:${mode}`, model: config.ai === "deep" ? MODEL : HAIKU_MODEL,
+        usage: res.usage, creditsCharged: 0, ref: body.cardId,
+      });
+    }
+    return NextResponse.json({ error: res.error }, { status: res.status });
+  }
 
   // Cache the estimate + debit the metered-compute ledger (soft for now — records
   // spend; hard-enforcement flips on with billing). Row first, debit second
@@ -88,9 +112,19 @@ export async function POST(request: Request) {
       }).select("id, created_at").maybeSingle()
     : { data: null, error: null };
   if (svc && credits > 0 && !cacheErr) {
-    const { error: debErr } = await svc.from("credit_ledger")
-      .insert({ user_id: user.id, delta: -credits, reason: `estimate:${mode}`, ref: body.cardId });
+    // FIFO draw from the soonest-expiring grants; records a shortfall rather
+    // than refusing (the compute already happened — the gate above is where
+    // refusal lives).
+    const { error: debErr } = await svc.rpc("credit_spend", {
+      p_user: user.id, p_amount: credits, p_reason: `estimate:${mode}`, p_ref: body.cardId,
+    });
     if (debErr) console.error(`estimate ${body.cardId}: stored but credits not debited (${debErr.message})`);
+  }
+  if (svc) {
+    await recordAiUsage(svc, {
+      userId: user.id, feature: `estimate:${mode}`, model: res.model,
+      usage: res.usage, creditsCharged: cacheErr ? 0 : credits, ref: body.cardId,
+    });
   }
 
   return NextResponse.json({

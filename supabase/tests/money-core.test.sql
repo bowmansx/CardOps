@@ -7,7 +7,7 @@
 -- the raise is what rolls every test row back, so nothing ever persists.
 -- THE RED ERROR BOX IS EXPECTED: read the message inside it.
 --
--- Requires migrations through 20260736000000. Simulated auth: sets
+-- Requires migrations through 20260737000000. Simulated auth: sets
 -- request.jwt.claims the way PostgREST does. The RPCs leave cardops.in_sell
 -- set for the rest of the transaction (harmless in prod where each request is
 -- its own transaction) — the harness resets it after every RPC call.
@@ -210,12 +210,82 @@ begin
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
+  -- ══ credit ledger v2 (migration 20260737) ═══════════════════════════════
+  -- Grants/spends are service-role surface — simulate the service role the
+  -- way PostgREST presents it, flipping back to the user to read balances.
+
+  -- ── 14. grant lands, balance = unexpired remainders ───────────────────────
+  perform set_config('request.jwt.claims',
+    json_build_object('role', 'service_role')::text, true);
+  perform public.credit_grant(v_uid, 100, 'purchase', null, 'harness: open grant');
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
+  v_n := public.credit_balance();
+  v_name := '14. credit grant funds the balance';
+  v_ok := v_n = 100;
+  v_note := format('balance=%s (want 100)', v_n);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 15. spend draws the SOONEST-EXPIRING bucket first ─────────────────────
+  perform set_config('request.jwt.claims',
+    json_build_object('role', 'service_role')::text, true);
+  perform public.credit_grant(v_uid, 50, 'plan_grant', now() + interval '1 hour', 'harness: expiring grant');
+  v_out := public.credit_spend(v_uid, 60, 'harness: fifo spend', null);
+  select remaining into v_cnt from public.credit_ledger
+    where user_id = v_uid and reason = 'harness: expiring grant';
+  select remaining into v_total from public.credit_ledger
+    where user_id = v_uid and reason = 'harness: open grant';
+  v_name := '15. spend drains soonest-expiring first';
+  v_ok := v_cnt = 0 and v_total = 90 and (v_out->>'shortfall')::int = 0
+    and (v_out->>'balance')::int = 90;
+  v_note := format('expiring=%s open=%s out=%s', v_cnt, v_total, v_out);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 16. an expired grant never counts and is never drawn ──────────────────
+  perform public.credit_grant(v_uid, 40, 'plan_grant', now() - interval '1 hour', 'harness: expired grant');
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
+  v_n := public.credit_balance();
+  v_name := '16. expired grants are dead weight';
+  v_ok := v_n = 90;
+  v_note := format('balance=%s (want 90, expired 40 excluded)', v_n);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 17. overspend records an honest shortfall (shadow mode) ───────────────
+  perform set_config('request.jwt.claims',
+    json_build_object('role', 'service_role')::text, true);
+  v_out := public.credit_spend(v_uid, 120, 'harness: overspend', null);
+  select shortfall into v_cnt from public.credit_ledger
+    where user_id = v_uid and reason = 'harness: overspend';
+  v_name := '17. overspend records shortfall, balance floors at 0';
+  v_ok := (v_out->>'covered')::int = 90 and (v_out->>'shortfall')::int = 30
+    and v_cnt = 30 and (v_out->>'balance')::int = 0;
+  v_note := format('out=%s row_shortfall=%s', v_out, v_cnt);
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 18. a non-owner cannot grant credits ──────────────────────────────────
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
+  v_name := '18. non-owner grant refused';
+  begin
+    perform public.credit_grant(v_uid, 999999, 'promo', null, 'harness: should fail');
+    v_ok := false; v_note := 'grant was allowed';
+  exception when others then
+    v_ok := true; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 13 PASSED · %s FAILED'
+    || '%s of 18 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 13 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 18 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;
