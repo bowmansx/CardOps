@@ -7,7 +7,7 @@
 -- the raise is what rolls every test row back, so nothing ever persists.
 -- THE RED ERROR BOX IS EXPECTED: read the message inside it.
 --
--- Requires migrations through 20260740000000. Simulated auth: sets
+-- Requires migrations through 20260741000000. Simulated auth: sets
 -- request.jwt.claims the way PostgREST does.
 --
 -- TRANSITION GUCs: card_sell, card_move_asset and card_reclass_tax_bucket each
@@ -677,12 +677,68 @@ begin
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
+  -- ══ photo preferences (migration 20260741) ══════════════════════════════
+
+  -- ── 40. a zero crop margin is refused at the database ─────────────────────
+  -- Zero puts the card's real edge ON the image boundary, which is the exact
+  -- misrepresentation the margin exists to prevent. TypeScript floors it; this
+  -- pins that a direct write can't get around that.
+  v_name := '40. crop margin cannot be set to zero';
+  begin
+    insert into public.card_user_prefs (user_id) values (v_uid)
+      on conflict (user_id) do nothing;
+    begin
+      update public.card_user_prefs set crop_margin_pct = 0 where user_id = v_uid;
+      v_ok := false; v_note := 'a zero margin was accepted';
+    exception when check_violation then
+      v_ok := true; v_note := 'refused, as it should be';
+    end;
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 41. burst count stays inside 1..5 ─────────────────────────────────────
+  -- An unbounded burst is a way to spend someone's storage quota by accident.
+  v_name := '41. burst count is bounded';
+  begin
+    begin
+      update public.card_user_prefs set burst_count = 50 where user_id = v_uid;
+      v_ok := false; v_note := 'a 50-frame burst was accepted';
+    exception when check_violation then
+      v_ok := true; v_note := 'refused, as it should be';
+    end;
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 42. turning originals off is recorded ─────────────────────────────────
+  -- It is the one setting that can quietly destroy evidence: with it off, a
+  -- crop becomes the only record of a card's edges. Allowed, but never silent.
+  v_name := '42. keep_originals change writes an audit row';
+  begin
+    select count(*) into v_cnt from public.audit_log
+     where action = 'photo_prefs.keep_originals' and target = v_uid::text;
+    update public.card_user_prefs set keep_originals = false where user_id = v_uid;
+    select count(*) into v_n from public.audit_log
+     where action = 'photo_prefs.keep_originals' and target = v_uid::text;
+    v_ok := v_n = v_cnt + 1;
+    v_note := format('audit rows before=%s after=%s (want +1)', v_cnt, v_n);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 39 PASSED · %s FAILED'
+    || '%s of 42 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 39 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 42 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;

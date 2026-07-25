@@ -6,6 +6,7 @@ import { Camera, Loader2, CheckCircle2, ScanLine, RotateCcw, AlertTriangle } fro
 import { SPORT_CATEGORIES, ZONES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import { commitIntakeCard, type IntakeInput } from "@/app/cards/intake/actions";
 import { CameraSheet } from "./CameraSheet";
+import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
 import { Lightbox } from "./Lightbox";
 
 const CONF = 0.85; // INTAKE_CONFIDENCE_THRESHOLD
@@ -22,6 +23,7 @@ export function FullIntake({
   strategies?: { key: string; label: string }[];
   entities?: { id: string; short_code: string; name: string }[];
 }) {
+  const photoPrefs = usePhotoPrefs();
   const [front, setFront] = useState<string | null>(null);
   const [back, setBack] = useState<string | null>(null);
   const [cam, setCam] = useState<null | "front" | "back">(null);
@@ -300,6 +302,7 @@ export function FullIntake({
 
       {cam && (
         <CameraSheet
+          prefs={photoPrefs}
           key={cam} // remount per shot → fresh camera stream for the back (day-review fix)
           title={`Photograph the ${cam}`}
           shotLabel={cam}

@@ -6,6 +6,7 @@ import { SPORT_CATEGORIES, ZONES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/t
 import { commitSpeedBatch, applyBatchStrategy, type SpeedItem } from "@/app/cards/intake/actions";
 import { Lightbox } from "./Lightbox";
 import { CameraSheet, type CapturedShot } from "./CameraSheet";
+import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
 
 // Speed Book: front-only rapid capture with NO external API calls (works
 // dormant). New shots inherit the current category/zone defaults. Committing a
@@ -17,6 +18,7 @@ export function SpeedBook({
   strategies?: { key: string; label: string }[];
   entities?: { id: string; short_code: string; name: string }[];
 }) {
+  const photoPrefs = usePhotoPrefs();
   const [cam, setCam] = useState(false);
   const [category, setCategory] = useState<string>("");
   const [zone, setZone] = useState<string>("BULK");
@@ -115,6 +117,7 @@ export function SpeedBook({
 
       {cam && (
         <CameraSheet
+          prefs={photoPrefs}
           title="Speed Book — front of each card"
           shotLabel="front"
           multi

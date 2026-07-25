@@ -7,20 +7,15 @@ import {
   CARD_ASPECT, SLAB_ASPECT, withMargin, sharpness, frameDelta,
   shouldAutoSnap, pickSharpest,
 } from "@/lib/cards/camera";
+import { QUALITY_SPECS, PHOTO_PREF_DEFAULTS, type PhotoPrefs } from "@/lib/cards/photo-prefs";
 
 // Card-scanner aspect guides (w/h): raw card 2.5"x3.5", PSA-style slab ~3.32"x5.44".
 const GUIDES = { raw: CARD_ASPECT, slab: SLAB_ASPECT } as const;
 type GuideKind = keyof typeof GUIDES;
 
-// Breathing room around the crop so the card's real edge sits INSIDE the photo.
-// ~4% of card width ≈ 2-3mm. Corners and edges are the grade; a crop flush to
-// the edge hides chipping and can't be told apart from a card that is genuinely
-// cut that way.
-const MARGIN_PCT = 0.04;
-
-// Auto-snap sampling.
+// Auto-snap sampling. (Margin, burst size and output quality now come from the
+// user's saved photo preferences — see lib/cards/photo-prefs.)
 const PROBE_W = 96;      // downscaled probe frame, keeps the loop cheap
-const BURST = 3;         // frames per auto capture; sharpest wins
 const HISTORY = 8;
 
 export type CapturedShot = {
@@ -45,6 +40,7 @@ export type CapturedShot = {
  */
 export function CameraSheet({
   title,
+  prefs: prefsIn,
   shotLabel,
   shotStep,
   onCapture,
@@ -52,6 +48,9 @@ export function CameraSheet({
   multi = false,
 }: {
   title: string;
+  /** The user's saved capture settings. Defaults apply when absent, so every
+   *  caller doesn't have to fetch them. */
+  prefs?: Partial<PhotoPrefs>;
   /** Which shot this is — rendered LARGE over the viewfinder. A small title bar
    *  is not enough when your hands are full and you're going front/back/front:
    *  you need to know which side it wants without reading. */
@@ -62,17 +61,25 @@ export function CameraSheet({
   onClose: () => void;
   multi?: boolean;
 }) {
+  const prefs: PhotoPrefs = { ...PHOTO_PREF_DEFAULTS, ...(prefsIn ?? {}) };
+  const quality = QUALITY_SPECS[prefs.photo_quality];
+  // The user can prefer their phone's own camera app — its HDR and noise
+  // reduction beat anything we can do to a raw frame. That trade is real, so
+  // we hand off entirely rather than pretending the guide still applies.
+  const osMode = prefs.capture_mode === "os_camera";
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const osCamRef = useRef<HTMLInputElement>(null);
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [guide, setGuide] = useState<GuideKind>("raw");
   const [guideRect, setGuideRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [shots, setShots] = useState(0);
   const [flash, setFlash] = useState(false);
-  const [auto, setAuto] = useState(false);
+  const [auto, setAuto] = useState(prefs.auto_snap);
   const [locked, setLocked] = useState(false); // sharp + steady right now
   const probeRef = useRef<HTMLCanvasElement | null>(null);
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null);
@@ -109,6 +116,7 @@ export function CameraSheet({
   }, [guide]);
 
   useEffect(() => {
+    if (osMode) return;
     let cancelled = false;
     (async () => {
       try {
@@ -135,7 +143,7 @@ export function CameraSheet({
       cancelled = true;
       stop();
     };
-  }, []);
+  }, [osMode]);
 
   useEffect(() => {
     layoutGuide();
@@ -144,7 +152,7 @@ export function CameraSheet({
   }, [ready, layoutGuide]);
 
   /** Draw a region of the video into a JPEG data URL, bounded by maxEdge. */
-  function frameToUrl(sx: number, sy: number, sw: number, sh: number, maxEdge: number): string | null {
+  function frameToUrl(sx: number, sy: number, sw: number, sh: number, maxEdge = quality.maxEdge): string | null {
     const v = videoRef.current;
     if (!v) return null;
     const outScale = Math.min(1, maxEdge / Math.max(sw, sh));
@@ -154,7 +162,7 @@ export function CameraSheet({
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(v, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.85);
+    return canvas.toDataURL("image/jpeg", quality.jpegQuality);
   }
 
   /** The guide, expressed in intrinsic video pixels. */
@@ -178,18 +186,23 @@ export function CameraSheet({
     const bounds = { w: v.videoWidth, h: v.videoHeight };
     const g = guideInVideoPixels();
 
-    // The framed shot keeps a MARGIN around the guide, so the card's real edge
-    // sits inside the photo rather than on its boundary.
-    const crop = g
-      ? withMargin({ x: g.x, y: g.y, w: g.w, h: g.h }, MARGIN_PCT, bounds)
+    // Crop per the user's setting: 'off' keeps the whole frame, 'tight' cuts to
+    // the guide, 'margin' (default) leaves background around the card so its
+    // real edge sits INSIDE the photo rather than on the boundary.
+    const marginPct = prefs.auto_crop === "tight" ? 0 : prefs.crop_margin_pct;
+    const crop = g && prefs.auto_crop !== "off"
+      ? withMargin({ x: g.x, y: g.y, w: g.w, h: g.h }, marginPct, bounds)
       : { x: 0, y: 0, w: bounds.w, h: bounds.h };
-    const url = frameToUrl(crop.x, crop.y, crop.w, crop.h, 1600);
+    const url = frameToUrl(crop.x, crop.y, crop.w, crop.h);
     if (!url) return;
 
-    // And we ALWAYS keep the full frame. A crop must never be the only record
-    // of an edge — if a corner is ever in question, the uncropped original is
-    // what settles it.
-    const original = g ? frameToUrl(0, 0, bounds.w, bounds.h, 1600) : null;
+    // Keep the full frame alongside the crop, so a crop is never the only
+    // record of an edge. Skipped when nothing was cropped (the frame IS the
+    // original) or when the user has turned originals off to save space.
+    const cropped = !!g && prefs.auto_crop !== "off";
+    const original = cropped && prefs.keep_originals
+      ? frameToUrl(0, 0, bounds.w, bounds.h)
+      : null;
 
     if (multi) {
       setShots((n) => n + 1);
@@ -201,7 +214,7 @@ export function CameraSheet({
     // FRONT frame as the "back" (day-review finding).
     onCapture({
       url, original,
-      meta: { mode: "in_app", auto: isAuto, sharp: sharpScore, marginPct: MARGIN_PCT },
+      meta: { mode: "in_app", auto: isAuto, sharp: sharpScore, marginPct: cropped ? marginPct : 0 },
     });
   }
 
@@ -211,9 +224,9 @@ export function CameraSheet({
     busyRef.current = true;
     try {
       const frames: { sharp: number; at: number }[] = [];
-      for (let i = 0; i < BURST; i++) {
+      for (let i = 0; i < prefs.burst_count; i++) {
         frames.push({ sharp: probe()?.sharp ?? 0, at: i });
-        if (i < BURST - 1) await new Promise((r) => setTimeout(r, 45));
+        if (i < prefs.burst_count - 1) await new Promise((r) => setTimeout(r, 45));
       }
       const best = pickSharpest(frames);
       shoot(true, best?.sharp ?? null);
@@ -285,7 +298,7 @@ export function CameraSheet({
           {multi && shots > 0 && <span className="figures ml-2 rounded bg-white/15 px-1.5 py-0.5 text-xs">{shots}</span>}
         </span>
         <span className="flex items-center gap-2">
-          <button
+          {!osMode && <button
             onClick={() => { const next = !auto; setAuto(next); if (!next) { setLocked(false); histRef.current = []; } }}
             aria-pressed={auto}
             title="Snap automatically once the card is sharp and still"
@@ -293,15 +306,15 @@ export function CameraSheet({
               (auto ? "border-[#c9a227] bg-[#c9a227]/25 text-white" : "border-white/25 text-white/50")}
           >
             <Wand2 size={13} /> Auto
-          </button>
-          <span className="flex overflow-hidden rounded-lg border border-white/25 text-[11px] font-semibold">
+          </button>}
+          {!osMode && <span className="flex overflow-hidden rounded-lg border border-white/25 text-[11px] font-semibold">
             {(["raw", "slab"] as const).map((g) => (
               <button key={g} onClick={() => setGuide(g)}
                 className={"px-2.5 py-1 " + (guide === g ? "bg-white/25 text-white" : "text-white/50")}>
                 {g === "raw" ? "Card" : "Slab"}
               </button>
             ))}
-          </span>
+          </span>}
           <button onClick={() => { stop(); onClose(); }} aria-label="Close camera" className="rounded-lg p-1 hover:bg-white/10">
             <X size={22} />
           </button>
@@ -340,7 +353,17 @@ export function CameraSheet({
           </>
         )}
         {flash && <div className="absolute inset-0 bg-white/70" />}
-        {!ready && !err && (
+        {osMode && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-10 text-center text-white/75">
+            <Camera size={34} className="text-white/50" />
+            <p className="text-sm font-semibold text-white">Using your phone&apos;s camera</p>
+            <p className="text-xs text-white/55">
+              Tap the shutter to open it. Better in low light — but no guide frame, no auto-snap,
+              and the photo is kept whole rather than cropped to the card.
+            </p>
+          </div>
+        )}
+        {!ready && !err && !osMode && (
           <div className="absolute inset-0 flex items-center justify-center text-white/70">
             <Loader2 className="animate-spin" size={28} />
           </div>
@@ -355,6 +378,14 @@ export function CameraSheet({
         className="hidden"
         onChange={(e) => { if (e.target.files?.[0]) fromFile(e.target.files[0]); e.target.value = ""; }}
       />
+      <input
+        ref={osCamRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => { if (e.target.files?.[0]) fromFile(e.target.files[0]); e.target.value = ""; }}
+      />
       <div className="grid grid-cols-3 items-center px-6 py-6">
         <button
           onClick={() => fileRef.current?.click()}
@@ -363,8 +394,8 @@ export function CameraSheet({
           <Images size={18} /> Library
         </button>
         <button
-          onClick={() => shoot(false)}
-          disabled={!ready}
+          onClick={() => (osMode ? osCamRef.current?.click() : shoot(false))}
+          disabled={!ready && !osMode}
           aria-label="Take photo"
           className="h-16 w-16 justify-self-center rounded-full border-4 border-white bg-white/25 transition active:scale-95 disabled:opacity-40"
         >

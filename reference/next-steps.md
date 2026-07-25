@@ -2,8 +2,9 @@
 
 ## ✅ STATE AS OF 2026-07-25 (end of session)
 
-**Everything is applied, deployed and verified.** Nothing is pending on the
-database or the repo.
+**One migration is waiting to be pasted:** `20260741000000_photo_prefs.sql`
+(P2 — capture settings, presets and defaults). Everything before it is applied,
+deployed and verified.
 
 - **All migrations applied** through `20260740000000` (credit metering, card
   identities, investor assets, photo provenance + storage).
@@ -23,6 +24,11 @@ tenant's out-of-possession assets through a view missing `security_invoker`.
 
 ### Next, in order
 
+0. **Paste `supabase/migrations/20260741000000_photo_prefs.sql`**, then re-run
+   the harness — it is now **42** assertions (40–42 cover the crop-margin
+   floor, the burst bound, and the keep-originals audit trail). Until it is
+   pasted, the settings screen falls back to defaults and saving photo settings
+   returns an error; nothing else is affected.
 1. **Put a real box of cards through the scanner.** Everything above was
    groundwork for this. Log where the capture flow actually hurts — that
    friction list is what Wave A gets designed against, per the standing
