@@ -26,6 +26,10 @@ declare
   v_name  text;
   v_note  text;
   v_n2    uuid;
+  -- Photo ids get their OWN variable. Borrowing v_solo for one cost assertions
+  -- 35 and 36 their meaning: they updated `where id = <a photo id>`, matched no
+  -- rows, raised nothing, and reported the guard as missing.
+  v_photo uuid;
   v_pass  int := 0;
   v_fail  int := 0;
   v_r     text := E'\n';
@@ -547,12 +551,12 @@ begin
   begin
     insert into public.card_photos (card_id, kind, variant, bucket, path, bytes)
       values (v_card, 'front', 'original', 'card-photos', 'x/src.jpg', 900)
-      returning id into v_solo;
+      returning id into v_photo;
     insert into public.card_photos (card_id, kind, variant, bucket, path, bytes, derived_from, crop_geometry)
-      values (v_card, 'front', 'processed', 'card-photos', 'x/crop.jpg', 300, v_solo,
+      values (v_card, 'front', 'processed', 'card-photos', 'x/crop.jpg', 300, v_photo,
               jsonb_build_object('margin_pct', 0.04, 'deskewed', false));
     select count(*) into v_cnt from public.card_photos
-     where derived_from = v_solo and (crop_geometry->>'margin_pct')::numeric = 0.04;
+     where derived_from = v_photo and (crop_geometry->>'margin_pct')::numeric = 0.04;
     v_ok := v_cnt = 1;
     v_note := format('linked_derivatives=%s', v_cnt);
   exception when others then
@@ -568,10 +572,22 @@ begin
   -- calls: clear the state, then sell.
   v_name := '35. asset_state refuses a field edit';
   begin
-    update public.cards set asset_state = 'vaulted' where id = v_solo;
-    v_ok := false; v_note := 'plain update was allowed';
+    -- Prove the target EXISTS first. A zero-row update raises nothing, which
+    -- is indistinguishable from "the guard is missing" — that is exactly how
+    -- this assertion lied on its first run.
+    select count(*) into v_cnt from public.cards where id = v_solo;
+    if v_cnt <> 1 then
+      v_ok := false; v_note := 'test target missing — assertion would be vacuous';
+    else
+      begin
+        update public.cards set asset_state = 'vaulted' where id = v_solo;
+        v_ok := false; v_note := 'plain update was allowed';
+      exception when others then
+        v_ok := sqlerrm ilike '%custody transition%'; v_note := sqlerrm;
+      end;
+    end if;
   exception when others then
-    v_ok := true; v_note := sqlerrm;
+    v_ok := false; v_note := sqlerrm;
   end;
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
@@ -579,10 +595,19 @@ begin
   -- ── 36. the tax-bucket REASON is guarded, not just the value ──────────────
   v_name := '36. tax_bucket provenance columns are guarded';
   begin
-    update public.cards set tax_bucket_reason = 'rewritten' where id = v_solo;
-    v_ok := false; v_note := 'reason was editable';
+    select count(*) into v_cnt from public.cards where id = v_solo;
+    if v_cnt <> 1 then
+      v_ok := false; v_note := 'test target missing — assertion would be vacuous';
+    else
+      begin
+        update public.cards set tax_bucket_reason = 'rewritten' where id = v_solo;
+        v_ok := false; v_note := 'reason was editable';
+      exception when others then
+        v_ok := sqlerrm ilike '%classification%'; v_note := sqlerrm;
+      end;
+    end if;
   exception when others then
-    v_ok := true; v_note := sqlerrm;
+    v_ok := false; v_note := sqlerrm;
   end;
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
