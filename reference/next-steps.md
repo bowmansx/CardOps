@@ -17,7 +17,17 @@ real money). The other toggles seeded off too — check them while you're there.
 | 3 | `20260739000000_investor_assets.sql` | Wave B: asset record, documents, custody |
 | 4 | `20260740000000_photo_provenance_storage.sql` | photo provenance + storage metering |
 
-Then `supabase/tests/money-core.test.sql` → expect **34 of 34 PASSED**.
+Then `supabase/tests/money-core.test.sql` → expect **39 of 39 PASSED**.
+
+> Migrations 2–4 were adversarially reviewed before pasting (40 agents, 36
+> candidates, 18 refuted, 8 distinct defects fixed in place — see commit
+> `17b8118`). Two would have silently voided the identity layer: a partial
+> unique index that made every upsert fail 42P10 behind a swallowed error, and
+> RLS that left shared history unreadable by everyone but one arbitrary owner.
+> A third leaked every tenant's out-of-possession assets through a view with no
+> `security_invoker`. **AI card scan was switched ON in Services on 2026-07-25
+> and verified end-to-end** — the scan route reaches Anthropic and returns a
+> parsed card.
 
 **3. Merge PR #2** (github.com/bowmansx/CardOps/pull/2) — it carries everything.
 
