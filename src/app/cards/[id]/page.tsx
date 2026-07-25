@@ -19,6 +19,7 @@ import { EbayListPanel } from "@/components/cards/EbayListPanel";
 import { CardStatusControl } from "@/components/cards/CardStatusControl";
 import { CardBooksControl } from "@/components/cards/CardBooksControl";
 import { BasisBreakdown } from "@/components/cards/BasisBreakdown";
+import { AddPhotos } from "@/components/cards/AddPhotos";
 import { lotAverages, cardAcquisitionBasis } from "@/lib/cards/basis";
 import { MarketBySource } from "@/components/cards/MarketBySource";
 import { currentRole } from "@/lib/cards/roles";
@@ -87,7 +88,16 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
 
   // Stored photos (private bucket → short-lived signed URLs).
   const { data: photos } = await supabase
-    .from("card_photos").select("kind, bucket, path").eq("card_id", id).order("created_at");
+    .from("card_photos").select("id, kind, role, bucket, path, variant, derived_from").eq("card_id", id).order("created_at");
+
+  // Which template shots this card actually HAS. One shot can store two rows
+  // (the uncropped frame and the crop derived from it), so counting rows would
+  // report a 12-shot template as satisfied after six photos. A shot is a row
+  // that nothing else was derived FROM.
+  const sourceIds = new Set((photos ?? []).map((p) => p.derived_from).filter(Boolean) as string[]);
+  const haveRoles = (photos ?? [])
+    .filter((p) => !sourceIds.has(p.id as string))
+    .map((p) => (p.role as string) ?? (p.kind as string));
   const shots = (
     await Promise.all(
       (photos ?? []).map(async (p) => {
@@ -146,6 +156,10 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
             <div className="figures mt-1 text-[10px] text-ink/40">scan → card</div>
           </div>
         </div>
+
+        {/* Photograph the card against a template — and the way back for a
+            card that was booked without its photos. */}
+        <AddPhotos cardId={c.id} haveRoles={haveRoles} />
 
         {/* Total Cost Basis, expandable into the lines that make it up. */}
         <div className="mt-4">

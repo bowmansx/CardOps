@@ -43,6 +43,7 @@ export function CameraSheet({
   prefs: prefsIn,
   shotLabel,
   shotStep,
+  shotHint,
   onCapture,
   onClose,
   multi = false,
@@ -57,6 +58,9 @@ export function CameraSheet({
   shotLabel?: string;
   /** Optional "2 of 4" progress, for template runs. */
   shotStep?: string;
+  /** One line of instruction for THIS shot, e.g. "Fill the frame with the
+   *  corner". Templates carry these; without one the frame is just a label. */
+  shotHint?: string;
   onCapture: (shot: CapturedShot) => void;
   onClose: () => void;
   multi?: boolean;
@@ -343,6 +347,11 @@ export function CameraSheet({
                   {shotLabel}
                 </span>
                 {shotStep && <span className="text-[11px] font-semibold text-white/70">{shotStep}</span>}
+                {shotHint && (
+                  <span className="max-w-full rounded bg-black/55 px-2 py-0.5 text-center text-[11px] leading-snug text-white/80">
+                    {shotHint}
+                  </span>
+                )}
               </span>
             )}
             {auto && (

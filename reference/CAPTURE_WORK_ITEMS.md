@@ -25,9 +25,9 @@ Status key: **✅ built** · **◐ partial** · **📋 designed, not built** ·
 | 9 | Extra files take up extra space | ✅ | `bytes` on every image, `user_storage_usage` rollup, shown on the credits page |
 | 10 | Subscriptions cap how much data you can store | 📋 | Quota + warn + block — **P4** (needs billing) |
 | 11 | Photo quality options, which change space used | ✅ | **P2** — Economy/Standard/High/Archive, each showing its storage cost at the point of choice |
-| 12 | Save multiple different photos of a card | ◐ | Schema ready (`kind` widened to corners/surface/edge); no UI to add — **P3** |
-| 13 | Users set up their own photo templates | 📋 | `photo_templates` — **P3** |
-| 14 | e.g. all four corners front+back, surface angles | 📋 | The "Grading" built-in — **P3** |
+| 12 | Save multiple different photos of a card | ✅ | **P3** — Add photos on the card page runs a template and attaches every shot |
+| 13 | Users set up their own photo templates | ✅ | **P3** — `card_photo_templates`, built-ins + user-defined via `/api/cards/photo-templates` |
+| 14 | e.g. all four corners front+back, surface angles | ✅ | **P3** — the "Grading — corners & surface" built-in, 12 shots |
 | 15 | …to give better info for AUTO-GRADING | ❌ | `grade-estimate` exists but ignores corner/surface shots — **P5** |
 | 16 | …and for eBAY LISTING export | ❌ | The eBay listing code uses **no photos at all** — **P5** |
 | 17 | Border that locks on to the card | 📋 | Static guide exists; dynamic edge detection is **P1** |
