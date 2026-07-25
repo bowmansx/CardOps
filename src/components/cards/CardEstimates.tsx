@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Brain, Loader2, ChevronDown, Coins } from "lucide-react";
 import { estimateCost, type EstimateConfig, type AiDepth } from "@/lib/cards/credits";
 
@@ -22,10 +22,21 @@ const MODES = [
 
 const confTone: Record<string, string> = { high: "text-pos", medium: "text-amber-600", low: "text-danger" };
 
-function Toggle({ on, set, label }: { on: boolean; set: (v: boolean) => void; label: string }) {
+// `judgment` marks a toggle that adds the MODEL'S OPINION, not fetched data.
+// Those are free and say so, because charging for data we never fetch — or
+// letting a name imply a source that doesn't exist — is how trust dies.
+function Toggle({
+  on, set, label, hint, judgment,
+}: {
+  on: boolean; set: (v: boolean) => void; label: string; hint: string; judgment?: boolean;
+}) {
   return (
-    <label className="flex items-center gap-1 rounded-full border border-hairline bg-white px-2 py-0.5 text-[11px]">
+    <label
+      title={hint}
+      className="flex items-center gap-1 rounded-full border border-hairline bg-white px-2 py-0.5 text-[11px]"
+    >
       <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} className="h-3 w-3 accent-flag" /> {label}
+      {judgment && <span className="text-[9px] uppercase tracking-wide text-ink/35">judgment</span>}
     </label>
   );
 }
@@ -33,7 +44,9 @@ function Toggle({ on, set, label }: { on: boolean; set: (v: boolean) => void; la
 export function CardEstimates({
   cardId, aiOn, initial, initialBalance,
 }: {
-  cardId: string; aiOn: boolean; initial: Record<string, Estimate>; initialBalance: number;
+  // initialBalance is null when the balance couldn't be read — shown as "—",
+  // never as 0 credits (rule 4).
+  cardId: string; aiOn: boolean; initial: Record<string, Estimate>; initialBalance: number | null;
 }) {
   const [estimates, setEstimates] = useState<Record<string, Estimate>>(initial ?? {});
   const [balance, setBalance] = useState(initialBalance);
@@ -46,11 +59,14 @@ export function CardEstimates({
   const [open, setOpen] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const configFor = (mode: string): EstimateConfig => ({ mode: mode as EstimateConfig["mode"], comparables, macro, news, pop, ai });
+  const configFor = useCallback(
+    (mode: string): EstimateConfig => ({ mode: mode as EstimateConfig["mode"], comparables, macro, news, pop, ai }),
+    [comparables, macro, news, pop, ai],
+  );
   const cost = useMemo(() => ({
     standard_plus: estimateCost(configFor("standard_plus")).credits,
     all_sales_plus: estimateCost(configFor("all_sales_plus")).credits,
-  }), [comparables, macro, news, pop, ai]);
+  }), [configFor]);
 
   async function run(mode: string) {
     setBusy(mode); setErr(null);
@@ -62,9 +78,12 @@ export function CardEstimates({
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Estimate failed.");
       setEstimates((p) => ({ ...p, [mode]: d.estimate }));
-      setBalance(d.balance);
+      setBalance(d.balance ?? null);
       setOpen(mode);
-      if (d.cache_warning) setErr(d.cache_warning); // estimate shown, storage failed — say so
+      // Estimate shown but something money-shaped went wrong — say so rather
+      // than leaving a silent divergence (rules 4/8).
+      if (d.cache_warning) setErr(d.cache_warning);
+      else if (d.debit_warning) setErr(d.debit_warning);
     } catch (e) { setErr(e instanceof Error ? e.message : "Estimate failed."); } finally { setBusy(null); }
   }
 
@@ -74,16 +93,22 @@ export function CardEstimates({
         <h2 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/50">
           <Brain size={13} className="text-flag" /> CardOps Estimated Price
         </h2>
-        <span className="figures inline-flex items-center gap-1 text-[10px] text-ink/45"><Coins size={11} /> {balance} credits</span>
+        <span className="figures inline-flex items-center gap-1 text-[10px] text-ink/45" title={balance === null ? "Balance couldn't be read" : undefined}>
+          <Coins size={11} /> {balance === null ? "—" : balance} credits
+        </span>
       </div>
 
       {/* Cost dials — the user controls their spend */}
       <div className="flex flex-wrap items-center gap-1.5 border-t border-hairline bg-paper/40 px-3 py-2">
         <span className="text-[9px] font-semibold uppercase tracking-wider text-ink/40">Context</span>
-        <Toggle on={comparables} set={setComparables} label="Comparables" />
-        <Toggle on={macro} set={setMacro} label="Market" />
-        <Toggle on={news} set={setNews} label="Player news" />
-        <Toggle on={pop} set={setPop} label="Scarcity" />
+        <Toggle on={comparables} set={setComparables} label="Comparables"
+          hint="Fetches live sales for similar cards (same set/parallel, and this player's other cards)." />
+        <Toggle on={news} set={setNews} label="Player news"
+          hint="Reads real headlines collected and scored daily for this player. If there are none, the estimate says so." />
+        <Toggle on={macro} set={setMacro} label="Market" judgment
+          hint="Model judgment only — no market-index data is fetched. Free." />
+        <Toggle on={pop} set={setPop} label="Scarcity" judgment
+          hint="Model judgment only — no population-report data is fetched. Free." />
         <span className="mx-1 h-3 w-px bg-hairline" />
         <select value={ai} onChange={(e) => setAi(e.target.value as AiDepth)} className="rounded-lg border border-hairline bg-white px-2 py-0.5 text-[11px] outline-none focus:border-flag">
           <option value="light">Light AI</option>

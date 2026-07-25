@@ -26,13 +26,30 @@ export const DEFAULT_ESTIMATE: EstimateConfig = { mode: "off" };
 
 // Per-component credit cost. Tuned so a cheap estimate is a few credits and a
 // maxed-out deep one is ~20 — the ceiling the bar fills against.
+//
+// HONESTY RULE (2026-07-25). A toggle may only carry a real price if it causes
+// real work. `news` used to cost 3 credits while doing nothing but appending a
+// sentence telling the model to recall what it already knew; `macro` and `pop`
+// were the same. Charging for data we never fetched is selling something that
+// doesn't exist, and it is the fastest way to lose a customer's trust.
+//
+// Now:
+//   news  — a REAL read of card_news (headlines fetched + AI-scored daily by
+//           the news cron). Priced at 1: it costs us a local query, not a
+//           vendor call, and retail should track the shape of real cost.
+//   macro — no data source exists. It is a MODEL-JUDGMENT overlay and is
+//           labelled as one in the UI. Free.
+//   pop   — same. A real population signal needs a PSA/BGS API we don't have;
+//           until then this is judgment, not data. Free.
+//
+// If a real source is wired later, raise the price then — never before.
 export const COST = {
   base_sales: 1, // pulling the card's own recent sales
   full_sales: 2, // pulling the FULL all-time sales set (Estimate B)
-  comparables: 2,
-  news: 3,
-  macro: 1,
-  pop: 1,
+  comparables: 2, // live vendor fetches, one per comparable query
+  news: 1, // real headlines, read locally
+  macro: 0, // model judgment, no fetch — must stay 0 until a source exists
+  pop: 0, // model judgment, no fetch — must stay 0 until a source exists
   ai_light: 3,
   ai_deep: 12,
 } as const;

@@ -42,27 +42,82 @@ export async function listEntityOptions(): Promise<{ id: string; short_code: str
   }
 }
 
+/**
+ * Store ONE image and return its card_photos id.
+ *
+ * `bytes` is always recorded — storage is a metered resource and you cannot
+ * bill, cap or warn on what was never measured (DESIGN_PHOTO_SYSTEM §6).
+ * Failures are RETURNED, not swallowed: this used to `return` silently on an
+ * upload error, so a card could end up with no photo and nobody the wiser
+ * (prevention rule 1).
+ */
+async function putImage(
+  supabase: SupabaseClient,
+  cardId: string,
+  kind: string,
+  dataUrl: string,
+  opts: { variant: "original" | "processed"; derivedFrom?: string | null; cropGeometry?: unknown; captureMeta?: unknown },
+): Promise<{ id: string | null; error: string | null }> {
+  const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUrl);
+  if (!m) return { id: null, error: "unrecognised image data" };
+  const ext = m[1].split("/")[1].replace("jpeg", "jpg");
+  const buf = Buffer.from(m[2], "base64");
+  // Folder by user first so the storage bucket itself is per-tenant (the RLS
+  // policy also still honours the legacy <card_id>/… layout for older photos).
+  const { data: { user } } = await supabase.auth.getUser();
+  const suffix = opts.variant === "original" ? "-src" : "";
+  const path = user
+    ? `${user.id}/${cardId}/${kind}${suffix}-${Date.now()}.${ext}`
+    : `${cardId}/${kind}${suffix}-${Date.now()}.${ext}`;
+  const { error: upErr } = await supabase.storage
+    .from("card-photos")
+    .upload(path, buf, { contentType: m[1], upsert: false });
+  if (upErr) return { id: null, error: upErr.message };
+
+  const { data, error: rowErr } = await supabase
+    .from("card_photos")
+    .insert({
+      card_id: cardId, kind, role: kind, variant: opts.variant,
+      bucket: "card-photos", path, bytes: buf.byteLength,
+      derived_from: opts.derivedFrom ?? null,
+      crop_geometry: opts.cropGeometry ?? null,
+      capture_meta: opts.captureMeta ?? null,
+    })
+    .select("id")
+    .maybeSingle();
+  if (rowErr) return { id: null, error: rowErr.message };
+  return { id: (data?.id as string) ?? null, error: null };
+}
+
+/**
+ * Store a shot: the uncropped frame first (when the camera kept one), then the
+ * framed image linked back to it.
+ *
+ * ORDER MATTERS. The original goes first so the derivative can point at it —
+ * a crop whose source is unknown is exactly the situation the margin rule
+ * exists to prevent.
+ */
 async function uploadPhoto(
   supabase: SupabaseClient,
   cardId: string,
   kind: "front" | "back",
   dataUrl: string | undefined,
-) {
-  if (!dataUrl) return;
-  const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUrl);
-  if (!m) return;
-  const ext = m[1].split("/")[1].replace("jpeg", "jpg");
-  // Folder by user first so the storage bucket itself is per-tenant (the RLS
-  // policy also still honours the legacy <card_id>/… layout for older photos).
-  const { data: { user } } = await supabase.auth.getUser();
-  const path = user ? `${user.id}/${cardId}/${kind}-${Date.now()}.${ext}` : `${cardId}/${kind}-${Date.now()}.${ext}`;
-  const { error } = await supabase.storage
-    .from("card-photos")
-    .upload(path, Buffer.from(m[2], "base64"), { contentType: m[1], upsert: false });
-  if (error) return;
-  await supabase
-    .from("card_photos")
-    .insert({ card_id: cardId, kind, variant: "original", bucket: "card-photos", path });
+  originalUrl?: string | undefined,
+): Promise<string | null> {
+  if (!dataUrl) return null;
+  let originalId: string | null = null;
+  if (originalUrl) {
+    const src = await putImage(supabase, cardId, kind, originalUrl, { variant: "original" });
+    if (src.error) console.error(`[intake] ${kind} uncropped frame not stored: ${src.error}`);
+    originalId = src.id;
+  }
+  const framed = await putImage(supabase, cardId, kind, dataUrl, {
+    variant: originalId ? "processed" : "original",
+    derivedFrom: originalId,
+    cropGeometry: originalId ? { margin_pct: 0.04, deskewed: false } : null,
+  });
+  if (framed.error) return `${kind} photo not saved: ${framed.error}`;
+  return null;
 }
 
 export type IntakeInput = {
@@ -76,6 +131,9 @@ export type IntakeInput = {
   cost?: string; // REQUIRED (validated in commitIntakeCard): what was paid, 0 allowed
   vision_confidence?: unknown;
   front?: string; back?: string;
+  // The uncropped camera frames behind `front`/`back`, when the in-app camera
+  // took them. Stored as variant='original' with the framed shot linked to it.
+  front_original?: string; back_original?: string;
 };
 
 const TREATMENTS = ["dealer", "investment", "hobby"];
@@ -84,7 +142,7 @@ const treatmentOf = (t?: string) => (t && TREATMENTS.includes(t) ? t : "dealer")
 // Full Intake: human-reviewed card → insert + store photos.
 export async function commitIntakeCard(
   input: IntakeInput,
-): Promise<{ ok: boolean; id?: string; sku?: string; error?: string }> {
+): Promise<{ ok: boolean; id?: string; sku?: string; error?: string; warning?: string }> {
   const { supabase } = await authed();
   // Cost is REQUIRED (0 allowed): un-costed cards are how basis silently
   // corrupted under the old global pool. Lot-funded intake comes via Speed Book.
@@ -134,10 +192,15 @@ export async function commitIntakeCard(
     if (error.code !== "23505" || attempt === 4) return { ok: false, error: error.message };
   }
   if (!id) return { ok: false, error: "Could not create the card." };
-  await uploadPhoto(supabase, id, "front", input.front);
-  await uploadPhoto(supabase, id, "back", input.back);
+  // A photo that failed to save is worth telling the user about — the card
+  // exists either way, but silently losing the image is how you discover at
+  // listing time that there's nothing to show (rules 1 and 8).
+  const photoWarnings = [
+    await uploadPhoto(supabase, id, "front", input.front, input.front_original),
+    await uploadPhoto(supabase, id, "back", input.back, input.back_original),
+  ].filter(Boolean) as string[];
   revalidatePath("/cards");
-  return { ok: true, id };
+  return { ok: true, id, ...(photoWarnings.length ? { warning: photoWarnings.join(" · ") } : {}) };
 }
 
 // Batch (AI) mode: stamp the chosen pricing standard + storage place onto a
@@ -227,7 +290,13 @@ export async function applyBatchScan(
   return { ok: true };
 }
 
-export type SpeedItem = { front?: string; sport_category?: string; zone?: string };
+export type SpeedItem = {
+  front?: string;
+  /** The uncropped camera frame behind `front`, when the scanner kept one. */
+  front_original?: string;
+  sport_category?: string;
+  zone?: string;
+};
 
 // Speed Book: rapid front-only batch. GUARDRAIL — a lot cost is REQUIRED so the
 // pool average never gets deflated by $0-basis cards. The pool ledger is written
@@ -235,7 +304,7 @@ export type SpeedItem = { front?: string; sport_category?: string; zone?: string
 export async function commitSpeedBatch(
   items: SpeedItem[],
   lotCost: number,
-): Promise<{ ok: boolean; inserted?: number; poolTotal?: number; ids?: string[]; error?: string }> {
+): Promise<{ ok: boolean; inserted?: number; poolTotal?: number; ids?: string[]; error?: string; warning?: string }> {
   const { supabase } = await authed();
   if (!items.length) return { ok: false, error: "No cards in the batch." };
   if (!(lotCost > 0)) return { ok: false, error: "Enter the lot cost for this batch (required)." };
@@ -256,13 +325,20 @@ export async function commitSpeedBatch(
   if (error) return { ok: false, error: error.message };
   const result = data as { inserted: number; ids: string[]; pool_total: number };
 
-  // Best-effort: attach each front photo to its card (order matches payload).
+  // Attach each front photo to its card (order matches payload), keeping the
+  // uncropped frame alongside it. A photo that fails to store is reported
+  // rather than dropped — the cards are already booked either way.
+  const photoWarnings: string[] = [];
   for (let i = 0; i < result.ids.length; i++) {
-    await uploadPhoto(supabase, result.ids[i], "front", items[i]?.front);
+    const w = await uploadPhoto(supabase, result.ids[i], "front", items[i]?.front, items[i]?.front_original);
+    if (w) photoWarnings.push(`card ${i + 1}: ${w}`);
   }
 
   revalidatePath("/cards");
   // ids in insertion order (matches `items`) — Batch (AI) mode uses them to
   // stamp the chosen strategy and pair each card with its photo for scanning.
-  return { ok: true, inserted: result.inserted, poolTotal: result.pool_total, ids: result.ids };
+  return {
+    ok: true, inserted: result.inserted, poolTotal: result.pool_total, ids: result.ids,
+    ...(photoWarnings.length ? { warning: `${photoWarnings.length} photo(s) not saved: ${photoWarnings.slice(0, 3).join(" · ")}` } : {}),
+  };
 }

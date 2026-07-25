@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Camera, Zap, X, CheckCircle2, Loader2 } from "lucide-react";
-import { downscale } from "@/lib/cards/img";
 import { SPORT_CATEGORIES, ZONES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import { commitSpeedBatch, applyBatchStrategy, type SpeedItem } from "@/app/cards/intake/actions";
 import { Lightbox } from "./Lightbox";
+import { CameraSheet, type CapturedShot } from "./CameraSheet";
 
 // Speed Book: front-only rapid capture with NO external API calls (works
 // dormant). New shots inherit the current category/zone defaults. Committing a
@@ -17,7 +17,7 @@ export function SpeedBook({
   strategies?: { key: string; label: string }[];
   entities?: { id: string; short_code: string; name: string }[];
 }) {
-  const camRef = useRef<HTMLInputElement>(null);
+  const [cam, setCam] = useState(false);
   const [category, setCategory] = useState<string>("");
   const [zone, setZone] = useState<string>("BULK");
   const [strategy, setStrategy] = useState<string>("standard");
@@ -31,20 +31,26 @@ export function SpeedBook({
   const [done, setDone] = useState<{ n: number; poolTotal?: number } | null>(null);
   const [view, setView] = useState<string | null>(null);
 
-  async function capture(file: File) {
-    const url = await downscale(file, 1280);
-    setItems((xs) => [...xs, { front: url, thumb: url, sport_category: category || undefined, zone }]);
+  // Speed Book now uses the same in-app scanner as the other intake paths, so
+  // bulk capture gets the alignment guide, auto-snap, the edge margin and the
+  // retained uncropped frame instead of a bare OS-camera hand-off.
+  function capture(shot: CapturedShot) {
+    setItems((xs) => [...xs, {
+      front: shot.url, thumb: shot.url, front_original: shot.original ?? undefined,
+      sport_category: category || undefined, zone,
+    }]);
   }
   function remove(i: number) { setItems((xs) => xs.filter((_, j) => j !== i)); }
 
   async function book() {
     setErr(null); setBusy(true);
-    const res = await commitSpeedBatch(items.map(({ front, sport_category, zone }) => ({ front, sport_category, zone })), Number(lotCost));
+    const res = await commitSpeedBatch(items.map(({ front, front_original, sport_category, zone }) => ({ front, front_original, sport_category, zone })), Number(lotCost));
     if (!res.ok) { setBusy(false); setErr(res.error ?? "Batch failed."); return; }
     // Stamp the chosen pricing standard across the lot (default column is
     // 'standard'; this applies whatever was picked).
     if (res.ids?.length && (strategy !== "standard" || entity || treatment !== "dealer")) await applyBatchStrategy(res.ids, strategy, undefined, entity || undefined, treatment);
     setBusy(false);
+    if (res.warning) setErr(res.warning); // booked, but say so if a photo didn't store
     setDone({ n: res.inserted ?? items.length, poolTotal: res.poolTotal });
     setItems([]); setLotCost(""); setAsking(false);
   }
@@ -107,9 +113,15 @@ export function SpeedBook({
 
       {view && <Lightbox src={view} onClose={() => setView(null)} />}
 
-      <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden"
-        onChange={(e) => { if (e.target.files?.[0]) capture(e.target.files[0]); e.target.value = ""; }} />
-      <button onClick={() => camRef.current?.click()}
+      {cam && (
+        <CameraSheet
+          title="Speed Book — front of each card"
+          multi
+          onClose={() => setCam(false)}
+          onCapture={capture}
+        />
+      )}
+      <button onClick={() => setCam(true)}
         className="flex w-full items-center justify-center gap-2 rounded-2xl bg-flag py-5 text-lg font-bold text-white active:scale-95">
         <Camera size={22} /> Capture ({items.length})
       </button>

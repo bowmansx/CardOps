@@ -45,7 +45,12 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
   const { data: priceHist } = await supabase
     .from("card_price_history").select("price, ts").eq("card_id", id).order("ts", { ascending: true }).limit(200);
   const { data: mktSales } = await supabase
-    .from("card_market_sales").select("sold_at, price, grader, grade").eq("card_id", id).order("sold_at", { ascending: true }).limit(500);
+    // Shared identity history when we can fingerprint the card, so the chart
+    // shows every sale anyone has collected for it — not just the ones observed
+    // since this copy was added.
+    .from("card_market_sales").select("sold_at, price, grader, grade")
+    .eq(c.identity_id ? "identity_id" : "card_id", c.identity_id ?? id)
+    .order("sold_at", { ascending: true }).limit(500);
   const { data: srcQuotes } = await supabase
     .from("card_source_quotes")
     .select("source, kind, grader, grade, price, currency, label, url, fetched_at")
@@ -55,7 +60,7 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
   // (SQL aggregate) + the AI switch.
   const EST_COLS = "mode, value, low, high, confidence, rationale, sources, credits_spent, model, created_at";
   const svc = createServiceClient();
-  const [estStd, estAll, { data: bal }, { data: aiCfg }] = await Promise.all([
+  const [estStd, estAll, { data: bal, error: balErr }, { data: aiCfg }] = await Promise.all([
     supabase.from("card_estimates").select(EST_COLS).eq("card_id", id).eq("mode", "standard_plus").order("created_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("card_estimates").select(EST_COLS).eq("card_id", id).eq("mode", "all_sales_plus").order("created_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.rpc("credit_balance"),
@@ -64,7 +69,9 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
   const estimates: Record<string, unknown> = {};
   if (estStd.data) estimates.standard_plus = estStd.data;
   if (estAll.data) estimates.all_sales_plus = estAll.data;
-  const creditBalance = Number(bal ?? 0);
+  // null (not 0) when the balance can't be read — a money figure renders
+  // complete or flagged, never 0-as-fact (rule 4).
+  const creditBalance = balErr ? null : Number(bal ?? 0);
   const aiOn = !!aiCfg?.enabled;
 
   // Stored photos (private bucket → short-lived signed URLs).

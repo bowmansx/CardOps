@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Camera, Loader2, CheckCircle2, ScanLine, RotateCcw, AlertTriangle } from "lucide-react";
 import { SPORT_CATEGORIES, ZONES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import { commitIntakeCard, type IntakeInput } from "@/app/cards/intake/actions";
@@ -32,6 +33,9 @@ export function FullIntake({
   const [busy, setBusy] = useState<null | "scanning" | "saving">(null);
   const [err, setErr] = useState<string | null>(null);
   const [aiOff, setAiOff] = useState(false);
+  // The full uncropped frames. A crop must never be the only record of an edge.
+  const [frontOriginal, setFrontOriginal] = useState<string | null>(null);
+  const [backOriginal, setBackOriginal] = useState<string | null>(null);
   const [f, setF] = useState<Fields>({});
   const [savedCount, setSavedCount] = useState(0);
 
@@ -50,8 +54,18 @@ export function FullIntake({
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Scan failed.");
-      if (d.aiOff) { setAiOff(true); setF({}); }
-      else setF({ ...d.card });
+      if (d.aiOff) {
+        // The server tells us WHY and we used to throw it away, so "Re-read
+        // (AI)" looked like a dead button. A fail-closed path the user can't
+        // see is indistinguishable from a broken one (rules 4 and 8).
+        setAiOff(true);
+        setErr(d.message ?? "AI scan is off — fill the card in manually.");
+        setF({});
+      } else {
+        setAiOff(false);
+        setErr(null);
+        setF({ ...d.card });
+      }
       setStep("review");
     } catch (e) { setErr(e instanceof Error ? e.message : "Scan failed."); }
     finally { setBusy(null); }
@@ -67,14 +81,21 @@ export function FullIntake({
       vision_confidence: f.confidences ? { ...f.confidences, overall: f.overall_confidence } : undefined,
       front: front ?? undefined,
       back: back ?? undefined,
+      // The uncropped frames, so a crop is never the only record of an edge.
+      front_original: frontOriginal ?? undefined,
+      back_original: backOriginal ?? undefined,
     });
     setBusy(null);
     if (!res.ok) { setErr(res.error ?? "Save failed."); return; }
+    // The card saved but a photo didn't — say so rather than let it surface
+    // later as a listing with no image.
+    if (res.warning) { setErr(res.warning); }
     setSavedCount((n) => n + 1);
     reset();
   }
   function reset() {
-    setFront(null); setBack(null); setF({}); setAiOff(false); setStep("capture"); setErr(null);
+    setFront(null); setBack(null); setFrontOriginal(null); setBackOriginal(null);
+    setF({}); setAiOff(false); setStep("capture");
   }
 
   const conf = (f.confidences ?? {}) as Record<string, number>;
@@ -113,9 +134,12 @@ export function FullIntake({
               return (
                 <button key={kind} type="button" onClick={() => setCam(kind)}
                   className="flex aspect-[3/4] w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-hairline bg-paper">
-                  {val
-                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={val} alt={kind} className="h-full w-full object-cover" />
-                    : <span className="flex flex-col items-center gap-1 text-xs text-ink/50"><Camera size={22} /> {kind}</span>}
+                  {val ? (
+                    /* eslint-disable-next-line @next/next/no-img-element -- data-URL camera preview; next/image can't optimize it */
+                    <img src={val} alt={kind} className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex flex-col items-center gap-1 text-xs text-ink/50"><Camera size={22} /> {kind}</span>
+                  )}
                 </button>
               );
             })}
@@ -142,6 +166,16 @@ export function FullIntake({
               : <span className="figures rounded bg-pos/15 px-1.5 py-0.5 text-[10px] font-semibold text-pos">AI-filled</span>}
           </div>
 
+          {/* "manual" alone doesn't say WHY or what to do about it. When the
+              kill-switch is the reason, say so and link to the fix — otherwise
+              re-reading just re-renders the same grey chip forever. */}
+          {aiOff && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-800">
+              AI scan is <strong>off</strong>, so nothing was filled in and <em>Re-read (AI)</em> can&apos;t do anything.
+              {" "}<Link href="/cards/services" className="underline underline-offset-2">Turn on “AI card scan (Anthropic)” in Services</Link>, then re-read.
+            </div>
+          )}
+
           {/* Photos: tap a thumbnail for full-screen + zoom; Retake swaps the
               shot without touching your field edits. */}
           <div className="flex items-start gap-3">
@@ -154,6 +188,18 @@ export function FullIntake({
                 <button type="button" onClick={() => setCam(kind)} className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-flag">
                   <Camera size={10} /> Retake {kind}
                 </button>
+                {/* The uncropped frame, when the camera took one. Lets you check
+                    with your own eyes that the crop didn't clip a corner —
+                    which is the only reason auto-crop is safe to trust. */}
+                {(kind === "front" ? frontOriginal : backOriginal) && (
+                  <button
+                    type="button"
+                    onClick={() => setView((kind === "front" ? frontOriginal : backOriginal) as string)}
+                    className="mt-0.5 block w-full text-[10px] text-ink/45 underline underline-offset-2"
+                  >
+                    uncropped
+                  </button>
+                )}
               </div>
             ))}
             <div className="ml-auto flex flex-col items-end gap-1.5">
@@ -257,8 +303,16 @@ export function FullIntake({
           key={cam} // remount per shot → fresh camera stream for the back (day-review fix)
           title={`Photograph the ${cam}`}
           onClose={() => setCam(null)}
-          onCapture={(url) => {
+          onCapture={(shot) => {
+            const url = shot.url;
             const kind = cam;
+            // Keep the uncropped frame alongside the framed one. Persisting it
+            // needs the card_photos columns from DESIGN_PHOTO_SYSTEM §4 — until
+            // then it is held here rather than silently thrown away.
+            if (shot.original) {
+              if (kind === "front") setFrontOriginal(shot.original);
+              else setBackOriginal(shot.original);
+            }
             // Retake from the REVIEW screen: just swap the photo — never
             // wipe the user's field edits with an auto re-scan (they can
             // tap "Re-read (AI)" if they want fresh extraction).

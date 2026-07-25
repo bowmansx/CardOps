@@ -1,5 +1,46 @@
 # CardOps — where things stand and what's left
 
+## ⚠ READ FIRST (2026-07-25, end of session)
+
+**1. Turn on "AI card scan (Anthropic)" in More → Services.** This is why a
+scanned card filled in nothing. `service_config` seeds every service DISABLED,
+and the new Supabase project was bootstrapped fresh, so the AI kill-switch came
+up off. Every AI path is gated on it and fails closed on purpose (they spend
+real money). The other toggles seeded off too — check them while you're there.
+
+**2. Paste queue — FOUR migrations, in order, then the harness:**
+
+| # | File | What it adds |
+|---|---|---|
+| 1 | `20260737000000_credit_metering.sql` | credit ledger v2, AI cost telemetry |
+| 2 | `20260738000000_card_identities.sql` | shared card identity + market data |
+| 3 | `20260739000000_investor_assets.sql` | Wave B: asset record, documents, custody |
+| 4 | `20260740000000_photo_provenance_storage.sql` | photo provenance + storage metering |
+
+Then `supabase/tests/money-core.test.sql` → expect **39 of 39 PASSED**.
+
+> Migrations 2–4 were adversarially reviewed before pasting (40 agents, 36
+> candidates, 18 refuted, 8 distinct defects fixed in place — see commit
+> `17b8118`). Two would have silently voided the identity layer: a partial
+> unique index that made every upsert fail 42P10 behind a swallowed error, and
+> RLS that left shared history unreadable by everyone but one arbitrary owner.
+> A third leaked every tenant's out-of-possession assets through a view with no
+> `security_invoker`. **AI card scan was switched ON in Services on 2026-07-25
+> and verified end-to-end** — the scan route reaches Anthropic and returns a
+> parsed card.
+
+**3. Merge PR #2** (github.com/bowmansx/CardOps/pull/2) — it carries everything.
+
+**4. Decisions blocking work:** off-site backup destination (R2 / Drive / S3)
+— gates seeding the Mantle; credits org- or user-scoped; and
+`VALUATION_ENGINE.md` still isn't in the repo (blocks Wave B3's discovery-plan
+display).
+
+Design docs written and awaiting go: `DESIGN_WAVE_B.md` (schema BUILT, UI not),
+`DESIGN_WAVE_C.md` (org tenancy, design only), `DESIGN_PHOTO_SYSTEM.md`
+(templates, quality presets, quotas — measurement built, policy not).
+
+
 Written 2026-07-24, the day CardOps became its own app.
 Nothing here is urgent. CardOps works today.
 
@@ -43,6 +84,66 @@ unbalanced or unmapped is refused rather than half-posted.
 MasterOps then reflects it automatically — it already reads those Zoho orgs, so
 card activity shows up in your entity cash/P&L with no wiring between the apps.
 
+## 1b. ✅ SUPABASE SPLIT — DONE 2026-07-25
+
+CardOps runs on its own Supabase project (`zgkydwvmdnnrxcacegth`). Schema
+bootstrapped from `supabase/bootstrap/`, owner promoted, three Vercel env
+vars repointed (new-style `sb_publishable_` / `sb_secret_` keys), redeployed
+and verified from outside: the live bundle targets the new project and
+anon routes answer correctly. Money-core harness on the NEW database:
+**13 of 13 PASSED**. The old login-bounce (shared auth redirecting to
+Master-Ops) is structurally gone.
+
+Left over from the split, non-urgent:
+- Google sign-in isn't configured on the new project yet — magic link works.
+  (Add the provider + the new `https://zgkydwvmdnnrxcacegth.supabase.co/auth/v1/callback`
+  to the Google Cloud console's authorized redirect URIs.)
+- Inventory starts EMPTY; pre-split test cards remain in the old project.
+- Master-Ops tax advisor still reads the OLD project's card tables.
+- VAPID/push, THECARDAPI, ANTHROPIC, ZOHO env vars were untouched by the
+  split — they don't reference Supabase.
+
+## 1c. Credit metering — SHADOW MODE (built 2026-07-25)
+
+The business model Beau chose: users buy computation credits on the WEBSITE
+(not in-app — avoids Apple's 15–30% on digital goods; the PWA has no such
+constraint anyway) and spend them on metered AI work. Built now so pricing is
+set from data, not guesses. Nothing is user-visible or enforced yet.
+
+**Decisions locked:**
+- Retail price (credits) is DECOUPLED from measured cost (dollars). Reprice
+  retail without redefining what a credit is.
+- Flat per-operation pricing. Prompt-cache savings are margin, not a variable
+  discount — a run that costs 9 credits one day and 4 the next is worse for
+  the user than a stable number. Cache the SHARED prefix (rubric/instructions)
+  only, never one user's card data.
+- Plan grants EXPIRE at period end; purchased top-ups do NOT. Spending draws
+  the soonest-expiring bucket first, so nothing evaporates that could have
+  been used. (Rollover cap of 1× allowance / 30d is the intended plan shape —
+  the schema supports it; the granting job that applies it comes with billing.)
+
+**What exists (migration `20260737000000_credit_metering.sql`):**
+- `ai_usage` — real tokens + computed dollar cost per AI run (service-role
+  only). Unknown model ⇒ `cost_usd` null and FLAGGED, never $0.
+- `credit_ledger` v2 — `kind` / `expires_at` / `remaining` / `shortfall`.
+- `credit_balance()` v2 (unexpired remainders), `credit_grant()` (owner or
+  service role), `credit_spend()` (FIFO by expiry, service role).
+- `/cards/credits` (owner-only) — $/credit per feature, enforcement toggle,
+  test grants, recent ledger.
+- Harness extended to **18 assertions** (14–18 cover grants, FIFO draw,
+  expiry, shortfall, and non-owner refusal).
+
+**Why `credit_spend` never refuses:** by the time it runs the compute already
+happened (rule 7 orders the effect before the charge). Refusing there would
+hide a real cost; it records a `shortfall` instead. Refusal lives in app code
+BEFORE the AI call, gated on the `credit_enforcement` service_config flag
+(currently OFF = shadow mode).
+
+**Before charging anyone:** watch `$ / credit` on `/cards/credits` across real
+usage, then set prices. Then Stripe checkout → `credit_grant` (with the same
+idempotency discipline as the Zoho push — double-crediting a payment is the
+mirror image of double-posting a journal), then flip enforcement on.
+
 ## 2. Still dark until you act
 
 - **eBay.** The OAuth RuName is registered with eBay against
@@ -56,7 +157,11 @@ card activity shows up in your entity cash/P&L with no wiring between the apps.
   now NO card cron runs anywhere. eBay sales settle via the hub's manual sync
   button on MasterOps until cutover.
 
-## 2b. Migrations queued to PASTE (in this order)
+## 2b. ✅ APPLIED 2026-07-25 — all three migrations pasted; money-core
+harness ran against the live database: **13 of 13 PASSED**. (Historical
+paste order kept below for reference.)
+
+### Original paste queue (done)
 
 From the `foundation-fixes` branch — paste each, in sequence:
 

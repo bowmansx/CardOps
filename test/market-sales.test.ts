@@ -13,15 +13,21 @@ describe("saleKey / saleToRow", () => {
     expect(k).toBe("2026-05-01:2.5:Roiling Dragonstorm");
   });
   it("maps a sale to a row and drops junk prices", () => {
-    expect(saleToRow("c1", sale({ price: 0 }))).toBeNull();
-    const r = saleToRow("c1", sale({ price: 2.05, grader: "PSA", grade: "10" as unknown as number }));
-    expect(r).toMatchObject({ card_id: "c1", source: "thecardapi", price: 2.05, grader: "PSA", grade: 10, sold_at: "2026-05-01" });
+    expect(saleToRow("i1", "c1", sale({ price: 0 }))).toBeNull();
+    const r = saleToRow("i1", "c1", sale({ price: 2.05, grader: "PSA", grade: "10" as unknown as number }));
+    expect(r).toMatchObject({ identity_id: "i1", card_id: "c1", source: "thecardapi", price: 2.05, grader: "PSA", grade: 10, sold_at: "2026-05-01" });
+  });
+  // Sales belong to the shared identity; card_id is provenance only and may be
+  // absent (e.g. a refresh driven by identity rather than by someone's copy).
+  it("allows a null card_id — history is identity-owned", () => {
+    const r = saleToRow("i1", null, sale({ price: 5 }));
+    expect(r).toMatchObject({ identity_id: "i1", card_id: null });
   });
 });
 
 describe("salesToRows dedups within a batch", () => {
   it("keeps one row per external id", () => {
-    const rows = salesToRows("c1", [sale({ id: "a", price: 2 }), sale({ id: "a", price: 2 }), sale({ id: "b", price: 3 })]);
+    const rows = salesToRows("i1", "c1", [sale({ id: "a", price: 2 }), sale({ id: "a", price: 2 }), sale({ id: "b", price: 3 })]);
     expect(rows.map((r) => r.external_id).sort()).toEqual(["a", "b"]);
   });
 });

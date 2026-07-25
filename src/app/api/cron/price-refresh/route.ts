@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { runnableAdapters, consensusForCard, type CardForPricing, type SourceQuote } from "@/lib/cards/price-sources";
-import { fetchCardApiSales, distillSales } from "@/lib/cards/price-sources/thecardapi";
+import { fetchCardApiSales, distillSales, type CardApiSale } from "@/lib/cards/price-sources/thecardapi";
 import { salesToRows } from "@/lib/cards/market-sales";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +27,7 @@ type CardRow = CardForPricing & {
   manual_price: number | null;
   price_locked: boolean | null;
   track_history: boolean | null;
+  identity_id: string | null;
 };
 
 export async function GET(req: Request) {
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
   // with the owner's for the same slots (and the owner paid for it). The owner
   // gets first claim on the budget; whatever's left rotates through everyone
   // else, still oldest-first.
-  const SELECT = "id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, market_value, manual_price, price_locked, track_history, last_priced_at";
+  const SELECT = "id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, market_value, manual_price, price_locked, track_history, last_priced_at, identity_id";
   const { data: ownerRow } = await svc.from("profiles").select("id").eq("role", "owner").limit(1).maybeSingle();
   const ownerId = (ownerRow?.id as string | undefined) ?? null;
   // Paid spend follows the ROLE roster: a demoted member's cards must not keep
@@ -101,42 +102,73 @@ export async function GET(req: Request) {
 
   let adopted = 0;
   let salesStored = 0;
+  const salesErrors: string[] = [];
   const history: { card_id: string; price: number; strategy: string }[] = [];
   const now = new Date().toISOString();
 
-  async function priceOne(card: CardRow) {
-    const adapters = runnableAdapters(card);
+  // FETCH once per IDENTITY, APPLY to every owner of it.
+  //
+  // The vendor question ("what has this card been selling for?") is a property
+  // of the CARD, not of whose copy it is — so twenty owners is one fetch. But
+  // the ANSWER is per-copy: a PSA 10 and a raw copy of the same card take
+  // different quotes out of the same sales, and each owner's card_source_quotes
+  // and market_value must still be written individually. Deduping the fetch
+  // without fanning out the apply would silently stop pricing every card but
+  // the first of each identity.
+  type Fetched = { quotes: SourceQuote[]; sales: CardApiSale[]; cleanSources: string[] };
+
+  async function fetchForGroup(rep: CardRow, keepHistory: boolean): Promise<Fetched> {
+    const adapters = runnableAdapters(rep);
     const useCardApi = adapters.some((a) => a.id === "thecardapi");
-    const fresh: SourceQuote[] = [];
+    const quotes: SourceQuote[] = [];
     const cleanSources: string[] = [];
+    let sales: CardApiSale[] = [];
     // Every source EXCEPT The Card API via the generic adapter loop (Scryfall etc.).
+    // Their quotes cover all conditions; bestForCondition picks per card later.
     for (const a of adapters.filter((a) => a.id !== "thecardapi")) {
       try {
-        const res = await a.fetch(card);
-        if (res.ok) { cleanSources.push(a.id); fresh.push(...res.quotes); }
+        const res = await a.fetch(rep);
+        if (res.ok) { cleanSources.push(a.id); quotes.push(...res.quotes); }
       } catch { /* transient — leave prior quotes intact */ }
     }
-    // The Card API: ONE raw-sales call → accumulate the day's sales into history
-    // AND distill a condition-matched quote (no double call, stays in budget).
+    // The Card API: ONE raw-sales call → accumulate the day's sales into the
+    // shared history AND feed each owner's condition-matched distill.
     if (useCardApi) {
       try {
-        const r = await fetchCardApiSales(card, { allGrades: true, limit: SALES_LIMIT });
+        const r = await fetchCardApiSales(rep, { allGrades: true, limit: SALES_LIMIT });
         if (r.ok) {
           cleanSources.push("thecardapi");
-          fresh.push(...distillSales(r.sales, card));
-          if (card.track_history !== false && r.sales.length) {
-            const rows = salesToRows(card.id, r.sales);
+          sales = r.sales;
+          // Accumulate against the shared IDENTITY so every owner benefits from
+          // this one fetch. A card too sparse to fingerprint has no identity and
+          // isn't accumulated — there's nothing stable to attach history to.
+          if (keepHistory && r.sales.length && rep.identity_id) {
+            const rows = salesToRows(rep.identity_id, rep.id, r.sales);
             if (rows.length) {
-              const { error } = await svc!.from("card_market_sales").upsert(rows, { onConflict: "card_id,source,external_id", ignoreDuplicates: true });
-              if (!error) salesStored += rows.length;
+              const { error } = await svc!.from("card_market_sales")
+                .upsert(rows, { onConflict: "identity_id,source,external_id", ignoreDuplicates: true });
+              // This write IS the shared history. Swallowing its error is how a
+              // broken conflict target (42P10) hid behind a run that reported
+              // success while accumulating nothing, forever (rule 1).
+              if (error) salesErrors.push(`${rep.identity_id}: ${error.message}`);
+              else salesStored += rows.length;
             }
+          }
+          if (rep.identity_id) {
+            await svc!.from("card_identities").update({ last_refreshed_at: now }).eq("id", rep.identity_id);
           }
         }
       } catch { /* transient */ }
     }
+    return { quotes, sales, cleanSources };
+  }
+
+  async function applyToCard(card: CardRow, f: Fetched) {
+    // Same sales, this card's condition.
+    const fresh = [...f.quotes, ...distillSales(f.sales, card)];
     // Replace only the sources that ran cleanly (a 0-quote clean run clears stale).
-    if (cleanSources.length) {
-      await svc!.from("card_source_quotes").delete().eq("card_id", card.id).in("source", cleanSources);
+    if (f.cleanSources.length) {
+      await svc!.from("card_source_quotes").delete().eq("card_id", card.id).in("source", f.cleanSources);
       if (fresh.length) {
         await svc!.from("card_source_quotes").insert(fresh.map((q) => ({
           card_id: card.id, source: q.source, kind: q.kind, grader: q.grader, grade: q.grade,
@@ -161,16 +193,41 @@ export async function GET(req: Request) {
     if (effective != null && effective > 0) history.push({ card_id: card.id, price: effective, strategy: "daily" });
   }
 
-  // Bounded concurrency.
-  for (let i = 0; i < list.length; i += CONCURRENCY) {
-    await Promise.all(list.slice(i, i + CONCURRENCY).map((c) => priceOne(c).catch(() => {})));
+  async function priceGroup(group: CardRow[]) {
+    // History accumulation is shared, so honour it if ANY owner in the group
+    // wants it — one opt-out must not blind the others.
+    const f = await fetchForGroup(group[0], group.some((c) => c.track_history !== false));
+    for (const card of group) await applyToCard(card, f);
+  }
+
+  // Group by identity; unidentifiable cards each form a group of one.
+  const groups = new Map<string, CardRow[]>();
+  for (const c of list) {
+    const key = c.identity_id ?? `card:${c.id}`;
+    const g = groups.get(key);
+    if (g) g.push(c); else groups.set(key, [c]);
+  }
+  const work = [...groups.values()];
+  const dedupedFetches = list.length - work.length;
+
+  // Bounded concurrency — over GROUPS, so the cap now bounds vendor calls
+  // rather than card count.
+  for (let i = 0; i < work.length; i += CONCURRENCY) {
+    await Promise.all(work.slice(i, i + CONCURRENCY).map((g) => priceGroup(g).catch(() => {})));
   }
 
   if (history.length) await svc.from("card_price_history").insert(history);
-  // Advance the rotation cursor for every card we touched (even unchanged ones).
+  // Advance the rotation cursor for every card we CONSIDERED — including the
+  // ones whose identity a sibling card fetched. Leaving them un-stamped would
+  // park them at the front of the oldest-first queue forever and starve the
+  // rest of the inventory.
   await svc.from("cards").update({ last_priced_at: now }).in("id", list.map((c) => c.id));
 
   return NextResponse.json({
-    ok: true, processed: list.length, adopted, history_written: history.length, sales_stored: salesStored, capped_at: CAP,
+    ok: true, processed: list.length, vendor_fetches: work.length, deduped_by_identity: dedupedFetches,
+    adopted, history_written: history.length, sales_stored: salesStored, capped_at: CAP,
+    ...(salesErrors.length
+      ? { sales_failed: salesErrors.length, sales_errors: salesErrors.slice(0, 5) }
+      : {}),
   });
 }

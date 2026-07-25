@@ -6,7 +6,13 @@ import type { CardApiSale } from "./price-sources/thecardapi";
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export type MarketSaleRow = {
-  card_id: string;
+  // Sales belong to the shared card IDENTITY, not to one owner's copy — that's
+  // what lets every owner of the same card share one accumulated history (and
+  // one vendor fetch). card_id is provenance only: which copy first caused the
+  // fetch. It is nullable and no longer cascades, so deleting a card can't
+  // destroy history other owners depend on.
+  identity_id: string;
+  card_id: string | null;
   source: string;
   external_id: string;
   title: string | null;
@@ -30,22 +36,26 @@ export function saleKey(s: CardApiSale): string {
   return `${saleDate(s) ?? "x"}:${Number(s.price)}:${String(s.title ?? "").slice(0, 48)}`;
 }
 
-export function saleToRow(cardId: string, s: CardApiSale, source = "thecardapi"): MarketSaleRow | null {
+export function saleToRow(
+  identityId: string, cardId: string | null, s: CardApiSale, source = "thecardapi",
+): MarketSaleRow | null {
   const price = Number(s.price);
   if (!Number.isFinite(price) || price <= 0) return null;
   const grade = s.grade != null && Number.isFinite(Number(s.grade)) ? Number(s.grade) : null;
   return {
-    card_id: cardId, source, external_id: saleKey(s), title: s.title ?? null,
+    identity_id: identityId, card_id: cardId, source, external_id: saleKey(s), title: s.title ?? null,
     price: round2(price), currency: (s.currency as string) ?? "USD",
     grader: (s.grader as string | null) ?? null, grade, platform: s.platform ?? null, sold_at: saleDate(s),
   };
 }
 
-export function salesToRows(cardId: string, sales: CardApiSale[], source = "thecardapi"): MarketSaleRow[] {
+export function salesToRows(
+  identityId: string, cardId: string | null, sales: CardApiSale[], source = "thecardapi",
+): MarketSaleRow[] {
   const rows: MarketSaleRow[] = [];
   const seen = new Set<string>();
   for (const s of sales) {
-    const r = saleToRow(cardId, s, source);
+    const r = saleToRow(identityId, cardId, s, source);
     if (r && !seen.has(r.external_id)) { seen.add(r.external_id); rows.push(r); } // in-batch dedup too
   }
   return rows;

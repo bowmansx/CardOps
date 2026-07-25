@@ -9,11 +9,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { anthropic, MODEL, HAIKU_MODEL } from "@/lib/anthropic";
 import { fetchCardApiSales, fetchCardApiByQuery } from "@/lib/cards/price-sources/thecardapi";
 import type { CardForPricing } from "@/lib/cards/price-sources/types";
-import { summarizeSales, comparableQueries, buildEstimateDigest, compsAsSales, groundPrice, medianOf, type SalesStats } from "@/lib/cards/estimate";
+import { summarizeSales, comparableQueries, buildEstimateDigest, compsAsSales, groundPrice, medianOf, type SalesStats, type DigestNews } from "@/lib/cards/estimate";
 import { storedToSales } from "@/lib/cards/market-sales";
 import type { EstimateConfig } from "@/lib/cards/credits";
+import type { AiTokens } from "@/lib/ai/rates";
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+const NEWS_WINDOW_DAYS = 45; // how far back a headline still informs a price
 
 const Schema = z.object({
   value: z.number().describe("single best estimate of the current fair market price, USD"),
@@ -23,12 +25,14 @@ const Schema = z.object({
   rationale: z.string().describe("2-4 sentences: what the sales show, and the player/market factors behind this number; call out thin or stale data"),
 });
 
-export type EstimateCard = CardForPricing & { market_value: number | null; manual_price: number | null };
+export type EstimateCard = CardForPricing & {
+  market_value: number | null; manual_price: number | null; identity_id?: string | null;
+};
 export type EstimateMode = "standard_plus" | "all_sales_plus";
 
 export type EstimateOutcome =
-  | { ok: true; value: number; low: number; high: number; confidence: string; rationale: string; sources: unknown; model: string }
-  | { ok: false; error: string; status: number };
+  | { ok: true; value: number; low: number; high: number; confidence: string; rationale: string; sources: unknown; model: string; usage: AiTokens }
+  | { ok: false; error: string; status: number; usage?: AiTokens };
 
 export async function runEstimate(
   db: SupabaseClient,
@@ -44,7 +48,13 @@ export async function runEstimate(
     fetchCardApiSales(c, { allGrades: mode === "all_sales_plus", limit: mode === "all_sales_plus" ? 100 : 40 }),
     db.from("card_comps").select("sale_price, sale_date, grader, grade, source, listing_url").eq("card_id", c.id).order("sale_date", { ascending: false }).limit(mode === "all_sales_plus" ? 200 : 60),
     db.from("card_source_quotes").select("source, kind, price, grade, grader, label").eq("card_id", c.id),
-    db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("card_id", c.id).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80),
+    // Read the SHARED identity history, not just this copy's — that's the whole
+    // point of the identity layer: a card added today inherits every day of
+    // market history anyone has collected for it. Falls back to the card's own
+    // rows when it's too sparse to fingerprint.
+    c.identity_id
+      ? db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("identity_id", c.identity_id).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80)
+      : db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("card_id", c.id).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80),
   ]);
   const own = summarizeSales([...ownRes.sales, ...compsAsSales(compRows ?? []), ...storedToSales(histRows ?? [])]);
 
@@ -62,15 +72,47 @@ export async function runEstimate(
     }
   }
 
+  // REAL news, not recall. The news cron already fetches headlines per subject
+  // and scores them; this reads them. `undefined` means the toggle is off; an
+  // empty array means "we looked and there's nothing", which the digest states
+  // explicitly so the model can't quietly invent a narrative.
+  let news: DigestNews[] | undefined;
+  if (config.news) {
+    const subject = (c.player ?? "").trim();
+    if (subject.length >= 3) {
+      const since = new Date(Date.now() - NEWS_WINDOW_DAYS * 86_400_000).toISOString();
+      const { data, error } = await db
+        .from("card_news")
+        .select("title, source, published_at, significance, direction, market_moving")
+        .ilike("subject", subject)
+        .gte("published_at", since)
+        .order("published_at", { ascending: false })
+        .limit(8);
+      // A failed read must not masquerade as "no news" — that would be a
+      // silent downgrade of something the user paid for.
+      if (error) console.error(`[cards/estimate] news read failed: ${error.message}`);
+      else news = (data ?? []) as DigestNews[];
+    } else {
+      news = [];
+    }
+  }
+
   const refValue = c.manual_price ?? c.market_value ?? null;
   const anchor = mode === "standard_plus" ? (refValue != null ? Number(refValue) : null) : null;
   const ground = groundPrice(own.median, guideMedian, refValue != null ? Number(refValue) : null);
 
-  const digest = buildEstimateDigest({ card: c, own, comparables, anchor, guides: guidesCond.length ? guidesCond : guidesAll });
+  const digest = buildEstimateDigest({ card: c, own, comparables, anchor, guides: guidesCond.length ? guidesCond : guidesAll, news });
+  // News is now DATA (in the digest above), so it needs no prompt overlay.
+  // What remains here is honestly labelled for what it is: the model's own
+  // judgment, with no source behind it. Saying so in the prompt keeps the
+  // rationale honest too — the model shouldn't cite "market data" it never saw.
   const overlays = [
-    config.news ? "Weigh recent player news/performance you know of (injury, form, trades, milestones) as a qualitative factor." : null,
-    config.macro ? "Weigh broad collectibles/market sentiment as a qualitative factor." : null,
-    config.pop ? "Consider scarcity/population where relevant." : null,
+    config.macro
+      ? "Also apply your general sense of collectibles-market conditions as a QUALITATIVE judgment — you have no market-index data here, so do not present it as data."
+      : null,
+    config.pop
+      ? "Also consider likely scarcity/population as a QUALITATIVE judgment — you have no population-report data here, so do not cite specific pop counts."
+      : null,
   ].filter(Boolean).join(" ");
 
   const instruction =
@@ -79,6 +121,7 @@ export async function runEstimate(
       : "IGNORE any template price. Derive a fair current market price purely from ALL the sales evidence, comparables, and conditions — this card may sell rarely, so the real price can differ from a simple average.";
 
   let parsed: z.infer<typeof Schema> | undefined;
+  let usage: AiTokens = { input_tokens: 0, output_tokens: 0 };
   try {
     const msg = await anthropic.messages.parse({
       model: config.ai === "deep" ? MODEL : HAIKU_MODEL,
@@ -93,11 +136,19 @@ export async function runEstimate(
       output_config: { format: zodOutputFormat(Schema) },
     });
     parsed = msg.parsed_output ?? undefined;
+    usage = {
+      input_tokens: msg.usage.input_tokens,
+      output_tokens: msg.usage.output_tokens,
+      cache_creation_input_tokens: msg.usage.cache_creation_input_tokens,
+      cache_read_input_tokens: msg.usage.cache_read_input_tokens,
+    };
   } catch (e) {
     console.error("[cards/estimate] AI failed:", e);
     return { ok: false, error: "Estimate failed — try again.", status: 502 };
   }
-  if (!parsed) return { ok: false, error: "Couldn't produce an estimate.", status: 422 };
+  // Tokens were consumed even when nothing parseable came back — carry usage
+  // so the caller's telemetry counts the cost of the failure too.
+  if (!parsed) return { ok: false, error: "Couldn't produce an estimate.", status: 422, usage };
 
   // Ground the output so a thin read (or an injected title) can't free-float.
   let value = Math.round(parsed.value * 100) / 100;
@@ -123,6 +174,7 @@ export async function runEstimate(
     confidence: parsed.confidence,
     rationale: parsed.rationale,
     model: config.ai === "deep" ? MODEL : HAIKU_MODEL,
+    usage,
     sources: {
       own, comparables, config,
       guides: guidesCond.length ? guidesCond : guidesAll,

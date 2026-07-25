@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateCost, bandFor, costFill, normalizeEstimate, COST_CEILING } from "@/lib/cards/credits";
+import { estimateCost, bandFor, costFill, normalizeEstimate, COST, COST_CEILING } from "@/lib/cards/credits";
 
 describe("estimateCost", () => {
   it("off = free / no band", () => {
@@ -31,9 +31,32 @@ describe("estimateCost", () => {
 
   it("a maxed deep estimate lands in high band near the ceiling", () => {
     const r = estimateCost({ mode: "all_sales_plus", ai: "deep", comparables: true, news: true, macro: true, pop: true });
-    // 1 + 2 + 2 + 3 + 1 + 1 + 12 = 22
-    expect(r.credits).toBe(22);
+    // base 1 + full_sales 2 + comparables 2 + news 1 + macro 0 + pop 0 + deep 12 = 18
+    expect(r.credits).toBe(18);
     expect(r.band).toBe("high");
+  });
+});
+
+// The honesty rule, pinned so it can't regress silently: a toggle may only
+// carry a price if it causes real work. macro and pop fetch NOTHING — they add
+// the model's own judgment — so they must stay free until a real data source
+// is wired behind them. If someone raises these, this test should stop them
+// and make them justify it.
+describe("no toggle charges for data it doesn't fetch", () => {
+  it("macro and pop are free — they are model judgment, not fetched data", () => {
+    expect(COST.macro).toBe(0);
+    expect(COST.pop).toBe(0);
+    const base = estimateCost({ mode: "standard_plus", ai: "light" }).credits;
+    const withJudgment = estimateCost({ mode: "standard_plus", ai: "light", macro: true, pop: true }).credits;
+    expect(withJudgment).toBe(base);
+  });
+
+  it("news costs something because it really reads collected headlines", () => {
+    const base = estimateCost({ mode: "standard_plus", ai: "light" }).credits;
+    const withNews = estimateCost({ mode: "standard_plus", ai: "light", news: true }).credits;
+    expect(withNews).toBeGreaterThan(base);
+    // …but less than a live vendor fetch, since it's a local read.
+    expect(COST.news).toBeLessThan(COST.comparables);
   });
 });
 
