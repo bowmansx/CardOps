@@ -189,16 +189,41 @@ create trigger cards_tax_bucket_bi before insert on public.cards
 
 -- Reclass is an explicit ACTION, not an edit. A tax classification that can be
 -- silently changed is not defensible; this forces a reason and an audit row.
+-- Guards the WHOLE provenance record, not just the value. Watching only
+-- `tax_bucket` left the three columns that make it defensible — source, when,
+-- and why — freely editable, so a classification could keep its audit trail
+-- while the trail was quietly rewritten to say something else.
 create or replace function public.guard_tax_bucket()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  if new.tax_bucket is distinct from old.tax_bucket
+  if (new.tax_bucket is distinct from old.tax_bucket
+      or new.tax_bucket_source is distinct from old.tax_bucket_source
+      or new.tax_bucket_set_at is distinct from old.tax_bucket_set_at
+      or new.tax_bucket_reason is distinct from old.tax_bucket_reason)
      and coalesce(auth.role(), '') = 'authenticated'
      and coalesce(current_setting('cardops.in_reclass', true), '') <> '1' then
     raise exception 'tax_bucket is a classification, not a field: use card_reclass_tax_bucket';
   end if;
   return new;
 end $$;
+
+-- asset_state had NO guard at all, which made the pledged-collateral block
+-- bypassable in two calls: set asset_state to something else, then sell. It
+-- also let the card's state drift away from the custody log that is supposed
+-- to be its history. Both now require going through card_move_asset.
+create or replace function public.guard_asset_state()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.asset_state is distinct from old.asset_state
+     and coalesce(auth.role(), '') = 'authenticated'
+     and coalesce(current_setting('cardops.in_move', true), '') <> '1' then
+    raise exception 'asset_state is a custody transition: use card_move_asset';
+  end if;
+  return new;
+end $$;
+drop trigger if exists cards_asset_state_guard on public.cards;
+create trigger cards_asset_state_guard before update on public.cards
+  for each row execute function public.guard_asset_state();
 drop trigger if exists cards_tax_bucket_guard on public.cards;
 create trigger cards_tax_bucket_guard before update on public.cards
   for each row execute function public.guard_tax_bucket();
@@ -258,7 +283,9 @@ begin
     raise exception 'card_move_asset: % requires an expected return date', p_to_state;
   end if;
 
+  perform set_config('cardops.in_move', '1', true);
   update public.cards set asset_state = p_to_state where id = p_card and user_id = v_uid;
+  perform set_config('cardops.in_move', '', true);
 
   insert into public.card_custody_log
     (card_id, user_id, from_state, to_state, counterparty, location, expected_back,
@@ -277,7 +304,12 @@ grant execute on function public.card_move_asset(uuid, text, text, text, date, t
 -- from the move that put them there. Derived from the CARD's current state
 -- (truth) joined to its latest custody row (context) — never from a mutable
 -- flag on the log.
-create or replace view public.card_assets_out as
+-- security_invoker: a view runs as its OWNER by default, which would bypass
+-- every RLS policy underneath it and hand each authenticated user a list of
+-- EVERY tenant's out-of-possession assets — counterparty, location, declared
+-- value. The whole aging board is a leak without this one setting.
+create or replace view public.card_assets_out
+with (security_invoker = true) as
 select c.id as card_id, c.user_id, c.player, c.year, c.set_name, c.asset_state,
        l.counterparty, l.location, l.sent_at, l.expected_back, l.declared_value,
        case

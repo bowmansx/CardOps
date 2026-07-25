@@ -102,6 +102,7 @@ export async function GET(req: Request) {
 
   let adopted = 0;
   let salesStored = 0;
+  const salesErrors: string[] = [];
   const history: { card_id: string; price: number; strategy: string }[] = [];
   const now = new Date().toISOString();
 
@@ -146,7 +147,11 @@ export async function GET(req: Request) {
             if (rows.length) {
               const { error } = await svc!.from("card_market_sales")
                 .upsert(rows, { onConflict: "identity_id,source,external_id", ignoreDuplicates: true });
-              if (!error) salesStored += rows.length;
+              // This write IS the shared history. Swallowing its error is how a
+              // broken conflict target (42P10) hid behind a run that reported
+              // success while accumulating nothing, forever (rule 1).
+              if (error) salesErrors.push(`${rep.identity_id}: ${error.message}`);
+              else salesStored += rows.length;
             }
           }
           if (rep.identity_id) {
@@ -221,5 +226,8 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true, processed: list.length, vendor_fetches: work.length, deduped_by_identity: dedupedFetches,
     adopted, history_written: history.length, sales_stored: salesStored, capped_at: CAP,
+    ...(salesErrors.length
+      ? { sales_failed: salesErrors.length, sales_errors: salesErrors.slice(0, 5) }
+      : {}),
   });
 }

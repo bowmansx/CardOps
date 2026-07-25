@@ -64,20 +64,43 @@ do $$ begin
   end if;
 end $$;
 
--- Photos are owned through their card. Resolve the owner once per change.
+-- The owner is DENORMALISED onto the photo row, and that is load-bearing.
+--
+-- Resolving it with `select user_id from cards where id = old.card_id` looked
+-- equivalent and was not: card_photos cascade-deletes with its card, so by the
+-- time the delete trigger ran the card was already gone, the lookup returned
+-- null, and the function bailed before decrementing. Deleting a card silently
+-- kept charging the user for its photos forever — and a quota built on that
+-- number would have been unfixable after the fact.
+alter table public.card_photos add column if not exists user_id uuid;
+update public.card_photos p set user_id = c.user_id
+  from public.cards c where c.id = p.card_id and p.user_id is null;
+
+create or replace function public.card_photos_set_owner()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.user_id is null then
+    select user_id into new.user_id from public.cards where id = new.card_id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists card_photos_owner_bi on public.card_photos;
+create trigger card_photos_owner_bi before insert on public.card_photos
+  for each row execute function public.card_photos_set_owner();
+
 create or replace function public.bump_storage_usage()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare v_user uuid; v_bytes bigint; v_objects int;
 begin
   if tg_op = 'INSERT' then
-    select user_id into v_user from public.cards where id = new.card_id;
+    v_user := new.user_id;
     v_bytes := coalesce(new.bytes, 0); v_objects := 1;
   elsif tg_op = 'DELETE' then
-    select user_id into v_user from public.cards where id = old.card_id;
+    v_user := old.user_id;   -- survives the parent card's deletion
     v_bytes := -coalesce(old.bytes, 0); v_objects := -1;
   else
     -- UPDATE: only a size change matters.
-    select user_id into v_user from public.cards where id = new.card_id;
+    v_user := coalesce(new.user_id, old.user_id);
     v_bytes := coalesce(new.bytes, 0) - coalesce(old.bytes, 0); v_objects := 0;
   end if;
   if v_user is null then return coalesce(new, old); end if;

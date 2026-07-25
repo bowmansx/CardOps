@@ -879,6 +879,13 @@ create or replace function public.resolve_card_identity(
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare v_fp text; v_id uuid;
 begin
+  -- SECURITY DEFINER writing to a CROSS-TENANT table: gate it. Without this,
+  -- any authenticated account — including one with no card access at all —
+  -- could write unlimited rows into the shared catalog every other tenant
+  -- reads. The definer bypasses RLS, so the check has to live here.
+  if not public.has_card_access() and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'resolve_card_identity: card access required';
+  end if;
   -- Too little to identify anything: no player AND no set means this would be
   -- a junk identity that every under-filled card in the system collides into.
   if public.norm_token(p_player) = '~' and public.norm_token(p_set) = '~' then
@@ -933,14 +940,48 @@ update public.card_market_sales m
   from public.cards c
  where m.card_id = c.id and m.identity_id is null;
 
--- Dedup by identity now. Partial: rows with no identity (a card too sparse to
--- identify) simply aren't accumulated — see the refresh job, which skips them.
+-- Dedup by identity now.
+--
+-- NOT a partial index. It was `where identity_id is not null`, which looked
+-- tidier and silently broke the entire layer: Postgres only infers a PARTIAL
+-- unique index as an ON CONFLICT arbiter when the statement repeats the index
+-- predicate, and PostgREST's `on_conflict=` can only emit a bare column list.
+-- Every upsert from the refresh cron would have failed with 42P10 — and that
+-- error was swallowed — so card_market_sales would never have gained a row
+-- while the run reported success. NULL identity_ids are distinct in a plain
+-- unique index anyway, so the predicate bought nothing.
 drop index if exists public.card_market_sales_dedup;
 create unique index if not exists card_market_sales_identity_dedup
-  on public.card_market_sales (identity_id, source, external_id)
-  where identity_id is not null;
+  on public.card_market_sales (identity_id, source, external_id);
 create index if not exists card_market_sales_identity_sold_idx
   on public.card_market_sales (identity_id, sold_at desc);
+
+-- ── RLS: the sales are SHARED market facts, not tenant data ───────────────
+-- 20260724 (multi-tenant) had replaced the original shared policy with
+-- `owns_card(card_id)`. Left alone, that would have defeated this entire
+-- migration: rows are written with the group representative's card_id, so
+-- every OTHER owner of the same identity would read an empty history — and
+-- once card_id goes NULL on delete, owns_card(null) is false and the row
+-- becomes invisible to everyone, forever.
+--
+-- Reads: any card user (these are public marketplace observations, keyed to a
+-- catalog identity — the same posture as card_identities above).
+-- Writes: SERVICE ROLE ONLY. A tenant-writable shared table would let anyone
+-- inject fabricated sales into an identity that prices everyone else's copies.
+do $$ begin
+  if exists (select 1 from pg_policies where schemaname='public' and tablename='card_market_sales' and policyname='card_market_sales_own') then
+    drop policy card_market_sales_own on public.card_market_sales;
+  end if;
+  if exists (select 1 from pg_policies where schemaname='public' and tablename='card_market_sales' and policyname='card_market_sales_all') then
+    drop policy card_market_sales_all on public.card_market_sales;
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='card_market_sales' and policyname='card_market_sales_read') then
+    create policy card_market_sales_read on public.card_market_sales
+      for select to authenticated using (public.has_card_access());
+  end if;
+end $$;
+-- No INSERT/UPDATE/DELETE policy: authenticated callers cannot write. The
+-- price-refresh cron writes with the service client, which bypasses RLS.
 
 -- card_id survives as provenance (which copy first caused us to fetch this),
 -- but MUST NOT cascade: deleting one user's card can no longer delete market
@@ -1143,16 +1184,41 @@ create trigger cards_tax_bucket_bi before insert on public.cards
 
 -- Reclass is an explicit ACTION, not an edit. A tax classification that can be
 -- silently changed is not defensible; this forces a reason and an audit row.
+-- Guards the WHOLE provenance record, not just the value. Watching only
+-- `tax_bucket` left the three columns that make it defensible — source, when,
+-- and why — freely editable, so a classification could keep its audit trail
+-- while the trail was quietly rewritten to say something else.
 create or replace function public.guard_tax_bucket()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  if new.tax_bucket is distinct from old.tax_bucket
+  if (new.tax_bucket is distinct from old.tax_bucket
+      or new.tax_bucket_source is distinct from old.tax_bucket_source
+      or new.tax_bucket_set_at is distinct from old.tax_bucket_set_at
+      or new.tax_bucket_reason is distinct from old.tax_bucket_reason)
      and coalesce(auth.role(), '') = 'authenticated'
      and coalesce(current_setting('cardops.in_reclass', true), '') <> '1' then
     raise exception 'tax_bucket is a classification, not a field: use card_reclass_tax_bucket';
   end if;
   return new;
 end $$;
+
+-- asset_state had NO guard at all, which made the pledged-collateral block
+-- bypassable in two calls: set asset_state to something else, then sell. It
+-- also let the card's state drift away from the custody log that is supposed
+-- to be its history. Both now require going through card_move_asset.
+create or replace function public.guard_asset_state()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.asset_state is distinct from old.asset_state
+     and coalesce(auth.role(), '') = 'authenticated'
+     and coalesce(current_setting('cardops.in_move', true), '') <> '1' then
+    raise exception 'asset_state is a custody transition: use card_move_asset';
+  end if;
+  return new;
+end $$;
+drop trigger if exists cards_asset_state_guard on public.cards;
+create trigger cards_asset_state_guard before update on public.cards
+  for each row execute function public.guard_asset_state();
 drop trigger if exists cards_tax_bucket_guard on public.cards;
 create trigger cards_tax_bucket_guard before update on public.cards
   for each row execute function public.guard_tax_bucket();
@@ -1212,7 +1278,9 @@ begin
     raise exception 'card_move_asset: % requires an expected return date', p_to_state;
   end if;
 
+  perform set_config('cardops.in_move', '1', true);
   update public.cards set asset_state = p_to_state where id = p_card and user_id = v_uid;
+  perform set_config('cardops.in_move', '', true);
 
   insert into public.card_custody_log
     (card_id, user_id, from_state, to_state, counterparty, location, expected_back,
@@ -1231,7 +1299,12 @@ grant execute on function public.card_move_asset(uuid, text, text, text, date, t
 -- from the move that put them there. Derived from the CARD's current state
 -- (truth) joined to its latest custody row (context) — never from a mutable
 -- flag on the log.
-create or replace view public.card_assets_out as
+-- security_invoker: a view runs as its OWNER by default, which would bypass
+-- every RLS policy underneath it and hand each authenticated user a list of
+-- EVERY tenant's out-of-possession assets — counterparty, location, declared
+-- value. The whole aging board is a leak without this one setting.
+create or replace view public.card_assets_out
+with (security_invoker = true) as
 select c.id as card_id, c.user_id, c.player, c.year, c.set_name, c.asset_state,
        l.counterparty, l.location, l.sent_at, l.expected_back, l.declared_value,
        case
@@ -1330,20 +1403,43 @@ do $$ begin
   end if;
 end $$;
 
--- Photos are owned through their card. Resolve the owner once per change.
+-- The owner is DENORMALISED onto the photo row, and that is load-bearing.
+--
+-- Resolving it with `select user_id from cards where id = old.card_id` looked
+-- equivalent and was not: card_photos cascade-deletes with its card, so by the
+-- time the delete trigger ran the card was already gone, the lookup returned
+-- null, and the function bailed before decrementing. Deleting a card silently
+-- kept charging the user for its photos forever — and a quota built on that
+-- number would have been unfixable after the fact.
+alter table public.card_photos add column if not exists user_id uuid;
+update public.card_photos p set user_id = c.user_id
+  from public.cards c where c.id = p.card_id and p.user_id is null;
+
+create or replace function public.card_photos_set_owner()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.user_id is null then
+    select user_id into new.user_id from public.cards where id = new.card_id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists card_photos_owner_bi on public.card_photos;
+create trigger card_photos_owner_bi before insert on public.card_photos
+  for each row execute function public.card_photos_set_owner();
+
 create or replace function public.bump_storage_usage()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare v_user uuid; v_bytes bigint; v_objects int;
 begin
   if tg_op = 'INSERT' then
-    select user_id into v_user from public.cards where id = new.card_id;
+    v_user := new.user_id;
     v_bytes := coalesce(new.bytes, 0); v_objects := 1;
   elsif tg_op = 'DELETE' then
-    select user_id into v_user from public.cards where id = old.card_id;
+    v_user := old.user_id;   -- survives the parent card's deletion
     v_bytes := -coalesce(old.bytes, 0); v_objects := -1;
   else
     -- UPDATE: only a size change matters.
-    select user_id into v_user from public.cards where id = new.card_id;
+    v_user := coalesce(new.user_id, old.user_id);
     v_bytes := coalesce(new.bytes, 0) - coalesce(old.bytes, 0); v_objects := 0;
   end if;
   if v_user is null then return coalesce(new, old); end if;

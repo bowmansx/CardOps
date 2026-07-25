@@ -25,6 +25,7 @@ declare
   v_ok    boolean;
   v_name  text;
   v_note  text;
+  v_n2    uuid;
   v_pass  int := 0;
   v_fail  int := 0;
   v_r     text := E'\n';
@@ -287,20 +288,39 @@ begin
   perform set_config('request.jwt.claims',
     json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
   v_total := public.credit_balance();   -- balance before the simulated re-paste
-  -- The guard's own condition, evaluated against this already-migrated ledger.
-  -- It must be FALSE (nothing left to convert), which is what makes the
-  -- destructive loop unreachable on a second paste.
-  v_ok := not exists (
-    select 1 from public.credit_ledger
-    where (delta < 0 and kind <> 'spend') or (delta > 0 and remaining is null)
-  );
-  v_n := public.credit_balance();
-  v_ok := v_ok and v_n = v_total;
-  v_note := format('guard_holds=%s before=%s after=%s',
-    not exists (select 1 from public.credit_ledger
-      where (delta < 0 and kind <> 'spend') or (delta > 0 and remaining is null)),
-    v_total, v_n);
+  -- The first draft asserted the guard's own predicate and then that the
+  -- balance hadn't moved — but the predicate is unsatisfiable once
+  -- credit_ledger_shape_chk exists, and nothing ran between the two reads, so
+  -- BOTH halves were tautologies. It could not fail.
+  --
+  -- Actually EXECUTE the destructive loop's body under the guard, and prove
+  -- the balance survives. This is the real regression: re-pasting the file
+  -- must not re-apply lifetime spend against grant remainders.
   v_name := '19. backfill guard makes a re-paste a no-op';
+  begin
+    perform set_config('request.jwt.claims',
+      json_build_object('role', 'service_role')::text, true);
+    if not exists (
+      select 1 from public.credit_ledger
+      where (delta < 0 and kind <> 'spend') or (delta > 0 and remaining is null)
+    ) then
+      null;                       -- guard holds: the loop below is unreachable
+    else
+      -- Guard did NOT hold on an already-migrated ledger: run what the
+      -- migration would run, so the damage shows up as a failed balance.
+      update public.credit_ledger l set remaining = greatest(0, l.remaining - (
+        select coalesce(-sum(s.delta), 0) from public.credit_ledger s
+        where s.user_id = l.user_id and s.kind = 'spend'))
+      where l.user_id = v_uid and l.kind <> 'spend' and l.remaining > 0;
+    end if;
+    perform set_config('request.jwt.claims',
+      json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
+    v_n := public.credit_balance();
+    v_ok := v_n = v_total;
+    v_note := format('before=%s after=%s', v_total, v_n);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
@@ -460,15 +480,24 @@ begin
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
   -- ── 31. a documented asset cannot be deleted out from under its evidence ──
+  -- Uses a card with ONLY a document attached. The first draft reused a card
+  -- that also had custody rows, so the delete was refused by the custody FK
+  -- and the assertion passed green while never touching card_documents — it
+  -- could not have detected the regression it exists to catch.
   v_name := '31. delete refused while documents exist';
   begin
+    insert into public.cards (user_id, sku, player, status, individual_basis)
+      values (v_uid, 'TST-2026-000009', 'DocOnlyCard', 'booked', 5.00)
+      returning id into v_n2;
     insert into public.card_documents (card_id, user_id, proves, kind, path)
-      values (v_solo, v_uid, 'basis', 'appraisal', 'harness/doc.pdf');
+      values (v_n2, v_uid, 'basis', 'appraisal', 'harness/doc.pdf');
     begin
-      delete from public.cards where id = v_solo;
+      delete from public.cards where id = v_n2;
       v_ok := false; v_note := 'card with evidence was deleted';
     exception when others then
-      v_ok := true; v_note := sqlerrm;
+      -- Confirm it was the DOCUMENT restrict that stopped it, not some other FK.
+      v_ok := sqlerrm ilike '%card_documents%';
+      v_note := sqlerrm;
     end;
   exception when others then
     v_ok := false; v_note := sqlerrm;
@@ -532,12 +561,94 @@ begin
   if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
 
+  -- ══ review fixes (2026-07-25 adversarial pass) ══════════════════════════
+
+  -- ── 35. asset_state cannot be moved by a plain UPDATE ─────────────────────
+  -- Without this guard the pledged-collateral block was bypassable in two
+  -- calls: clear the state, then sell.
+  v_name := '35. asset_state refuses a field edit';
+  begin
+    update public.cards set asset_state = 'vaulted' where id = v_solo;
+    v_ok := false; v_note := 'plain update was allowed';
+  exception when others then
+    v_ok := true; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 36. the tax-bucket REASON is guarded, not just the value ──────────────
+  v_name := '36. tax_bucket provenance columns are guarded';
+  begin
+    update public.cards set tax_bucket_reason = 'rewritten' where id = v_solo;
+    v_ok := false; v_note := 'reason was editable';
+  exception when others then
+    v_ok := true; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 37. market sales are readable across tenants, writable by nobody ──────
+  -- The identity layer is pointless if another owner can't read the history,
+  -- and dangerous if any tenant can inject sales into a shared identity.
+  v_name := '37. market sales: shared read, no tenant write';
+  begin
+    select count(*) into v_cnt from pg_policies
+     where schemaname = 'public' and tablename = 'card_market_sales'
+       and cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL');
+    v_n := (select count(*) from pg_policies
+            where schemaname = 'public' and tablename = 'card_market_sales' and cmd = 'SELECT');
+    v_ok := v_cnt = 0 and v_n >= 1;
+    v_note := format('write_policies=%s (want 0) read_policies=%s (want >=1)', v_cnt, v_n);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 38. the dedup index is usable as an ON CONFLICT arbiter ───────────────
+  -- A PARTIAL index here silently breaks every upsert the cron makes (42P10),
+  -- so the shared history would never accumulate at all.
+  v_name := '38. sales dedup index is not partial';
+  begin
+    select count(*) into v_cnt from pg_indexes
+     where schemaname = 'public' and indexname = 'card_market_sales_identity_dedup'
+       and indexdef ilike '%where%';
+    v_ok := v_cnt = 0;
+    v_note := format('partial_definitions=%s (want 0)', v_cnt);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
+  -- ── 39. deleting a card gives its photo bytes back ────────────────────────
+  -- The rollup used to resolve the owner FROM the card, which is already gone
+  -- during a cascade — so deletes never decremented and a quota built on that
+  -- number would have been wrong forever.
+  v_name := '39. card delete releases its photo bytes';
+  begin
+    insert into public.cards (user_id, sku, player, status, individual_basis)
+      values (v_uid, 'TST-2026-000010', 'CascadeCard', 'booked', 1.00)
+      returning id into v_n2;
+    insert into public.card_photos (card_id, kind, variant, bucket, path, bytes)
+      values (v_n2, 'front', 'original', 'card-photos', 'x/c.jpg', 5000);
+    select bytes into v_total from public.user_storage_usage where user_id = v_uid;
+    delete from public.cards where id = v_n2;
+    select bytes into v_n from public.user_storage_usage where user_id = v_uid;
+    v_ok := v_n = v_total - 5000;
+    v_note := format('before=%s after=%s (want %s)', v_total, v_n, v_total - 5000);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'\n';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'\n'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 34 PASSED · %s FAILED'
+    || '%s of 39 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 34 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 39 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;

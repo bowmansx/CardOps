@@ -83,6 +83,13 @@ create or replace function public.resolve_card_identity(
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare v_fp text; v_id uuid;
 begin
+  -- SECURITY DEFINER writing to a CROSS-TENANT table: gate it. Without this,
+  -- any authenticated account — including one with no card access at all —
+  -- could write unlimited rows into the shared catalog every other tenant
+  -- reads. The definer bypasses RLS, so the check has to live here.
+  if not public.has_card_access() and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'resolve_card_identity: card access required';
+  end if;
   -- Too little to identify anything: no player AND no set means this would be
   -- a junk identity that every under-filled card in the system collides into.
   if public.norm_token(p_player) = '~' and public.norm_token(p_set) = '~' then
@@ -137,14 +144,48 @@ update public.card_market_sales m
   from public.cards c
  where m.card_id = c.id and m.identity_id is null;
 
--- Dedup by identity now. Partial: rows with no identity (a card too sparse to
--- identify) simply aren't accumulated — see the refresh job, which skips them.
+-- Dedup by identity now.
+--
+-- NOT a partial index. It was `where identity_id is not null`, which looked
+-- tidier and silently broke the entire layer: Postgres only infers a PARTIAL
+-- unique index as an ON CONFLICT arbiter when the statement repeats the index
+-- predicate, and PostgREST's `on_conflict=` can only emit a bare column list.
+-- Every upsert from the refresh cron would have failed with 42P10 — and that
+-- error was swallowed — so card_market_sales would never have gained a row
+-- while the run reported success. NULL identity_ids are distinct in a plain
+-- unique index anyway, so the predicate bought nothing.
 drop index if exists public.card_market_sales_dedup;
 create unique index if not exists card_market_sales_identity_dedup
-  on public.card_market_sales (identity_id, source, external_id)
-  where identity_id is not null;
+  on public.card_market_sales (identity_id, source, external_id);
 create index if not exists card_market_sales_identity_sold_idx
   on public.card_market_sales (identity_id, sold_at desc);
+
+-- ── RLS: the sales are SHARED market facts, not tenant data ───────────────
+-- 20260724 (multi-tenant) had replaced the original shared policy with
+-- `owns_card(card_id)`. Left alone, that would have defeated this entire
+-- migration: rows are written with the group representative's card_id, so
+-- every OTHER owner of the same identity would read an empty history — and
+-- once card_id goes NULL on delete, owns_card(null) is false and the row
+-- becomes invisible to everyone, forever.
+--
+-- Reads: any card user (these are public marketplace observations, keyed to a
+-- catalog identity — the same posture as card_identities above).
+-- Writes: SERVICE ROLE ONLY. A tenant-writable shared table would let anyone
+-- inject fabricated sales into an identity that prices everyone else's copies.
+do $$ begin
+  if exists (select 1 from pg_policies where schemaname='public' and tablename='card_market_sales' and policyname='card_market_sales_own') then
+    drop policy card_market_sales_own on public.card_market_sales;
+  end if;
+  if exists (select 1 from pg_policies where schemaname='public' and tablename='card_market_sales' and policyname='card_market_sales_all') then
+    drop policy card_market_sales_all on public.card_market_sales;
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='card_market_sales' and policyname='card_market_sales_read') then
+    create policy card_market_sales_read on public.card_market_sales
+      for select to authenticated using (public.has_card_access());
+  end if;
+end $$;
+-- No INSERT/UPDATE/DELETE policy: authenticated callers cannot write. The
+-- price-refresh cron writes with the service client, which bypasses RLS.
 
 -- card_id survives as provenance (which copy first caused us to fetch this),
 -- but MUST NOT cascade: deleting one user's card can no longer delete market
