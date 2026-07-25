@@ -9,13 +9,25 @@ advisor, re-pointed later via env vars in Master-Ops.
 
 ## Run order (Supabase SQL editor of the NEW project, in sequence)
 
+Learned the hard way on the first real run (2026-07-25): **the owner's auth
+user must exist before part 2.** `20260725000000_card_businesses.sql` seeds
+card_businesses from entities only when an owner is resolvable (profiles.role
+= 'owner', else the known owner email), then repoints every entity FK — with
+no user, the seed is empty and the repoint fails on the already-seeded
+card_pool row. Hence the user-creation step in the middle.
+
 1. `00_foundations.sql` — profiles/entities/audit_log/push_subscriptions +
    receipts bucket (the pieces Master-Ops-era migrations owned). The Card
    Operations entity is pinned to the app's hardcoded uuid.
-2. `01_schema_part1.sql` → `01_schema_part2.sql` → `01_schema_part3.sql` —
-   the full CardOps migration history, concatenated in order. Replays the
-   pool era and then replaces it with purchase lots, exactly as production
-   lived it. Expect "Success" for each.
+2. `01_schema_part1.sql` — expect "Success". (Choose **Run without RLS** on
+   Supabase's warning: these migrations enable RLS deliberately, table by
+   table, exactly as the shared production DB has it.)
+3. **Create the owner's auth user** — Authentication → Users → Add user →
+   `bowmansx@gmail.com`, auto-confirm. Beau does this; it involves a
+   password.
+4. `02_after_first_login.sql` — promotes that user to `owner` (part 1's own
+   promotion ran when no user existed, so it did nothing).
+5. `01_schema_part2.sql` → `01_schema_part3.sql` — expect "Success" each.
 3. Vercel env swap (card-ops project → Settings → Environment Variables):
    replace the values of `NEXT_PUBLIC_SUPABASE_URL`,
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` with the new
