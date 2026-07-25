@@ -319,6 +319,7 @@ export function BatchIntake({
       {cam && (
         <CameraSheet
           title="Batch scan — front of each card"
+          shotLabel="front"
           multi
           onClose={() => setCam(false)}
           onCapture={addShot}

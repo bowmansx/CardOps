@@ -45,11 +45,19 @@ export type CapturedShot = {
  */
 export function CameraSheet({
   title,
+  shotLabel,
+  shotStep,
   onCapture,
   onClose,
   multi = false,
 }: {
   title: string;
+  /** Which shot this is — rendered LARGE over the viewfinder. A small title bar
+   *  is not enough when your hands are full and you're going front/back/front:
+   *  you need to know which side it wants without reading. */
+  shotLabel?: string;
+  /** Optional "2 of 4" progress, for template runs. */
+  shotStep?: string;
   onCapture: (shot: CapturedShot) => void;
   onClose: () => void;
   multi?: boolean;
@@ -311,6 +319,19 @@ export function CameraSheet({
                 (auto && locked ? "border-emerald-400" : "border-[#c9a227]")}
               style={guideRect}
             />
+            {/* Which side/shot, big and unmissable, sitting just above the
+                frame so it's in view while you line the card up. */}
+            {shotLabel && (
+              <span
+                className="pointer-events-none absolute flex flex-col items-center gap-0.5"
+                style={{ left: guideRect.left, width: guideRect.width, top: Math.max(4, guideRect.top - 46) }}
+              >
+                <span className="rounded-lg bg-[#c9a227] px-3 py-1 text-base font-black uppercase tracking-widest text-black">
+                  {shotLabel}
+                </span>
+                {shotStep && <span className="text-[11px] font-semibold text-white/70">{shotStep}</span>}
+              </span>
+            )}
             {auto && (
               <span className="pointer-events-none absolute bottom-4 rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold text-white/85">
                 {locked ? "Hold still…" : "Fill the frame · hold steady"}

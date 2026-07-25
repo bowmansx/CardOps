@@ -116,6 +116,7 @@ export function SpeedBook({
       {cam && (
         <CameraSheet
           title="Speed Book — front of each card"
+          shotLabel="front"
           multi
           onClose={() => setCam(false)}
           onCapture={capture}

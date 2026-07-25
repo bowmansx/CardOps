@@ -302,6 +302,8 @@ export function FullIntake({
         <CameraSheet
           key={cam} // remount per shot → fresh camera stream for the back (day-review fix)
           title={`Photograph the ${cam}`}
+          shotLabel={cam}
+          shotStep={withBack ? (cam === "front" ? "1 of 2" : "2 of 2") : undefined}
           onClose={() => setCam(null)}
           onCapture={(shot) => {
             const url = shot.url;
