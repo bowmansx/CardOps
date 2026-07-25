@@ -9,12 +9,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { anthropic, MODEL, HAIKU_MODEL } from "@/lib/anthropic";
 import { fetchCardApiSales, fetchCardApiByQuery } from "@/lib/cards/price-sources/thecardapi";
 import type { CardForPricing } from "@/lib/cards/price-sources/types";
-import { summarizeSales, comparableQueries, buildEstimateDigest, compsAsSales, groundPrice, medianOf, type SalesStats } from "@/lib/cards/estimate";
+import { summarizeSales, comparableQueries, buildEstimateDigest, compsAsSales, groundPrice, medianOf, type SalesStats, type DigestNews } from "@/lib/cards/estimate";
 import { storedToSales } from "@/lib/cards/market-sales";
 import type { EstimateConfig } from "@/lib/cards/credits";
 import type { AiTokens } from "@/lib/ai/rates";
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+const NEWS_WINDOW_DAYS = 45; // how far back a headline still informs a price
 
 const Schema = z.object({
   value: z.number().describe("single best estimate of the current fair market price, USD"),
@@ -71,15 +72,47 @@ export async function runEstimate(
     }
   }
 
+  // REAL news, not recall. The news cron already fetches headlines per subject
+  // and scores them; this reads them. `undefined` means the toggle is off; an
+  // empty array means "we looked and there's nothing", which the digest states
+  // explicitly so the model can't quietly invent a narrative.
+  let news: DigestNews[] | undefined;
+  if (config.news) {
+    const subject = (c.player ?? "").trim();
+    if (subject.length >= 3) {
+      const since = new Date(Date.now() - NEWS_WINDOW_DAYS * 86_400_000).toISOString();
+      const { data, error } = await db
+        .from("card_news")
+        .select("title, source, published_at, significance, direction, market_moving")
+        .ilike("subject", subject)
+        .gte("published_at", since)
+        .order("published_at", { ascending: false })
+        .limit(8);
+      // A failed read must not masquerade as "no news" — that would be a
+      // silent downgrade of something the user paid for.
+      if (error) console.error(`[cards/estimate] news read failed: ${error.message}`);
+      else news = (data ?? []) as DigestNews[];
+    } else {
+      news = [];
+    }
+  }
+
   const refValue = c.manual_price ?? c.market_value ?? null;
   const anchor = mode === "standard_plus" ? (refValue != null ? Number(refValue) : null) : null;
   const ground = groundPrice(own.median, guideMedian, refValue != null ? Number(refValue) : null);
 
-  const digest = buildEstimateDigest({ card: c, own, comparables, anchor, guides: guidesCond.length ? guidesCond : guidesAll });
+  const digest = buildEstimateDigest({ card: c, own, comparables, anchor, guides: guidesCond.length ? guidesCond : guidesAll, news });
+  // News is now DATA (in the digest above), so it needs no prompt overlay.
+  // What remains here is honestly labelled for what it is: the model's own
+  // judgment, with no source behind it. Saying so in the prompt keeps the
+  // rationale honest too — the model shouldn't cite "market data" it never saw.
   const overlays = [
-    config.news ? "Weigh recent player news/performance you know of (injury, form, trades, milestones) as a qualitative factor." : null,
-    config.macro ? "Weigh broad collectibles/market sentiment as a qualitative factor." : null,
-    config.pop ? "Consider scarcity/population where relevant." : null,
+    config.macro
+      ? "Also apply your general sense of collectibles-market conditions as a QUALITATIVE judgment — you have no market-index data here, so do not present it as data."
+      : null,
+    config.pop
+      ? "Also consider likely scarcity/population as a QUALITATIVE judgment — you have no population-report data here, so do not cite specific pop counts."
+      : null,
   ].filter(Boolean).join(" ");
 
   const instruction =

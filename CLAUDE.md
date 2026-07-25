@@ -134,6 +134,13 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
   claim, then SAY which ones were wrong before building. (Standing rule after
   the Wave A spec, 2026-07-25, proposed rebuilding Speed Book, a second
   `tax_bucket`, and cited a `VALUATION_ENGINE.md` that wasn't here.)
+- **Never charge for data you don't fetch.** A paid toggle may only carry a
+  price if it causes real work. `news`/`macro`/`pop` each cost credits while
+  doing nothing but appending a sentence telling the model to recall what it
+  already knew (fixed 2026-07-25). `news` now reads real scored headlines;
+  `macro` and `pop` are free, labelled "judgment" in the UI, and the prompt
+  tells the model not to present them as data. A `COST` entry above zero is a
+  claim that something was fetched — a test in `test/credits.test.ts` pins it.
 - **Tax classification is recorded, never determined.** The app stores Beau's
   classification and his stated reason, with the timestamp and an append-only
   trail. It never presents itself as making the investment/dealer/hobby call —

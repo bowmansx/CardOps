@@ -22,10 +22,21 @@ const MODES = [
 
 const confTone: Record<string, string> = { high: "text-pos", medium: "text-amber-600", low: "text-danger" };
 
-function Toggle({ on, set, label }: { on: boolean; set: (v: boolean) => void; label: string }) {
+// `judgment` marks a toggle that adds the MODEL'S OPINION, not fetched data.
+// Those are free and say so, because charging for data we never fetch — or
+// letting a name imply a source that doesn't exist — is how trust dies.
+function Toggle({
+  on, set, label, hint, judgment,
+}: {
+  on: boolean; set: (v: boolean) => void; label: string; hint: string; judgment?: boolean;
+}) {
   return (
-    <label className="flex items-center gap-1 rounded-full border border-hairline bg-white px-2 py-0.5 text-[11px]">
+    <label
+      title={hint}
+      className="flex items-center gap-1 rounded-full border border-hairline bg-white px-2 py-0.5 text-[11px]"
+    >
       <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} className="h-3 w-3 accent-flag" /> {label}
+      {judgment && <span className="text-[9px] uppercase tracking-wide text-ink/35">judgment</span>}
     </label>
   );
 }
@@ -90,10 +101,14 @@ export function CardEstimates({
       {/* Cost dials — the user controls their spend */}
       <div className="flex flex-wrap items-center gap-1.5 border-t border-hairline bg-paper/40 px-3 py-2">
         <span className="text-[9px] font-semibold uppercase tracking-wider text-ink/40">Context</span>
-        <Toggle on={comparables} set={setComparables} label="Comparables" />
-        <Toggle on={macro} set={setMacro} label="Market" />
-        <Toggle on={news} set={setNews} label="Player news" />
-        <Toggle on={pop} set={setPop} label="Scarcity" />
+        <Toggle on={comparables} set={setComparables} label="Comparables"
+          hint="Fetches live sales for similar cards (same set/parallel, and this player's other cards)." />
+        <Toggle on={news} set={setNews} label="Player news"
+          hint="Reads real headlines collected and scored daily for this player. If there are none, the estimate says so." />
+        <Toggle on={macro} set={setMacro} label="Market" judgment
+          hint="Model judgment only — no market-index data is fetched. Free." />
+        <Toggle on={pop} set={setPop} label="Scarcity" judgment
+          hint="Model judgment only — no population-report data is fetched. Free." />
         <span className="mx-1 h-3 w-px bg-hairline" />
         <select value={ai} onChange={(e) => setAi(e.target.value as AiDepth)} className="rounded-lg border border-hairline bg-white px-2 py-0.5 text-[11px] outline-none focus:border-flag">
           <option value="light">Light AI</option>
