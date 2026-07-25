@@ -7,10 +7,16 @@
 -- the raise is what rolls every test row back, so nothing ever persists.
 -- THE RED ERROR BOX IS EXPECTED: read the message inside it.
 --
--- Requires migrations through 20260737000000. Simulated auth: sets
--- request.jwt.claims the way PostgREST does. The RPCs leave cardops.in_sell
--- set for the rest of the transaction (harmless in prod where each request is
--- its own transaction) — the harness resets it after every RPC call.
+-- Requires migrations through 20260740000000. Simulated auth: sets
+-- request.jwt.claims the way PostgREST does.
+--
+-- TRANSITION GUCs: card_sell, card_move_asset and card_reclass_tax_bucket each
+-- set a cardops.in_* flag so their own writes pass the guards. Those flags
+-- outlive the call for the rest of the TRANSACTION — harmless in production,
+-- where every request is its own transaction, but this whole harness is one
+-- transaction, so a flag left set silently disables the very guard the next
+-- assertion is testing. THE HARNESS RESETS EACH FLAG AFTER EVERY RPC CALL.
+-- Assertions 35 and 36 failed on the first live run for exactly this reason.
 -- ══════════════════════════════════════════════════════════════════════════
 do $$
 declare
@@ -419,6 +425,7 @@ begin
       v_ok := false; v_note := 'empty reason accepted';
     exception when others then
       v_out := public.card_reclass_tax_bucket(v_solo, 'dealer', 'moved to flip inventory');
+      perform set_config('cardops.in_reclass', '', true);
       select tax_bucket_source into v_note from public.cards where id = v_solo;
       v_ok := (v_out->>'to') = 'dealer' and v_note = 'explicit_override';
       v_note := format('to=%s source=%s', v_out->>'to', v_note);
@@ -445,6 +452,7 @@ begin
   begin
     perform public.card_move_asset(v_solo, 'out_for_crossover', 'PSA', null,
                                    (current_date + 90), 'TRK1', 100.00, 'harness');
+    perform set_config('cardops.in_move', '', true);
     select count(*) into v_cnt from public.card_custody_log
      where card_id = v_solo and to_state = 'out_for_crossover';
     select asset_state into v_note from public.cards where id = v_solo;
@@ -471,6 +479,7 @@ begin
   v_name := '30. pledged asset refuses listing/sale';
   begin
     perform public.card_move_asset(v_solo, 'pledged_as_collateral', 'Lender', null, (current_date + 30));
+    perform set_config('cardops.in_move', '', true);
     begin
       update public.cards set status = 'listed' where id = v_solo;
       v_ok := false; v_note := 'listing a pledged asset was allowed';
