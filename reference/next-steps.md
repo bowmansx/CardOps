@@ -43,6 +43,25 @@ unbalanced or unmapped is refused rather than half-posted.
 MasterOps then reflects it automatically — it already reads those Zoho orgs, so
 card activity shows up in your entity cash/P&L with no wiring between the apps.
 
+## 1b. ✅ SUPABASE SPLIT — DONE 2026-07-25
+
+CardOps runs on its own Supabase project (`zgkydwvmdnnrxcacegth`). Schema
+bootstrapped from `supabase/bootstrap/`, owner promoted, three Vercel env
+vars repointed (new-style `sb_publishable_` / `sb_secret_` keys), redeployed
+and verified from outside: the live bundle targets the new project and
+anon routes answer correctly. Money-core harness on the NEW database:
+**13 of 13 PASSED**. The old login-bounce (shared auth redirecting to
+Master-Ops) is structurally gone.
+
+Left over from the split, non-urgent:
+- Google sign-in isn't configured on the new project yet — magic link works.
+  (Add the provider + the new `https://zgkydwvmdnnrxcacegth.supabase.co/auth/v1/callback`
+  to the Google Cloud console's authorized redirect URIs.)
+- Inventory starts EMPTY; pre-split test cards remain in the old project.
+- Master-Ops tax advisor still reads the OLD project's card tables.
+- VAPID/push, THECARDAPI, ANTHROPIC, ZOHO env vars were untouched by the
+  split — they don't reference Supabase.
+
 ## 2. Still dark until you act
 
 - **eBay.** The OAuth RuName is registered with eBay against
