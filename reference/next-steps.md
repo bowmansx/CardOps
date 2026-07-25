@@ -2,15 +2,18 @@
 
 ## ✅ STATE AS OF 2026-07-25 (end of session)
 
-**Everything is applied.** One fix is committed but NOT yet deployed — see
-step 0 below.
+**The database is fully applied and verified. The code is not deployed** —
+PR #3 is open and unmerged; see step 0.
 
-- **All migrations applied** through `20260741000000` (credit metering, card
-  identities, investor assets, photo provenance + storage, photo prefs).
-- **Money-core harness: 39 of 39 PASSED** against the live database — basis
+- **All migrations applied** through `20260742000000` (credit metering, card
+  identities, investor assets, photo provenance + storage, photo prefs, cost
+  basis lines).
+- **Money-core harness: 48 of 48 PASSED** against the live database — basis
   draw, the sold boundary both ways, double-sell refusal, lot balances,
   cross-user isolation, credit FIFO + expiry, identity resolution, shared
-  history surviving deletion, custody guards, storage rollup, RLS shape.
+  history surviving deletion, custody guards, storage rollup, RLS shape,
+  the photo-prefs guards, and the cost-basis layer (full draw, sold lock,
+  single cache writer, cache-follows-CRUD, negative floor, unstated-vs-zero).
 - **PR #2 merged**; `main` is deployed with the camera work.
 - **AI card scan is ON** in Services and verified end-to-end.
 
@@ -23,18 +26,21 @@ tenant's out-of-possession assets through a view missing `security_invoker`.
 
 ### Next, in order
 
-0. **Merge and deploy `788b757`** — booking a card hangs for ever on
-   "Saving…" in production and no card is created. Photos go to the server
-   action as base64; base64 inflates ~37%; `bodySizeLimit` was unset so Next's
-   1 MB default applied; and 041b0c8 (deployed 13:41 on 2026-07-25) started
-   sending the uncropped originals too, which pushed a single front photo over
-   the cap. The request was refused before the action ran. `save()` had no
-   try/catch, so the 413 rendered as a frozen spinner rather than an error.
-   Fixed by a 4 MB limit, a client-side payload fitter, an action that returns
-   its failures, and `finally` on all five stranded surfaces.
-   Re-run the harness after deploying — it is now **42** assertions (40–42
-   cover the crop-margin floor, the burst bound, and the keep-originals audit
-   trail).
+0. **Merge and deploy [PR #3](https://github.com/bowmansx/CardOps/pull/3).**
+   Two things are waiting in it, and the first is a live outage:
+   - **Booking a card hangs for ever on "Saving…"** in production and no card
+     is created. Photos go to the server action as base64; base64 inflates
+     ~37%; `bodySizeLimit` was unset so Next's 1 MB default applied; and
+     041b0c8 (deployed 13:41 on 2026-07-25) started sending the uncropped
+     originals too, pushing a single front photo over the cap. The request was
+     refused before the action ran. `save()` had no try/catch, so the 413
+     rendered as a frozen spinner rather than an error. Fixed by a 4 MB limit,
+     a client-side payload fitter, an action that returns its failures, and
+     `finally` on all five stranded surfaces.
+   - **Cost basis is optional now**, with an editable breakdown. The schema for
+     it is already live; until the code deploys, the new columns simply sit
+     unused.
+
 1. **Put a real box of cards through the scanner.** Everything above was
    groundwork for this. Log where the capture flow actually hurts — that
    friction list is what Wave A gets designed against, per the standing
