@@ -1,5 +1,36 @@
 # CardOps — where things stand and what's left
 
+## ⚠ READ FIRST (2026-07-25, end of session)
+
+**1. Turn on "AI card scan (Anthropic)" in More → Services.** This is why a
+scanned card filled in nothing. `service_config` seeds every service DISABLED,
+and the new Supabase project was bootstrapped fresh, so the AI kill-switch came
+up off. Every AI path is gated on it and fails closed on purpose (they spend
+real money). The other toggles seeded off too — check them while you're there.
+
+**2. Paste queue — FOUR migrations, in order, then the harness:**
+
+| # | File | What it adds |
+|---|---|---|
+| 1 | `20260737000000_credit_metering.sql` | credit ledger v2, AI cost telemetry |
+| 2 | `20260738000000_card_identities.sql` | shared card identity + market data |
+| 3 | `20260739000000_investor_assets.sql` | Wave B: asset record, documents, custody |
+| 4 | `20260740000000_photo_provenance_storage.sql` | photo provenance + storage metering |
+
+Then `supabase/tests/money-core.test.sql` → expect **34 of 34 PASSED**.
+
+**3. Merge PR #2** (github.com/bowmansx/CardOps/pull/2) — it carries everything.
+
+**4. Decisions blocking work:** off-site backup destination (R2 / Drive / S3)
+— gates seeding the Mantle; credits org- or user-scoped; and
+`VALUATION_ENGINE.md` still isn't in the repo (blocks Wave B3's discovery-plan
+display).
+
+Design docs written and awaiting go: `DESIGN_WAVE_B.md` (schema BUILT, UI not),
+`DESIGN_WAVE_C.md` (org tenancy, design only), `DESIGN_PHOTO_SYSTEM.md`
+(templates, quality presets, quotas — measurement built, policy not).
+
+
 Written 2026-07-24, the day CardOps became its own app.
 Nothing here is urgent. CardOps works today.
 
