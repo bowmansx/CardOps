@@ -48,9 +48,16 @@ Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
      something nobody asked for. An idea becomes real only when Beau moves it
      into an area note or writes it in INBOX — promotion is his act, never
      the loop's.
-   - **READ ONLY.** Never write, tidy, reformat, reorganise, tick items off, or
-     "update it to match the code". An item too vague to build comes back as a
-     question, never a guess.
+   - **READ ONLY, with exactly one exception: `spec/OUTBOX.md`.** That file is
+     the loop's side of the conversation and the loop owns it. Everything else
+     under `spec/` is never written, tidied, reformatted, reorganised, ticked
+     off, or "updated to match the code".
+   - **Ask in `spec/OUTBOX.md`, not only in chat.** A question asked in chat
+     while Beau is away sits in a transcript he may never reopen; a question in
+     OUTBOX is sitting in Obsidian next to his notes when he comes back. Chat
+     as well when he is present — but OUTBOX is the durable channel, and every
+     question, every shipped item and every thing noticed-but-not-acted-on
+     goes there. He answers in INBOX.
 3. **Diff the vault since last time.** `reference/loop-state.md` records the
    commit last processed; `git diff <that>..HEAD -- spec/` is what changed.
    - A changed **area note** is a CANDIDATE, not an order. Report what changed
@@ -75,9 +82,11 @@ Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
    passed every gate.
 9. **Fix what the review confirms.** Re-gate.
 10. **Push and merge** — unless a STOP rule below applies.
-11. **Update `reference/next-steps.md`** and `reference/loop-state.md`.
-    **Never write anything under `spec/`** — report what was finished and let
-    Beau cross off his own list.
+11. **Write `spec/OUTBOX.md`** — questions that need an answer, what shipped,
+    anything noticed but deliberately not acted on, and what is blocked. Then
+    update `reference/next-steps.md` and `reference/loop-state.md`.
+    **Never write anything else under `spec/`** — report what was finished and
+    let Beau cross off his own list.
 12. **Report** what shipped, what it cost, and what is now waiting on Beau.
 
 ---
