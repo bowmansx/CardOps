@@ -2,7 +2,7 @@
 
 Inventory and books for trading cards, built for someone who actually moves
 volume: photograph a card, know what it is, know what it's worth, know what it
-cost, list it, and have the money land in real books correctly.
+cost, list it, and have the money land in real books correctly. It is built for people who want a higher amount of versatility and control in market analysis, market pricing, bookeeping, automation, synchronization, and one database of their inventory to use app conections for pushing that information towards sales and bookkeeping. CardOps can also receive an inventory system from the template/format of any other inventory software and restructure the template/format to be prepared for export to any other 
 
 Live at https://card-ops-zeta.vercel.app. Its own Supabase project
 (`zgkydwvmdnnrxcacegth`) since 2026-07-25.
