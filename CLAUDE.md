@@ -175,6 +175,12 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
 
 ## Reference
 
+- `spec/` — **Beau's Obsidian vault: the spec.** Read it, never write to it.
+  `spec/INBOX.md` outranks everything; the area notes describe how each part is
+  MEANT to work, so where a note and the code disagree the note wins.
+- `reference/LOOP_CHARTER.md` — READ FIRST when running unattended. Scope,
+  STOP rules (a PR containing a migration is never auto-merged), what counts
+  as blocked, and when to end the loop rather than invent work.
 - `reference/next-steps.md` — current state, cutover order, open decisions
 - `reference/audit-2026-07-24.md` — the multi-tenancy audit; read before
   touching service-role, SECURITY DEFINER, or books code
