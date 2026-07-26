@@ -175,6 +175,9 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
 
 ## Reference
 
+- `reference/LOOP_CHARTER.md` — READ FIRST when running unattended. Scope,
+  STOP rules (a PR containing a migration is never auto-merged), what counts
+  as blocked, and when to end the loop rather than invent work.
 - `reference/next-steps.md` — current state, cutover order, open decisions
 - `reference/audit-2026-07-24.md` — the multi-tenancy audit; read before
   touching service-role, SECURITY DEFINER, or books code
