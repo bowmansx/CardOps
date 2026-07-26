@@ -1,7 +1,8 @@
 Full(AI)
 
 Batch (AI)
-
+Categories - Option to "Add New"
+Zone
 
 Speed Book
 
