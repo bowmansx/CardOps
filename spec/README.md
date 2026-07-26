@@ -9,6 +9,12 @@ thoughts, whole sections, notes at midnight. It does not need to be tidy.
 ## The contract
 
 - **The loop READS this vault every iteration. It never writes to it.**
+- **You don't have to log your edits anywhere.** Git records exactly what
+  changed, so the loop diffs the vault against the last commit it processed.
+  An edited area note comes back as *"you changed X — build it?"* rather than
+  being built on sight: an edit can equally mean "build this", "your
+  description was wrong", or "thinking out loud", and a diff can't tell those
+  apart. [[INBOX]] is where you say *go*.
   Nothing here gets reformatted, reorganised, tidied, or "helpfully updated".
   What you wrote stays as you wrote it.
 - **[[INBOX]] outranks everything.** Whatever is under *Do next* there is the
