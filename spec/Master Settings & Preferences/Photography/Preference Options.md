@@ -1,8 +1,8 @@
 Standard Metrics
-
+	Describe distance in (Feet and Inches) or (Meters and Millimeters)
 
 Checkboxes
-	Always show Distance from lens to card.
+	Always show Distance from lens to card?
 
 
 
