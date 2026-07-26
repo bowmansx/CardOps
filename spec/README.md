@@ -39,6 +39,8 @@ There is no required format. Some things that help:
 
 ## What's in here
 
+- [[ideas/README|ideas/]] — **your blank space.** Thinking out loud; the loop
+  reads it for context and never builds from it.
 - [[INBOX]] — what to do next. The only file the loop treats as orders.
 - [[00-what-cardops-is]] — the product, in one page.
 - [[10-intake]] — getting a card into the system.
