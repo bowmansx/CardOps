@@ -11,11 +11,25 @@ If something matters, it must be written down, not remembered.
 
 ---
 
+## Where the loop works
+
+**`C:\dev\CardOps-loop`** — a separate clone, and the loop never touches
+`C:\dev\CardOps`.
+
+That directory is Beau's: he has the `spec/` vault open in Obsidian there, with
+the Obsidian Git plugin auto-committing his notes. A `git checkout` from the
+loop in the same working tree would collide with his uncommitted edits, and the
+plugin's auto-commit would sweep the loop's half-finished work into a commit of
+its own. Two clones, one remote, no collisions — git is the only channel
+between them.
+
+Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
+
 ## The loop, per iteration
 
-1. **Start clean.** `git checkout main && git pull`. Never build on a stale
-   ref — that mistake has already been made twice in this repo, and both times
-   it produced a confidently wrong diagnosis.
+1. **Start clean.** In `C:\dev\CardOps-loop`: `git checkout main && git pull`.
+   Never build on a stale ref — that mistake has already been made twice in
+   this repo, and both times it produced a confidently wrong diagnosis.
 2. **Read the spec vault at `spec/` FIRST.** It is Beau's Obsidian vault and
    the source of truth for how CardOps is meant to work.
    - `spec/INBOX.md` is the only file treated as ORDERS. *Do next* outranks
