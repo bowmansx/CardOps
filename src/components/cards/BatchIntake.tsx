@@ -12,9 +12,9 @@ import {
   type SpeedItem,
   type IntakeInput,
 } from "@/app/cards/intake/actions";
-import { CameraSheet } from "./CameraSheet";
+import { CameraSheet, type CapturedShot } from "./CameraSheet";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
-import { uploadCardPhotos } from "@/lib/cards/upload";
+import { uploadCardPhotos, type PhotoShot } from "@/lib/cards/upload";
 import { createClient } from "@/lib/supabase/client";
 import { Lightbox } from "./Lightbox";
 
@@ -87,9 +87,18 @@ export function BatchIntake({
     finally { activeRef.current--; const n = waitRef.current.shift(); if (n) n(); }
   }
 
-  function addShot(shot: { url: string }) {
+  function addShot(shot: CapturedShot) {
     const url = shot.url;
-    setItems((xs) => [...xs, { front: url, thumb: url, sport_category: category || undefined, zone }]);
+    // The uncropped frame was being thrown away here while Speed Book and full
+    // intake both kept theirs, so a batch-booked card had no way to prove its
+    // crop hadn't clipped a corner. Same camera, same guarantee.
+    setItems((xs) => [...xs, {
+      front: url,
+      front_original: shot.original ?? undefined,
+      thumb: url,
+      sport_category: category || undefined,
+      zone,
+    }]);
     // Kick off the AI read now, in the background.
     if (!preRef.current.has(url)) {
       preRef.current.set(url, withSlot(() => scanFront(url)).then((card) => { setPreDone((s) => new Set(s).add(url)); return card; }));
@@ -132,7 +141,21 @@ export function BatchIntake({
         for (let i = 0; i < ids.length && user; i++) {
           const front = items[i]?.front;
           if (!front) continue;
-          const up = await uploadCardPhotos(user.id, ids[i], [{ dataUrl: front, kind: "front", variant: "original" }]);
+          const original = items[i]?.front_original;
+          const shots: PhotoShot[] = [];
+          let srcIndex: number | undefined;
+          if (original) { srcIndex = 0; shots.push({ dataUrl: original, kind: "front", variant: "original" }); }
+          shots.push({
+            dataUrl: front, kind: "front",
+            // 'original' ONLY when there is no frame behind it. Filing a crop
+            // as an original is a claim that nothing was cut off.
+            variant: original ? "processed" : "original",
+            derivedFromIndex: srcIndex,
+            cropGeometry: original
+              ? { margin_pct: photoPrefs.auto_crop === "tight" ? 0 : photoPrefs.crop_margin_pct, deskewed: false }
+              : null,
+          });
+          const up = await uploadCardPhotos(user.id, ids[i], shots);
           if (up.failures.length) misses.push(`card ${i + 1}: ${up.failures.join("; ")}`);
           if (up.photos.length) {
             const rec = await recordCardPhotos(ids[i], up.photos);
