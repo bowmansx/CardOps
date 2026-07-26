@@ -3,9 +3,19 @@ option to go back and retake previous photo. i want there to also be a menu duri
 
 now say you were editing the photos of a card you have already logged. this expandable left menu would appear and you would be able to choose 
 
-When adding a new card, it will bring up the standard photo session menu, though, it may have some extra ideas 
+When adding a new card, it will bring up the standard photo session menu, though, it will have some extra initial ideas than editing an existing card's photos would have.
+Like we have the card pricing standards/templates, we will have standard photo templates. 
 
-new card input photo menu:
+Standard Photo Template Options:
+Corners
+	4 Front Corners
+	4 Back Corners
+		We may have a suggested zoom/proximity assignment for taking corner photos. We may give the option in the template creator for them to decide how close of a proximity they want. Then it would be up to the app to aid them in getting the proximity/zoom level set in the template.
+Angles
+	Similar to corners, we may have a box that the user can input a number that would be the number of degree during
+
+new card input photo menu: 
+
 editing photos of an existing card menu:
 expandable left menu: this rolls out from the side to take up approximately 1/3 of your device's screen. In this menu, you will see the entire series of photos already taken of your card and then you start to add what you want to take in this session. there will be the ability to delete individual photos from the series whether those are from what you have already taken, the one you are taking now, or the ones coming up in your session. there will also be the option to grab and move around the order of your session and this will also be the order of how your photos are saved. There should be a small check box at the bottom of the menu that toggles whether, when a photo is already taken for an upcoming item in the session, whether it brings up that photo for your inspection with the option to retake the photo. 
 
