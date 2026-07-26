@@ -48,6 +48,9 @@ There is no required format. Some things that help:
 - [[ideas/README|ideas/]] — **your blank space.** Thinking out loud; the loop
   reads it for context and never builds from it.
 - [[INBOX]] — what to do next. The only file the loop treats as orders.
+- [[OUTBOX]] — **the loop talking back.** Questions it needs answered, what
+  shipped, what it noticed but didn't act on. The one file in here it writes;
+  you answer in [[INBOX]].
 - [[00-what-cardops-is]] — the product, in one page.
 - [[10-intake]] — getting a card into the system.
 - [[20-money]] — basis, sales, profit, books.
