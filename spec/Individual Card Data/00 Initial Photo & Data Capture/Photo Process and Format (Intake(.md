@@ -1,3 +1,12 @@
+Full(AI)
+
+Batch (AI)
+
+
+Speed Book
+
+Whatever the Process is, a front full body photo of the card should always be first. The moment this photo is taken, based on the level/standard this card is set for, some backend processing can start to happen. One example of backend processing is to determine the card size based on using the data found on the front of the card to see what set this card is from to determine what the dimensions are. 
+
 Front & Back should be the first option is the set. Followed by Front Only and then whatever else it is you have. Any time ever taking a photo, I want it to have a header letting you know what you are taking a photo for. Below our core set of initial photo taking options, I want there to be a series of extra photo options that someone can select for part of their input process. These photo options will also be available when someone is editing their photo and may want to retake photos or add additional photos. We will work on a default standard set of extra photos someone may want to take during their photo session
 option to go back and retake previous photo. i want there to also be a menu during a photo session. this menu is a expand/collapse menu that brings a whole window over from the left. In this menu, you will see the entire series of photos you have decided to take in this session. there will be the ability to delete individual photos from the series whether those are from what you have already taken, the one you are taking now, or the ones coming up in your session. there will also be the option to grab and move around the order of your session and this will also be the order of how your photos are saved. 
 
