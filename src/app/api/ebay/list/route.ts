@@ -1,5 +1,6 @@
 import { auditOrThrow } from "@/lib/audit";
 import { NextResponse } from "next/server";
+import { listingPhotos, type PhotoRow } from "@/lib/cards/photo-set";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { currentRole } from "@/lib/cards/roles";
@@ -89,15 +90,36 @@ export async function POST(request: Request) {
   if (!pol.ok) return NextResponse.json({ error: pol.error }, { status: 502 });
 
   // Photos → 48h signed URLs (bucket is private; eBay copies at listing time).
-  const { data: photos } = await supabase
-    .from("card_photos").select("kind, bucket, path").eq("card_id", card.id).order("created_at");
+  //
+  // ORDER AND SELECTION MATTER HERE. This used to take rows in created_at
+  // order with no filter, which since the camera work meant the UNCROPPED
+  // frame — table background and all — was the lead image buyers see as the
+  // thumbnail. With a 12-shot grading template it was worse: twelve slots
+  // filled with corner close-ups before ever reaching the back of the card.
+  const { data: photoRows, error: photoErr } = await supabase
+    .from("card_photos")
+    .select("id, kind, role, variant, derived_from, bucket, path")
+    .eq("card_id", card.id)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
+  if (photoErr) return NextResponse.json({ error: `Couldn't read the card's photos: ${photoErr.message}` }, { status: 500 });
+
+  const { photos: chosen, truncated } = listingPhotos(photoRows as PhotoRow[] | null, 12);
   const urls: string[] = [];
-  for (const p of photos ?? []) {
-    const { data: s } = await supabase.storage.from(p.bucket as string).createSignedUrl(p.path as string, 48 * 3600);
-    if (s?.signedUrl) urls.push(s.signedUrl);
-    if (urls.length >= 12) break;
+  const unsigned: string[] = [];
+  for (const p of chosen) {
+    const { data: s, error: sErr } = await supabase.storage.from(p.bucket).createSignedUrl(p.path, 48 * 3600);
+    // A photo that can't be signed is one the listing won't show. Say which.
+    if (sErr || !s?.signedUrl) unsigned.push((p.role || p.kind) ?? "photo");
+    else urls.push(s.signedUrl);
   }
-  if (!urls.length) return NextResponse.json({ error: "Card has no stored photos — scan it first." }, { status: 400 });
+  if (!urls.length) return NextResponse.json({ error: "Card has no usable stored photos — scan it first." }, { status: 400 });
+
+  // Silent truncation reads as "we published everything" (prevention rule 10).
+  const photoWarns = [
+    ...(truncated ? [`This card has more photos than eBay's 12-image limit — the ${urls.length} most useful were sent (whole card first, then detail shots).`] : []),
+    ...(unsigned.length ? [`${unsigned.length} photo(s) couldn't be prepared and are NOT on the listing: ${unsigned.join(", ")}`] : []),
+  ];
 
   const draft = (card.listing_refs as Record<string, { title?: string; description?: string }> | null)?.ebay;
   const builtTitle = [card.year, card.player, card.set_name, card.parallel,
@@ -191,6 +213,7 @@ export async function POST(request: Request) {
     const warns0 = [
       ...(dbErr0 ? [`LISTING IS LIVE (#${r.itemId}) but CardOps couldn't record it (${dbErr0.message}) — do NOT list again; edit the card's listing state or re-run from the hub`] : []),
       ...(r.warnings ?? []),
+      ...photoWarns,
       ...(auditWarn0 ? [auditWarn0] : []),
     ];
     return NextResponse.json({ ok: true, url, listingId: r.itemId, warnings: warns0.length ? warns0 : undefined });
@@ -291,6 +314,7 @@ export async function POST(request: Request) {
 
   const warns = [
     ...(dbErr ? [`LISTING IS LIVE (#${listingId}) but CardOps couldn't record it (${dbErr.message}) — do NOT list again; reconcile from the hub`] : []),
+    ...photoWarns,
     ...(auditWarn ? [auditWarn] : []),
   ];
   return NextResponse.json({ ok: true, url, listingId, warnings: warns.length ? warns : undefined });

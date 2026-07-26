@@ -10,6 +10,8 @@ export type StoredEstimate = {
   psa: CompanyEst; bgs: CompanyEst; sgc: CompanyEst; cgc: CompanyEst;
   caveats: string;
   at?: string;
+  views?: string[];
+  missing_views?: string[];
 };
 
 const COMPANIES: { key: keyof Pick<StoredEstimate, "psa" | "bgs" | "sgc" | "cgc">; label: string }[] = [
@@ -99,6 +101,17 @@ export function GradeEstimate({ cardId, initial }: { cardId: string; initial: St
               {est.caveats} · Photo: {est.image_quality}
               {est.at ? ` · estimated ${new Date(est.at).toLocaleDateString()}` : ""}
             </p>
+            {/* What the estimate was actually LOOKING at. Two views and eight
+                views are different claims, and a grade rendered without saying
+                which is a number presented as more than it is. */}
+            {est.views?.length ? (
+              <p className="mt-1 text-[10px] leading-snug text-ink/45">
+                From {est.views.length} view{est.views.length === 1 ? "" : "s"}: {est.views.join(", ")}.
+                {est.missing_views?.length
+                  ? ` No ${est.missing_views.join(", ")} — shoot the grading template for a tighter range.`
+                  : " Full set."}
+              </p>
+            ) : null}
             <p className="mt-1 text-[10px] font-semibold text-warn/80">Pre-grading intel — never a guarantee.</p>
           </div>
         </div>
