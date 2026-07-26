@@ -1,3 +1,4 @@
 Pricing Templates
 Photo Templates
 Inventory
+Inventory Groups
