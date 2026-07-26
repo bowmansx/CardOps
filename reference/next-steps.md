@@ -2,20 +2,28 @@
 
 ## ✅ STATE AS OF 2026-07-25 (end of session)
 
-**The database is fully applied and verified. The code is not deployed** —
-PR #3 is open and unmerged; see step 0.
+**Everything built today is applied, merged and deployed.** The queue below is
+now entirely items only Beau can do.
 
-- **All migrations applied** through `20260742000000` (credit metering, card
+- **All migrations applied** through `20260744000000` — credit metering, card
   identities, investor assets, photo provenance + storage, photo prefs, cost
-  basis lines).
+  basis lines, photo bucket limits, photo templates.
 - **Money-core harness: 48 of 48 PASSED** against the live database — basis
   draw, the sold boundary both ways, double-sell refusal, lot balances,
   cross-user isolation, credit FIFO + expiry, identity resolution, shared
   history surviving deletion, custody guards, storage rollup, RLS shape,
   the photo-prefs guards, and the cost-basis layer (full draw, sold lock,
   single cache writer, cache-follows-CRUD, negative floor, unstated-vs-zero).
-- **PR #2 merged**; `main` is deployed with the camera work.
+- **PRs #2–#6 merged**; production is current.
 - **AI card scan is ON** in Services and verified end-to-end.
+
+Shipped 2026-07-25, after the Supabase split: the "Saving…" hang fixed (the
+server-action body limit), optional cost basis with an editable breakdown,
+photo settings and presets, photo templates, direct browser→storage upload,
+and corner/surface shots feeding both the grade estimate and eBay listings.
+
+**The autonomous loop is set up** — `reference/LOOP_CHARTER.md` for its terms,
+`spec/` for Beau's Obsidian vault. `spec/INBOX.md` is how work reaches it.
 
 Migrations 2–4 were adversarially reviewed *before* pasting (40 agents, 36
 candidates, 18 refuted, 8 distinct defects fixed in place — commit `17b8118`).
@@ -26,26 +34,23 @@ tenant's out-of-possession assets through a view missing `security_invoker`.
 
 ### Next, in order
 
-0. **Paste `supabase/migrations/20260743000000_photo_bucket_limits.sql`**, then
-   merge the direct-upload PR. Photos now go straight from the browser to
-   Supabase Storage; only paths reach the server. That removed the accidental
-   size ceiling the server-action body limit used to provide, so this migration
-   puts a real one on the bucket (25 MB, images only) and adds
-   `card_photo_orphans()` for the sweep below.
+**Everything here is Beau's.** The loop checked on 2026-07-25 and found no
+unblocked item — which is the charter working as designed, not a failure. To
+give it something, write in `spec/INBOX.md` → *Do next*, or answer one of the
+questions in that file's *Waiting on you* table.
 
-   **Known gap, deliberately not built:** nothing DELETES an orphaned object.
-   If an upload lands and the recording call fails, the app now says so and
-   offers Retry photos — but bytes already abandoned stay in the bucket,
-   invisible to `user_storage_usage` (which sums `card_photos.bytes`). Run
-   `select * from card_photo_orphans();` occasionally. A real sweeper wants to
-   run as a cron, and crons are still fenced off by the cutover interlock.
-
-1. **Put a real box of cards through the scanner.** Everything above was
-   groundwork for this. Log where the capture flow actually hurts — that
-   friction list is what Wave A gets designed against, per the standing
-   agreement not to design the intake loop from imagination.
+1. **Put a real box of cards through the scanner.** Everything built today was
+   groundwork for this. Log where the capture flow actually hurts into
+   `spec/10-intake.md` → *What hurts today* — that section is deliberately
+   empty, and per the standing agreement it outranks any feature idea invented
+   at a desk. It also unblocks the held P1 work (edge detection, deskew), which
+   is waiting on evidence that capture angle is a genuine problem.
 2. **Re-add the businesses** (AF, HOP) — that setup lived in the old database.
 3. **Connect Zoho books** (§1 below) once the businesses exist.
+4. **Install the GitHub CLI** (`winget install --id GitHub.cli`, then
+   `gh auth login`). Not product work, but it is what lets the loop open and
+   merge its own PRs — browser automation against GitHub proved unreliable, so
+   the charter's merge step currently has no dependable mechanism.
 
 ### Decisions still open (not blocking)
 
