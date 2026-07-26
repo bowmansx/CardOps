@@ -4,10 +4,11 @@ import { useState } from "react";
 import Link from "next/link";
 import { Camera, Loader2, CheckCircle2, ScanLine, RotateCcw, AlertTriangle } from "lucide-react";
 import { SPORT_CATEGORIES, ZONES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
-import { commitIntakeCard, type IntakeInput } from "@/app/cards/intake/actions";
+import { commitIntakeCard, recordCardPhotos, type IntakeInput } from "@/app/cards/intake/actions";
 import { CameraSheet } from "./CameraSheet";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
-import { fitPayload } from "@/lib/cards/payload";
+import { uploadCardPhotos, type PhotoShot } from "@/lib/cards/upload";
+import { createClient } from "@/lib/supabase/client";
 import { Lightbox } from "./Lightbox";
 
 const CONF = 0.85; // INTAKE_CONFIDENCE_THRESHOLD
@@ -41,6 +42,10 @@ export function FullIntake({
   const [backOriginal, setBackOriginal] = useState<string | null>(null);
   const [f, setF] = useState<Fields>({});
   const [savedCount, setSavedCount] = useState(0);
+  // A card that IS booked but whose photos didn't attach. Holding this is what
+  // turns a dead end into a retry: the images stay in state and the retry
+  // targets the existing card instead of booking another one.
+  const [pending, setPendingPhotos] = useState<{ cardId: string; label: string } | null>(null);
 
   function set<K extends keyof Fields>(k: K, v: Fields[K]) { setF((p) => ({ ...p, [k]: v })); }
 
@@ -78,45 +83,142 @@ export function FullIntake({
 
   async function save() {
     setErr(null); setBusy("saving");
+    // Did the card actually land? Everything after step 1 runs AFTER the card
+    // exists, and a rejection there must never be reported as "nothing was
+    // booked" — that reads as an invitation to press the button again, which
+    // would book a second card.
+    let bookedId: string | null = null;
     try {
-      // Photos travel as base64, which inflates by ~37%. Over the server
-      // action's body limit the request dies in transit — no card, no error,
-      // just a spinner. Shrink to fit rather than let the save fail.
-      const fit = await fitPayload([front, back, frontOriginal, backOriginal]);
-      const [fFront, fBack, fFrontSrc, fBackSrc] = fit.urls;
+      // STEP 1 - create the card. Fields only; no image bytes cross the wire,
+      // so this can't run into the server-action body limit however many
+      // photos or whatever quality the user picked.
       const res = await commitIntakeCard({
         ...f,
         // Persist the model's confidence for audit / later re-check.
         vision_confidence: f.confidences ? { ...f.confidences, overall: f.overall_confidence } : undefined,
-        front: fFront ?? undefined,
-        back: fBack ?? undefined,
-        // The uncropped frames, so a crop is never the only record of an edge.
-        front_original: fFrontSrc ?? undefined,
-        back_original: fBackSrc ?? undefined,
       });
-      if (!res.ok) { setErr(res.error ?? "Save failed."); return; }
-      // The card saved but a photo didn't — say so rather than let it surface
-      // later as a listing with no image.
-      if (res.warning) { setErr(res.warning); }
+      if (!res.ok || !res.id) { setErr(res.error ?? "Save failed."); return; }
+      bookedId = res.id;
+
+      // STEP 2 - the browser puts the bytes straight into storage, inside the
+      // user's own folder, which is the boundary card_photo_visible() already
+      // enforces. The card exists by now, so nothing is orphaned under an id
+      // that never became a card.
+      const shots = buildShots();
+      const problems: string[] = [];
+      if (shots.length) {
+        const { data: { user } } = await createClient().auth.getUser();
+        if (!user) {
+          problems.push("your session ended before the photos uploaded");
+        } else {
+          const up = await uploadCardPhotos(user.id, res.id, shots);
+          problems.push(...up.failures);
+          // STEP 3 - record whatever landed. A photo that uploaded but was
+          // never recorded is an object no screen shows and no quota counts.
+          if (up.photos.length) {
+            const rec = await recordCardPhotos(res.id, up.photos);
+            if (!rec.ok) problems.push(rec.error ?? "the photos couldn't be recorded");
+            else if (rec.warning) problems.push(rec.warning);
+          }
+        }
+      }
+
+      if (problems.length) {
+        // EVERY problem, not just the last one - an earlier setErr used to be
+        // overwritten by a later one, understating what was lost. The photos
+        // stay in state and the card id is remembered, so "Retry photos"
+        // targets the card that already exists instead of booking a new one.
+        setPendingPhotos({ cardId: res.id, label: cardTitle(f) });
+        setErr(`Card booked, but its photos didn't attach: ${problems.join(" \u00b7 ")}`);
+        setSavedCount((n) => n + 1);
+        return; // deliberately NOT reset() - the images are the only copy
+      }
+
       setSavedCount((n) => n + 1);
       reset();
     } catch (e) {
-      // A server action can REJECT — expired session, dropped connection, a
-      // body the platform refused. Without this the button sat on "Saving…"
-      // for ever with nothing said and no way back. Note what is NOT here:
-      // reset(). The photos and every typed field stay exactly as they are, so
-      // the retry costs a tap rather than the whole card.
-      setErr(
-        (e instanceof Error && e.message ? e.message + " — " : "") +
-        "The save didn't go through and nothing was booked. Your photos and details are still here — tap Book card to try again.",
-      );
+      // A server action can REJECT - expired session, dropped connection, a
+      // body the platform refused. Without this the button sat on "Saving..."
+      // for ever with nothing said and no way back.
+      if (bookedId) {
+        // The card EXISTS. Saying "nothing was booked" here would invite a
+        // retry that books a duplicate.
+        setPendingPhotos({ cardId: bookedId, label: cardTitle(f) });
+        setErr(
+          "The card was booked, but attaching its photos failed" +
+          (e instanceof Error && e.message ? ` (${e.message})` : "") +
+          ". Tap Retry photos - do not tap Book card again, that would create a second card.",
+        );
+        setSavedCount((n) => n + 1);
+      } else {
+        setErr(
+          (e instanceof Error && e.message ? e.message + " - " : "") +
+          "The save didn't go through and nothing was booked. Your photos and details are still here - tap Book card to try again.",
+        );
+      }
     } finally {
       setBusy(null);
     }
   }
+
+  /** The shots this card would upload, originals first so a crop can link back. */
+  function buildShots() {
+    const shots: PhotoShot[] = [];
+    const push = (kind: "front" | "back", url: string | null, original: string | null) => {
+      if (!url) return;
+      let srcIndex: number | undefined;
+      if (original) {
+        srcIndex = shots.length;
+        shots.push({ dataUrl: original, kind, variant: "original" });
+      }
+      shots.push({
+        dataUrl: url,
+        kind,
+        variant: original ? "processed" : "original",
+        derivedFromIndex: srcIndex,
+        // The margin ACTUALLY applied, not the preference: with cropping set to
+        // 'tight' the preference still holds a percentage that was never used.
+        cropGeometry: original
+          ? { margin_pct: photoPrefs.auto_crop === "tight" ? 0 : photoPrefs.crop_margin_pct, deskewed: false }
+          : null,
+      });
+    };
+    push("front", front, frontOriginal);
+    push("back", back, backOriginal);
+    return shots;
+  }
+
+  /** Re-attach photos to a card that IS booked. Never creates a second card. */
+  async function retryPhotos() {
+    if (!pending) return;
+    setErr(null); setBusy("saving");
+    try {
+      const { data: { user } } = await createClient().auth.getUser();
+      if (!user) { setErr("You're signed out - sign in again, then tap Retry photos."); return; }
+      const up = await uploadCardPhotos(user.id, pending.cardId, buildShots());
+      const problems = [...up.failures];
+      if (up.photos.length) {
+        const rec = await recordCardPhotos(pending.cardId, up.photos);
+        if (!rec.ok) problems.push(rec.error ?? "the photos couldn't be recorded");
+        else if (rec.warning) problems.push(rec.warning);
+      }
+      if (problems.length) { setErr(`Still couldn't attach the photos: ${problems.join(" \u00b7 ")}`); return; }
+      setPendingPhotos(null);
+      reset();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't attach the photos.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   function reset() {
     setFront(null); setBack(null); setFrontOriginal(null); setBackOriginal(null);
-    setF({}); setAiOff(false); setStep("capture");
+    setF({}); setAiOff(false); setStep("capture"); setPendingPhotos(null);
+  }
+
+  function cardTitle(x: Fields) {
+    return [x.year, x.player, x.set_name].filter(Boolean).join(" ") || "That card";
   }
 
   const conf = (f.confidences ?? {}) as Record<string, number>;
@@ -311,8 +413,25 @@ export function FullIntake({
             </label>
           )}
           {err && <p className="text-xs text-danger">{err}</p>}
+          {pending && (
+            <div className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2">
+              <p className="text-[11px] text-amber-800">
+                <strong>{pending.label}</strong> is booked \u2014 only its photos are missing.
+              </p>
+              <div className="mt-1.5 flex gap-2">
+                <button onClick={retryPhotos} disabled={busy !== null}
+                  className="rounded-lg bg-flag px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-50">
+                  {busy ? "Retrying\u2026" : "Retry photos"}
+                </button>
+                <button onClick={() => { setPendingPhotos(null); reset(); }} disabled={busy !== null}
+                  className="rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-ink/60">
+                  Skip \u2014 book the next card
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex gap-2 pt-1">
-            <button onClick={save} disabled={busy !== null}
+            <button onClick={save} disabled={busy !== null || !!pending}
               className="flex-1 rounded-xl bg-flag py-3 font-bold text-white disabled:opacity-50">
               {busy === "saving" ? "Saving…" : "Book card"}
             </button>

@@ -139,6 +139,105 @@ export type IntakeInput = {
 const TREATMENTS = ["dealer", "investment", "hobby"];
 const treatmentOf = (t?: string) => (t && TREATMENTS.includes(t) ? t : "dealer");
 
+
+export type UploadedPhotoRef = {
+  path: string; bytes: number; kind: string;
+  variant: "original" | "processed";
+  shotIndex: number;
+  derivedFromIndex?: number;
+  cropGeometry?: unknown; captureMeta?: unknown;
+};
+
+/**
+ * Record photos the BROWSER already uploaded to storage.
+ *
+ * The bytes never touch this action — only paths — so the server-action body
+ * limit stops being a ceiling on photo quality.
+ *
+ * Nothing here is taken on trust. The card is re-read under the caller's RLS;
+ * every path must sit inside that user's own folder; and each object's SIZE is
+ * read back from storage rather than believed, because `bytes` feeds the
+ * storage meter and a number the client simply asserts is not a measurement
+ * (prevention rule 9 — money and metered figures are validated, never
+ * defaulted).
+ */
+export async function recordCardPhotos(
+  cardId: string,
+  photos: UploadedPhotoRef[],
+): Promise<{ ok: boolean; recorded?: number; error?: string; warning?: string }> {
+  try {
+    const { supabase, userId } = await authed();
+    if (!photos.length) return { ok: true, recorded: 0 };
+
+    // RLS-scoped read: a card you can't see doesn't exist to you.
+    const { data: card, error: cardErr } = await supabase
+      .from("cards").select("id").eq("id", cardId).maybeSingle();
+    if (cardErr) return { ok: false, error: cardErr.message };
+    if (!card) return { ok: false, error: "That card isn't yours." };
+
+    const prefix = `${userId}/${cardId}/`;
+    const bad = photos.find((p) => typeof p.path !== "string" || !p.path.startsWith(prefix) || p.path.includes(".."));
+    if (bad) return { ok: false, error: "A photo path was outside this card's own storage." };
+
+    // Verify each object EXISTS and take its real size from storage.
+    const { data: listed, error: listErr } = await supabase.storage
+      .from("card-photos").list(`${userId}/${cardId}`, { limit: 1000 });
+    if (listErr) return { ok: false, error: `Couldn't verify the uploads: ${listErr.message}` };
+    const sizeByName = new Map<string, number>();
+    for (const o of listed ?? []) {
+      const meta = o.metadata as { size?: number } | null;
+      sizeByName.set(o.name, Number(meta?.size ?? 0));
+    }
+
+    // Originals first, so a crop can point at the frame it came from — a crop
+    // whose source is unknown is what the margin rule exists to prevent.
+    const order = [...photos.keys()].sort(
+      (a, b) => (photos[a].variant === "original" ? 0 : 1) - (photos[b].variant === "original" ? 0 : 1),
+    );
+    const idByShotIndex = new Map<number, string>();
+    const failures: string[] = [];
+
+    for (const i of order) {
+      const p = photos[i];
+      const name = p.path.slice(prefix.length);
+      if (!sizeByName.has(name)) { failures.push(`${p.kind}: the uploaded file isn't in storage`); continue; }
+      const derivedFrom = p.derivedFromIndex != null ? idByShotIndex.get(p.derivedFromIndex) ?? null : null;
+      // A crop whose original failed to record loses its link. Say so in the
+      // row rather than letting it look like a photo that was never cropped.
+      const geom = p.derivedFromIndex != null && !derivedFrom
+        ? { ...(p.cropGeometry as Record<string, unknown> ?? {}), original_link_lost: true }
+        : p.cropGeometry ?? null;
+      const { data, error } = await supabase
+        .from("card_photos")
+        .insert({
+          card_id: cardId, kind: p.kind, role: p.kind, variant: p.variant,
+          bucket: "card-photos", path: p.path,
+          bytes: sizeByName.get(name) ?? 0,
+          derived_from: derivedFrom,
+          crop_geometry: geom,
+          capture_meta: p.captureMeta ?? null,
+        })
+        .select("id")
+        .single();
+      // Checked, never assumed: an unrecorded photo is an uploaded object that
+      // no screen will ever show and no quota will ever count (rules 1 and 7).
+      if (error) { failures.push(`${p.kind}: ${error.message}`); continue; }
+      idByShotIndex.set(p.shotIndex, data.id as string);
+    }
+
+    revalidatePath(`/cards/${cardId}`);
+    if (failures.length) {
+      return {
+        ok: true, recorded: idByShotIndex.size,
+        warning: `${failures.length} photo${failures.length === 1 ? "" : "s"} uploaded but couldn't be recorded — ${failures.join(" · ")}`,
+      };
+    }
+    return { ok: true, recorded: idByShotIndex.size };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't record the photos." };
+  }
+}
+
 // Full Intake: human-reviewed card → insert + store photos.
 export async function commitIntakeCard(
   input: IntakeInput,
@@ -335,6 +434,9 @@ export async function commitSpeedBatch(
   // increments the pool inside ONE locked transaction. Either the whole lot
   // and its pool cost land together, or nothing does — no orphan pool-basis
   // cards, no lost pool updates. Photos are attached afterward (best-effort).
+  // Only the identity fields go to the RPC — a batch's photos are uploaded by
+  // the browser straight to storage and recorded afterwards by path, so a
+  // 40-card stack is no larger on the wire than a 1-card one.
   const payload = items.map((it) => ({
     cat: catCode(it.sport_category?.trim() || null),
     sport_category: it.sport_category?.trim() || "",
@@ -349,11 +451,12 @@ export async function commitSpeedBatch(
   // poolTotal was ALWAYS undefined and the confirmation screen showed nothing.
   const result = data as { inserted: number; ids: string[]; lot_id: string; lot_cost: number };
 
-  // Attach each front photo to its card (order matches payload), keeping the
-  // uncropped frame alongside it. A photo that fails to store is reported
-  // rather than dropped — the cards are already booked either way.
+  // Legacy path: an item that still arrives carrying base64 (an older client,
+  // or a caller that hasn't moved to direct upload) is still stored, so this
+  // change can't strand a photo mid-rollout.
   const photoWarnings: string[] = [];
   for (let i = 0; i < result.ids.length; i++) {
+    if (!items[i]?.front) continue;
     const w = await uploadPhoto(supabase, result.ids[i], "front", items[i]?.front, items[i]?.front_original);
     if (w) photoWarnings.push(`card ${i + 1}: ${w}`);
   }
