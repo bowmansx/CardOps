@@ -175,6 +175,8 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
 
 ## Reference
 
+- `reference/BEAU_INBOX.md` — Beau's file. Read it, never write to it; its
+  "Do next" outranks next-steps.md and its "Notes" can unblock a blocked item.
 - `reference/LOOP_CHARTER.md` — READ FIRST when running unattended. Scope,
   STOP rules (a PR containing a migration is never auto-merged), what counts
   as blocked, and when to end the loop rather than invent work.
