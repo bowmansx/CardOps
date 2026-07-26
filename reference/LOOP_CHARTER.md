@@ -16,13 +16,21 @@ If something matters, it must be written down, not remembered.
 1. **Start clean.** `git checkout main && git pull`. Never build on a stale
    ref — that mistake has already been made twice in this repo, and both times
    it produced a confidently wrong diagnosis.
-2. **Read `reference/BEAU_INBOX.md` FIRST.** It is Beau's file — the loop
-   reads it and NEVER writes to it. Anything under "Do next" outranks
-   everything in `next-steps.md`; anything under "Don't touch" is off limits
-   with no justification required; "Notes for the loop" may contain the answer
-   to something currently listed as blocked, which unblocks it on the spot.
-   An inbox item that is too vague to build comes back as a question rather
-   than a guess.
+2. **Read the spec vault at `spec/` FIRST.** It is Beau's Obsidian vault and
+   the source of truth for how CardOps is meant to work.
+   - `spec/INBOX.md` is the only file treated as ORDERS. *Do next* outranks
+     `next-steps.md`. *Don't touch* is absolute and needs no justification.
+     *Notes for the loop* may contain the answer to something listed as
+     blocked, which unblocks it on the spot.
+   - The area notes (`00-` … `90-`) describe how each part is MEANT to work.
+     Read the one covering whatever you're about to touch, before touching it.
+     **Where a note and the code disagree, the NOTE is the change request** —
+     build the note, and say which assumption the code got wrong.
+   - `spec/90-decisions.md` records why things are as they are. Never quietly
+     undo one; if a change reverses a decision, name it and say why.
+   - **READ ONLY.** Never write, tidy, reformat, reorganise, tick items off, or
+     "update it to match the code". An item too vague to build comes back as a
+     question, never a guess.
 3. **Pick ONE item** — the inbox if it has one, otherwise the highest thing in
    `reference/next-steps.md` §"Next, in order" that is not blocked (see below).
    One item per iteration. A loop that starts three things finishes none.
@@ -38,9 +46,8 @@ If something matters, it must be written down, not remembered.
 8. **Fix what the review confirms.** Re-gate.
 9. **Push, open a PR, merge it** — unless a STOP rule below applies.
 10. **Update `reference/next-steps.md`** to reflect the new truth, including
-    anything newly blocked or newly discovered. **Never write to
-    `BEAU_INBOX.md`** — report what was finished and let Beau clear his own
-    list.
+    anything newly blocked or newly discovered. **Never write anything under
+    `spec/`** — report what was finished and let Beau cross off his own list.
 11. **Report** what shipped, what it cost, and what is now waiting on Beau.
 
 ---

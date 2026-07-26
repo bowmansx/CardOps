@@ -4,3 +4,8 @@ node_modules
 .vercel
 *.tsbuildinfo
 next-env.d.ts
+
+# Obsidian workspace state — the notes are tracked, the UI state is not
+spec/.obsidian/workspace*.json
+spec/.obsidian/cache
+spec/.trash/

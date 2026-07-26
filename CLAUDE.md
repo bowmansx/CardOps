@@ -175,8 +175,9 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
 
 ## Reference
 
-- `reference/BEAU_INBOX.md` — Beau's file. Read it, never write to it; its
-  "Do next" outranks next-steps.md and its "Notes" can unblock a blocked item.
+- `spec/` — **Beau's Obsidian vault: the spec.** Read it, never write to it.
+  `spec/INBOX.md` outranks everything; the area notes describe how each part is
+  MEANT to work, so where a note and the code disagree the note wins.
 - `reference/LOOP_CHARTER.md` — READ FIRST when running unattended. Scope,
   STOP rules (a PR containing a migration is never auto-merged), what counts
   as blocked, and when to end the loop rather than invent work.
