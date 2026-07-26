@@ -32,7 +32,7 @@ _(empty)_
      the last box of cards felt to scan. An answer to anything in "Waiting on
      you" below goes here and unblocks that work immediately. -->
 
-_(empty)_
+Notice the change to 00, you'll see my description of cardops which should give you an understanding of the native goal for the app. Please help me realize this with our app.
 
 ---
 
