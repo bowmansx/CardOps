@@ -1,0 +1,3 @@
+Pricing Templates
+Photo Templates
+Inventory
