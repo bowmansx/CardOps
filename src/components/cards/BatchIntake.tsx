@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Camera, Zap, X, CheckCircle2, Loader2, Sparkles } from "lucide-react";
-import { SPORT_CATEGORIES, ZONES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
+import { SPORT_CATEGORIES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import {
   commitSpeedBatch,
   recordCardPhotos,
@@ -21,7 +21,7 @@ import { Lightbox } from "./Lightbox";
 type Phase = "setup" | "booking" | "scanning" | "done";
 
 /**
- * Batch (AI) intake (Beau, 2026-07-18): set the defaults ONCE (category, zone,
+ * Batch (AI) intake (Beau, 2026-07-18): set the defaults ONCE (category,
  * pricing standard, lot cost) → rapid-fire the scanner through a whole stack →
  * one atomic Speed-Book commit → then the AI reads every card in the
  * background and parks them in `review`, one pile to walk through and edit.
@@ -39,7 +39,6 @@ export function BatchIntake({
 }) {
   const photoPrefs = usePhotoPrefs();
   const [category, setCategory] = useState<string>("");
-  const [zone, setZone] = useState<string>("BULK");
   const [strategy, setStrategy] = useState<string>("standard");
   const [storage, setStorage] = useState<string>("");
   const [entity, setEntity] = useState<string>("");
@@ -97,7 +96,6 @@ export function BatchIntake({
       front_original: shot.original ?? undefined,
       thumb: url,
       sport_category: category || undefined,
-      zone,
     }]);
     // Kick off the AI read now, in the background.
     if (!preRef.current.has(url)) {
@@ -116,7 +114,7 @@ export function BatchIntake({
       // Identity fields only: the photos go straight from the browser to
       // storage once the cards exist, so batch size no longer decides whether
       // the request fits inside the server-action body limit.
-      const payload = items.map(({ sport_category, zone }) => ({ sport_category, zone }));
+      const payload = items.map(({ sport_category }) => ({ sport_category }));
       const res = await commitSpeedBatch(payload, Number(lotCost));
       if (!res.ok) {
         setErr(res.error ?? "Batch failed.");
@@ -281,12 +279,6 @@ export function BatchIntake({
           <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-flag">
             <option value="">—</option>
             {SPORT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ink/50">Zone</span>
-          <select value={zone} onChange={(e) => setZone(e.target.value)} className="w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-flag">
-            {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
           </select>
         </label>
         <label className="block">

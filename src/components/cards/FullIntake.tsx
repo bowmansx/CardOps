@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Camera, Loader2, CheckCircle2, ScanLine, RotateCcw, AlertTriangle } from "lucide-react";
-import { SPORT_CATEGORIES, ZONES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
+import { SPORT_CATEGORIES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import { commitIntakeCard, recordCardPhotos, type IntakeInput } from "@/app/cards/intake/actions";
 import { CameraSheet } from "./CameraSheet";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
@@ -367,7 +367,6 @@ export function FullIntake({
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Zone" k="zone" f={f} set={set} select={ZONES as unknown as string[]} />
             <Field label="Location" k="location_code" f={f} set={set} />
           </div>
           <label className="block">

@@ -125,7 +125,6 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
     ["Market value", money(c.market_value)],
     ["Manual price", money(c.manual_price)],
     ["Strategy", c.pricing_strategy],
-    ["Zone", c.zone ?? "—"],
     ["Location", c.location_code ?? "—"],
     ["Acquisition", c.acquisition_method ?? "—"],
   ];

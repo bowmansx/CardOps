@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Camera, Zap, X, CheckCircle2, Loader2 } from "lucide-react";
-import { SPORT_CATEGORIES, ZONES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
+import { SPORT_CATEGORIES, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import { commitSpeedBatch, applyBatchStrategy, type SpeedItem } from "@/app/cards/intake/actions";
 import { Lightbox } from "./Lightbox";
 import { CameraSheet, type CapturedShot } from "./CameraSheet";
@@ -24,7 +24,6 @@ export function SpeedBook({
   const photoPrefs = usePhotoPrefs();
   const [cam, setCam] = useState(false);
   const [category, setCategory] = useState<string>("");
-  const [zone, setZone] = useState<string>("BULK");
   const [strategy, setStrategy] = useState<string>("standard");
   const [entity, setEntity] = useState<string>("");
   const [treatment, setTreatment] = useState<string>("dealer");
@@ -45,7 +44,7 @@ export function SpeedBook({
   function capture(shot: CapturedShot) {
     setItems((xs) => [...xs, {
       front: shot.url, thumb: shot.url, front_original: shot.original ?? undefined,
-      sport_category: category || undefined, zone,
+      sport_category: category || undefined,
     }]);
   }
   function remove(i: number) { setItems((xs) => xs.filter((_, j) => j !== i)); }
@@ -64,7 +63,7 @@ export function SpeedBook({
       // Identity fields only - a 40-card stack is now no larger on the wire
       // than a single card. The photos follow, straight from the browser.
       const res = await commitSpeedBatch(
-        items.map(({ sport_category, zone }) => ({ sport_category, zone })),
+        items.map(({ sport_category }) => ({ sport_category })),
         Number(lotCost),
       );
       if (!res.ok) { setErr(res.error ?? "Batch failed."); return; }
@@ -174,9 +173,6 @@ export function SpeedBook({
         </label>
         <label className="block">
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ink/50">Zone</span>
-          <select value={zone} onChange={(e) => setZone(e.target.value)} className="w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-flag">
-            {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
-          </select>
         </label>
         <label className="col-span-2 block">
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ink/50">Pricing standard (whole lot — editable later)</span>

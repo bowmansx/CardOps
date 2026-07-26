@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  CATEGORIES, categoryKind, ZONES, GRADERS, ACQUISITION_METHODS,
+  CATEGORIES, categoryKind, GRADERS, ACQUISITION_METHODS,
   PRICING_STRATEGY_OPTIONS, type Card,
 } from "@/lib/cards/types";
 
@@ -160,13 +160,6 @@ export function CardForm({
             <select name="acquisition_method" defaultValue={initial?.acquisition_method ?? ""} className={inputCls}>
               <option value="">—</option>
               {ACQUISITION_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </label>
-          <label className="block">
-            <span className={lblCls}>Zone</span>
-            <select name="zone" defaultValue={initial?.zone ?? ""} className={inputCls}>
-              <option value="">—</option>
-              {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
             </select>
           </label>
           <label className="block">

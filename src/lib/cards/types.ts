@@ -66,7 +66,16 @@ export const DOCUMENT_PROVES = [
 ] as const;
 export type DocumentProves = (typeof DOCUMENT_PROVES)[number];
 
-export const ZONES = ["GR", "RP", "BULK", "LIST", "HOLD"] as const;
+// ZONES retired 2026-07-26. The five codes (GR/RP/BULK/LIST/HOLD) had no
+// definition anywhere in the repo, and three of them duplicated a `status`
+// value — GR/graded_out, LIST/listed, HOLD/hold — so two fields could disagree
+// about the same card with nothing to reconcile them. What each was reaching
+// for now has a real home:
+//   status      — where the card is in the selling lifecycle (DB-enforced)
+//   asset_state — where it physically is (custody, guarded, logged)
+//   location    — which shelf, free text, remembers what you type
+// The `cards.zone` column is left in place; existing values are still readable
+// and nothing writes it any more.
 export const GRADERS = ["PSA", "BGS", "SGC", "CGC", "HGA", "ISA", "GMA", "OTHER"] as const;
 export const ACQUISITION_METHODS = [
   "purchased", "inherited", "partnership_split", "trade", "pull",

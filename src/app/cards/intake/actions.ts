@@ -288,7 +288,6 @@ async function commitIntakeCardInner(
     grader: input.grader?.trim() || null,
     grade: input.grade && Number.isFinite(Number(input.grade)) ? Number(input.grade) : null,
     cert_number: input.cert_number?.trim() || null,
-    zone: input.zone?.trim() || null,
     location_code: input.location_code?.trim() || null,
     pricing_strategy: input.pricing_strategy?.trim() || "standard",
     vision_confidence: input.vision_confidence ?? null,
@@ -440,7 +439,6 @@ export async function commitSpeedBatch(
   const payload = items.map((it) => ({
     cat: catCode(it.sport_category?.trim() || null),
     sport_category: it.sport_category?.trim() || "",
-    zone: it.zone?.trim() || "BULK",
   }));
   const { data, error } = await supabase.rpc("speed_book_commit", {
     p_items: payload,
