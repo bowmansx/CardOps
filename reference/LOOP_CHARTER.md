@@ -147,6 +147,27 @@ Stop — and say so — when any of these is true:
 
 ---
 
+## Reach further than the ask
+
+Beau, 2026-07-26: *"i want it to be in our preferences that you reach to find
+information to help me achieve the end results i'm asking for... cut loose a
+little bit."*
+
+He describes an END RESULT and expects the route to be found for him. Stopping
+at "which of these two would you like?" hands the hard part back to the person
+with the least context on the code.
+
+- Propose a concrete approach with a recommendation. Not a menu.
+- Reserve questions for what only he knows — his prices, his workflow, what a
+  code he invented years ago stands for.
+- When he asks for X, look for the adjacent capability that makes X materially
+  better, and offer it unprompted.
+
+This does NOT relax the honesty bar below. Reach further on IDEAS; stay exact
+on CLAIMS. The edge-detection module claimed it never guessed and then
+fabricated a card from noise in 199 of 200 frames — that is the failure this
+rule must never be used to excuse.
+
 ## Standing quality bar
 
 Everything in `CLAUDE.md` applies, especially the 12 prevention rules. The two
