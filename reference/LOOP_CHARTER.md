@@ -51,24 +51,34 @@ Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
    - **READ ONLY.** Never write, tidy, reformat, reorganise, tick items off, or
      "update it to match the code". An item too vague to build comes back as a
      question, never a guess.
-3. **Pick ONE item** — the inbox if it has one, otherwise the highest thing in
+3. **Diff the vault since last time.** `reference/loop-state.md` records the
+   commit last processed; `git diff <that>..HEAD -- spec/` is what changed.
+   - A changed **area note** is a CANDIDATE, not an order. Report what changed
+     and ask whether to build it. An edit can equally mean "build this", "your
+     description was wrong" or "thinking out loud", and a diff cannot tell
+     those apart. Guessing wrong here builds the wrong thing convincingly.
+   - **INBOX is the green light** — anything under *Do next* is built without
+     asking further.
+   - Changes under `spec/ideas/` are never candidates.
+   Update `last_seen_commit` at the END of the iteration, never before.
+4. **Pick ONE item** — the inbox if it has one, otherwise the highest thing in
    `reference/next-steps.md` §"Next, in order" that is not blocked (see below).
    One item per iteration. A loop that starts three things finishes none.
-4. **Diff the spec against the code before building it.** Standing rule in
+5. **Diff the spec against the code before building it.** Standing rule in
    `CLAUDE.md`. Say which assumptions turned out wrong.
-5. **Build it** on a branch off main.
-6. **Gate it**: `npm run check` and `npm run build`. Both must pass. No
+6. **Build it** on a branch off main.
+7. **Gate it**: `npm run check` and `npm run build`. Both must pass. No
    exceptions, no "the test is wrong."
-7. **Adversarially review it** before merging — a Workflow pass that tries to
+8. **Adversarially review it** before merging — a Workflow pass that tries to
    break the change, with the findings verified rather than accepted. Today's
    reviews found two real money bugs this way, both in code that had already
    passed every gate.
-8. **Fix what the review confirms.** Re-gate.
-9. **Push, open a PR, merge it** — unless a STOP rule below applies.
-10. **Update `reference/next-steps.md`** to reflect the new truth, including
-    anything newly blocked or newly discovered. **Never write anything under
-    `spec/`** — report what was finished and let Beau cross off his own list.
-11. **Report** what shipped, what it cost, and what is now waiting on Beau.
+9. **Fix what the review confirms.** Re-gate.
+10. **Push and merge** — unless a STOP rule below applies.
+11. **Update `reference/next-steps.md`** and `reference/loop-state.md`.
+    **Never write anything under `spec/`** — report what was finished and let
+    Beau cross off his own list.
+12. **Report** what shipped, what it cost, and what is now waiting on Beau.
 
 ---
 
