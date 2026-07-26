@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { gradingPhotos, roleCaption, type PhotoRow } from "@/lib/cards/photo-set";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { anthropic, MODEL } from "@/lib/anthropic";
@@ -90,15 +91,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ estimate: stored, cached: true });
   }
 
-  const { data: photos } = await supabase
-    .from("card_photos").select("kind, bucket, path").eq("card_id", card.id).order("created_at");
-  const front = (photos ?? []).find((p) => p.kind === "front");
-  const back = (photos ?? []).find((p) => p.kind === "back");
-  if (!front) return NextResponse.json({ error: "This card has no stored front photo — rescan it first." }, { status: 400 });
+  // EVERY view the card has, not just front and back. Corners and surface
+  // angles are precisely what a grader looks at, and the grading template
+  // exists to produce them - reading only kind='front'/'back' meant a card
+  // photographed from twelve angles was graded from two.
+  const { data: photoRows, error: photoErr } = await supabase
+    .from("card_photos")
+    .select("id, kind, role, variant, derived_from, bucket, path")
+    .eq("card_id", card.id)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
+  if (photoErr) return NextResponse.json({ error: `Couldn't read the card's photos: ${photoErr.message}` }, { status: 500 });
 
-  const frontUrl = await photoDataUrl(supabase, front.bucket as string, front.path as string);
-  const backUrl = back ? await photoDataUrl(supabase, back.bucket as string, back.path as string) : null;
-  if (!frontUrl) return NextResponse.json({ error: "Couldn't load the front photo." }, { status: 500 });
+  const set = gradingPhotos(photoRows as PhotoRow[] | null, 8);
+  if (!set.photos.some((p) => (p.role || p.kind) === "front")) {
+    return NextResponse.json({ error: "This card has no stored front photo - photograph it first." }, { status: 400 });
+  }
+
+  // Load in parallel; a view that will not load is dropped and NAMED, never
+  // silently treated as a view the card does not have.
+  const loaded = (await Promise.all(set.photos.map(async (p) => {
+    const url = await photoDataUrl(supabase, p.bucket, p.path);
+    return url ? { role: (p.role || p.kind || "other") as string, url } : null;
+  }))).filter(Boolean) as { role: string; url: string }[];
+  const unreadable = set.photos.length - loaded.length;
+  if (!loaded.some((l) => l.role === "front")) {
+    return NextResponse.json({ error: "Couldn't load the front photo." }, { status: 500 });
+  }
 
   const kind = categoryKind(card.sport_category as string | null);
   const era = kind === "tcg" ? "tcg" : eraOf(card.year as number | null) === "vintage" ? "vintage_sports" : "modern_sports";
@@ -120,10 +139,23 @@ export async function POST(request: Request) {
       messages: [{
         role: "user",
         content: [
-          { type: "text", text: "Front of the card:" },
-          block(frontUrl),
-          ...(backUrl ? [{ type: "text" as const, text: "Back of the card:" }, block(backUrl)] : [{ type: "text" as const, text: "(No back photo — hedge accordingly.)" }]),
-          { type: "text", text: `Card metadata:\n${meta}\n\nEstimate the per-company grade ranges.` },
+          // Each image is captioned with WHICH view it is, so a corner
+          // close-up is read as a corner rather than as a blurry whole card.
+          ...loaded.flatMap((l) => [
+            { type: "text" as const, text: `${roleCaption(l.role)}:` },
+            block(l.url),
+          ]),
+          {
+            type: "text",
+            text:
+              `Card metadata:\n${meta}\n\n` +
+              `Views supplied: ${loaded.map((l) => l.role).join(", ")}.\n` +
+              (set.missing.length
+                ? `Views NOT supplied: ${set.missing.join(", ")}. An estimate from ${loaded.length} view(s) is weaker than one from a full set - widen your ranges accordingly and say so in caveats.\n`
+                : `This is a full set of views - you may be correspondingly more confident.\n`) +
+              (unreadable ? `${unreadable} stored photo(s) could not be loaded and are absent from what you see.\n` : "") +
+              `\nEstimate the per-company grade ranges.`,
+          },
         ],
       }],
       output_config: { format: zodOutputFormat(Estimate) },
@@ -141,7 +173,7 @@ export async function POST(request: Request) {
       ? (prior as Record<string, unknown>)
       : {};
     const update: Record<string, unknown> = {
-      vision_confidence: { ...vc, grade_estimate: { ...est, at: new Date().toISOString() } },
+      vision_confidence: { ...vc, grade_estimate: { ...est, at: new Date().toISOString(), views: loaded.map((l) => l.role), missing_views: set.missing } },
     };
     if (card.condition_type !== "graded") update.raw_grade_estimate = summary;
     const { error: upErr } = await supabase.from("cards").update(update).eq("id", card.id);

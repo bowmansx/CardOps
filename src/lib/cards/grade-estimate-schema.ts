@@ -19,6 +19,12 @@ export const EstimateSchema = z.object({
   cgc: CompanyEst,
   caveats: z.string(),
   at: z.string().optional(),
+  // Which views the model actually saw. An estimate from a front photo and one
+  // from a full twelve-shot template are different claims; storing the basis
+  // is what lets a screen say which it is showing (optional so estimates made
+  // before templates still parse).
+  views: z.array(z.string()).optional(),
+  missing_views: z.array(z.string()).optional(),
 });
 
 export type Estimate = z.infer<typeof EstimateSchema>;

@@ -28,8 +28,8 @@ Status key: **✅ built** · **◐ partial** · **📋 designed, not built** ·
 | 12 | Save multiple different photos of a card | ✅ | **P3** — Add photos on the card page runs a template and attaches every shot |
 | 13 | Users set up their own photo templates | ✅ | **P3** — `card_photo_templates`, built-ins + user-defined via `/api/cards/photo-templates` |
 | 14 | e.g. all four corners front+back, surface angles | ✅ | **P3** — the "Grading — corners & surface" built-in, 12 shots |
-| 15 | …to give better info for AUTO-GRADING | ❌ | `grade-estimate` exists but ignores corner/surface shots — **P5** |
-| 16 | …and for eBAY LISTING export | ❌ | The eBay listing code uses **no photos at all** — **P5** |
+| 15 | …to give better info for AUTO-GRADING | ✅ | **P5** — every view is sent, captioned by role, and the estimate records which views it saw |
+| 16 | …and for eBAY LISTING export | ✅ | **P5** — it always sent photos (my earlier note was wrong); it sent them in insert order, so the UNCROPPED frame was the lead image. Now ordered whole-card-first and capped after ordering |
 | 17 | Border that locks on to the card | 📋 | Static guide exists; dynamic edge detection is **P1** |
 | 18 | Auto-snap once focused | ✅ | `a84c3e2` — sharpness + stability + consecutive-frame gate |
 | 19 | 3× snap, best of the set | ✅ | Best-of-burst. True multi-frame merge deliberately skipped (see design §2) |
