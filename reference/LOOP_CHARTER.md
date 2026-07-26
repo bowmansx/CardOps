@@ -42,6 +42,12 @@ Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
      build the note, and say which assumption the code got wrong.
    - `spec/90-decisions.md` records why things are as they are. Never quietly
      undo one; if a change reverses a decision, name it and say why.
+   - **`spec/ideas/` is THINKING, not spec and not orders.** Read it for
+     context; **never build from it.** A half-formed idea sitting in a folder
+     is not a request, and treating it as one is how a loop ends up shipping
+     something nobody asked for. An idea becomes real only when Beau moves it
+     into an area note or writes it in INBOX — promotion is his act, never
+     the loop's.
    - **READ ONLY.** Never write, tidy, reformat, reorganise, tick items off, or
      "update it to match the code". An item too vague to build comes back as a
      question, never a guess.
