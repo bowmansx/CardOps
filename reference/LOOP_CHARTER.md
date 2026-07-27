@@ -93,11 +93,17 @@ Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
 
 ## STOP rules — do not merge, hand to Beau instead
 
-**A PR that adds a migration must NOT be auto-merged.** Beau pastes migrations
-by hand; that is the design. Merging code whose schema is not yet applied
-points production at columns that do not exist. Open the PR, say clearly that
-the SQL must be pasted FIRST, and stop. The next iteration must not treat that
-item as done, and must not stack a second migration on top of an unpasted one.
+**A migration is APPLIED before the branch that needs it is merged.** Never the
+other way round: merging code whose schema is not yet applied points production
+at columns that do not exist.
+
+This used to read "hand it to Beau, he pastes it by hand." That was never the
+point — the point was ORDER, and handing it over was just the only way to
+guarantee it. Apply the SQL, confirm it succeeded, then merge. Unattended, that
+still means stopping and saying so, because nothing here can reach the database
+on its own; with Beau present it means doing both in one sitting.
+
+A second migration is never stacked on top of an unapplied one.
 
 Also never, without Beau saying so in the moment:
 
