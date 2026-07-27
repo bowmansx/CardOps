@@ -184,6 +184,7 @@ export function AddPhotos({ cardId, haveRoles }: { cardId: string; haveRoles: st
           shotStep={shotStep(index, queue.length)}
           shotHint={current.hint}
           shotTarget={current}
+          shotGuide={current.guide}
           session={{
             items,
             index,

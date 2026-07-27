@@ -56,6 +56,15 @@ export type TemplateShot = {
   targetTilt?: number;
   /** How far either side of the target still counts as on-target. */
   tolerance?: number;
+  /**
+   * Which frame guide this shot wants: the raw-card aspect or the slab one.
+   *
+   * A graded card in a PSA holder is a different shape from the card inside
+   * it, and having to remember to tap "Slab" before every shot is exactly the
+   * kind of thing a template exists to carry. Absent means raw, which is what
+   * every existing template means today.
+   */
+  guide?: "raw" | "slab";
 };
 
 export type PhotoTemplate = {
@@ -95,6 +104,7 @@ export function normalizeShots(raw: unknown): TemplateShot[] {
       // A target outside its plausible range is DROPPED, not clamped: a
       // template asking to fill 300% of the frame is a mistake, and clamping
       // it to 100% would silently invent a requirement nobody wrote.
+      guide: o.guide === "slab" ? "slab" : o.guide === "raw" ? "raw" : undefined,
       targetFill: num(o.targetFill, 0.05, 0.98),
       targetTilt: num(o.targetTilt, 0, 75),
       tolerance: num(o.tolerance, 0.01, 0.5),

@@ -55,6 +55,7 @@ export function CameraSheet({
   shotLabel,
   shotStep,
   shotHint,
+  shotGuide,
   shotTarget,
   session,
   onCapture,
@@ -77,6 +78,8 @@ export function CameraSheet({
   /** One line of instruction for THIS shot, e.g. "Fill the frame with the
    *  corner". Templates carry these; without one the frame is just a label. */
   shotHint?: string;
+  /** The frame guide this shot wants, when the template states one. */
+  shotGuide?: "raw" | "slab";
   /**
    * The whole run, when this camera is working through a template. Passing it
    * turns the sheet from a WIZARD into a SESSION: a menu you can open mid-shoot
@@ -132,7 +135,11 @@ export function CameraSheet({
   // to make visible.
   const [delivered, setDelivered] = useState<{ src: string; out: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [guide, setGuide] = useState<GuideKind>("raw");
+  // DERIVED so a template can carry it without an effect: the shot names the
+  // guide it wants (a slab is not the shape of the card inside it), and a
+  // manual tap still wins for the rest of the session.
+  const [manualGuide, setManualGuide] = useState<GuideKind | null>(null);
+  const guide: GuideKind = manualGuide ?? shotGuide ?? "raw";
   const [guideRect, setGuideRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [shots, setShots] = useState(0);
   const [flash, setFlash] = useState(false);
@@ -575,7 +582,7 @@ export function CameraSheet({
           </button>}
           {!osMode && <span className="flex overflow-hidden rounded-lg border border-white/30 text-[13px] font-bold">
             {(["raw", "slab"] as const).map((g) => (
-              <button key={g} onClick={() => setGuide(g)}
+              <button key={g} onClick={() => setManualGuide(g)}
                 className={"px-3 py-1.5 " + (guide === g ? "bg-white/30 text-white" : "text-white/60")}>
                 {g === "raw" ? "Card" : "Slab"}
               </button>
