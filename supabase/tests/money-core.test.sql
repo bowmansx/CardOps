@@ -7,7 +7,7 @@
 -- the raise is what rolls every test row back, so nothing ever persists.
 -- THE RED ERROR BOX IS EXPECTED: read the message inside it.
 --
--- Requires migrations through 20260742000000. Simulated auth: sets
+-- Requires migrations through 20260745000000. Simulated auth: sets
 -- request.jwt.claims the way PostgREST does.
 --
 -- TRANSITION GUCs: card_sell, card_move_asset and card_reclass_tax_bucket each
@@ -855,12 +855,69 @@ begin
   else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
 '; end if;
 
+  -- ══ identity: autograph and relic (migration 20260745) ══════════════════
+
+  -- ── 49. a signed copy gets its OWN identity ───────────────────────────────
+  -- Before this, a signed and an unsigned copy of the same card shared one
+  -- identity AND one pooled sales history that every tenant reads. An
+  -- autograph multiplies value; pooling the two invents a price.
+  v_name := '49. signed and unsigned resolve to different identities';
+  begin
+    insert into public.cards (user_id, sku, player, year, set_name, card_number, status, individual_basis, is_auto)
+      values (v_uid, 'TST-2026-000030', 'IdentityCard', 1986, 'Fleer', '57', 'booked', 1.00, false)
+      returning identity_id into v_n2;
+    insert into public.cards (user_id, sku, player, year, set_name, card_number, status, individual_basis, is_auto)
+      values (v_uid, 'TST-2026-000031', 'IdentityCard', 1986, 'Fleer', '57', 'booked', 1.00, true)
+      returning identity_id into v_photo;
+    v_ok := v_n2 is not null and v_photo is not null and v_n2 <> v_photo;
+    v_note := format('unsigned=%s signed=%s (must differ)', v_n2, v_photo);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
+  -- ── 50. flipping is_auto re-points the card ───────────────────────────────
+  -- Leaving is_auto off the trigger's UPDATE list was half the defect: the
+  -- correction would have been recorded and then ignored.
+  v_name := '50. correcting is_auto moves the card to the right identity';
+  begin
+    update public.cards set is_auto = true where sku = 'TST-2026-000030';
+    select identity_id into v_n from public.cards where sku = 'TST-2026-000030';
+    v_ok := v_n = v_photo;
+    v_note := format('now=%s want=%s (the signed identity)', v_n, v_photo);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
+  -- ── 51. relic is its own axis, not a synonym for auto ─────────────────────
+  v_name := '51. relic resolves separately from auto and from plain';
+  begin
+    insert into public.cards (user_id, sku, player, year, set_name, card_number, status, individual_basis, is_relic)
+      values (v_uid, 'TST-2026-000032', 'IdentityCard', 1986, 'Fleer', '57', 'booked', 1.00, true)
+      returning identity_id into v_n2;
+    v_ok := v_n2 is not null and v_n2 <> v_photo;
+    v_note := format('relic=%s auto=%s (must differ)', v_n2, v_photo);
+  exception when others then
+    v_ok := false; v_note := sqlerrm;
+  end;
+  if v_ok then v_pass := v_pass + 1; v_r := v_r || 'PASS  ' || v_name || E'
+';
+  else v_fail := v_fail + 1; v_r := v_r || 'FAIL  ' || v_name || ' — ' || v_note || E'
+'; end if;
+
   -- ── report + rollback in one move: raising undoes every row above ─────────
   raise exception using message = format(
     E'\n════ MONEY-CORE HARNESS REPORT — THIS RED BOX IS EXPECTED ════\n'
-    || '%s of 48 PASSED · %s FAILED'
+    || '%s of 51 PASSED · %s FAILED'
     || E'%s'
     || E'\nAll test data from this run has been ROLLED BACK — nothing persisted.\n'
-    || '(Raising an exception is how the harness undoes itself. 48 PASS = your money core is verified.)',
+    || '(Raising an exception is how the harness undoes itself. 51 PASS = your money core is verified.)',
     v_pass, v_fail, v_r);
 end $$;

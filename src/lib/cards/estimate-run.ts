@@ -52,9 +52,13 @@ export async function runEstimate(
     // point of the identity layer: a card added today inherits every day of
     // market history anyone has collected for it. Falls back to the card's own
     // rows when it's too sparse to fingerprint.
+    // pre_auto_split rows were gathered when the fingerprint could not tell a
+    // signed copy from an unsigned one, so they may be a mixture with no way to
+    // separate them. Excluded rather than blended — an autograph multiplies a
+    // card's value, so pooling the two does not blur a price, it invents one.
     c.identity_id
-      ? db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("identity_id", c.identity_id).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80)
-      : db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("card_id", c.id).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80),
+      ? db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("identity_id", c.identity_id).eq("pre_auto_split", false).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80)
+      : db.from("card_market_sales").select("price, sold_at, grader, grade, platform, title").eq("card_id", c.id).eq("pre_auto_split", false).order("sold_at", { ascending: false }).limit(mode === "all_sales_plus" ? 300 : 80),
   ]);
   const own = summarizeSales([...ownRes.sales, ...compsAsSales(compRows ?? []), ...storedToSales(histRows ?? [])]);
 
