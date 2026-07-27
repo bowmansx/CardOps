@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Camera, Loader2, Search, AlertTriangle, CircleCheck, CircleHelp, Plus } from "lucide-react";
+import { Camera, Loader2, Search, AlertTriangle, CircleCheck, CircleHelp, Plus, ListPlus, Printer, Check } from "lucide-react";
+import { GradingSheet } from "./GradingSheet";
 import { CameraSheet } from "./CameraSheet";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
 import type { MatchQuery } from "@/lib/cards/match";
@@ -50,6 +51,13 @@ export function FindCard() {
   const [note, setNote] = useState<string | null>(null);
   const [q, setQ] = useState<MatchQuery>({});
   const [matches, setMatches] = useState<Match[] | null>(null);
+  // The UPDATE half. Beau: *"i do like the idea of maybe having an option for
+  // 'update' when taking a photo... say i'm sending out 10 cards for
+  // grading"*. Find ten cards one at a time, then act on them ONCE.
+  const [batch, setBatch] = useState<Match[]>([]);
+  const [action, setAction] = useState<string>("graded_out");
+  const [applied, setApplied] = useState<string | null>(null);
+  const [sheet, setSheet] = useState(false);
 
   async function search(query: MatchQuery) {
     setBusy("find"); setErr(null);
@@ -98,6 +106,43 @@ export function FindCard() {
     } finally {
       // Cleared in `finally` so a rejected fetch can never strand the spinner.
       setBusy((b) => (b === "scan" ? null : b));
+    }
+  }
+
+  function addToBatch(m: Match) {
+    setBatch((b) => (b.some((x) => x.id === m.id) ? b : [...b, m]));
+    setApplied(null);
+  }
+
+  /**
+   * One status change for the whole batch, through the audited bulk route.
+   *
+   * Deliberately NOT a new endpoint: /api/cards/bulk already allowlists the
+   * fields, refuses to touch a sold card, and writes the audit row. A second
+   * path to the same write is a second place for those rules to drift out of.
+   */
+  async function applyBatch() {
+    if (!batch.length) return;
+    setBusy("find"); setErr(null); setApplied(null);
+    try {
+      const r = await fetch("/api/cards/bulk", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: batch.map((b) => b.id), patch: { status: action } }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { setErr(d?.error ?? "Couldn't update those cards."); return; }
+      // Say what actually happened, including what did NOT change - a silent
+      // skip on a sold card would read as a completed update.
+      setApplied(
+        d.skipped
+          ? `${d.updated} updated · ${d.skipped} skipped (sold, or not yours to change)`
+          : `${d.updated} card${d.updated === 1 ? "" : "s"} updated.`,
+      );
+      if (d.updated) setBatch([]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't update those cards.");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -186,11 +231,12 @@ export function FindCard() {
         <ul className="space-y-1.5">
           {matches.map((m) => {
             const conf = CONF[m.confidence];
+            const inBatch = batch.some((b) => b.id === m.id);
             return (
-              <li key={m.id}>
+              <li key={m.id} className="flex items-stretch gap-1.5">
                 <Link
                   href={`/cards/${m.id}`}
-                  className="flex items-start gap-2 rounded-xl border border-hairline bg-white p-3 hover:border-flag/50"
+                  className="flex min-w-0 flex-1 items-start gap-2 rounded-xl border border-hairline bg-white p-3 hover:border-flag/50"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
@@ -226,11 +272,85 @@ export function FindCard() {
                   </span>
                   <span className="figures shrink-0 text-sm font-semibold text-ink/70">{money(m.market_value)}</span>
                 </Link>
+                <button
+                  type="button"
+                  onClick={() => addToBatch(m)}
+                  disabled={inBatch}
+                  aria-label={inBatch ? `${m.sku ?? "Card"} is already in the batch` : `Add ${m.sku ?? "card"} to the batch`}
+                  className={"flex w-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border text-[9px] font-semibold " +
+                    (inBatch ? "border-pos/40 bg-pos/10 text-pos" : "border-hairline bg-white text-ink/45")}
+                >
+                  {inBatch ? <Check size={15} /> : <ListPlus size={15} />}
+                  {inBatch ? "added" : "batch"}
+                </button>
               </li>
             );
           })}
         </ul>
       )}
+
+      {applied && (
+        <p className="flex items-center gap-1.5 rounded-lg bg-pos/10 px-2 py-1.5 text-[11px] font-semibold text-pos">
+          <Check size={13} /> {applied}
+        </p>
+      )}
+
+      {/* The batch. Sits above everything because you build it one card at a
+          time and need to see it grow without losing the camera. */}
+      {batch.length > 0 && (
+        <div className="sticky bottom-3 rounded-xl border border-flag/40 bg-white p-3 shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink/50">
+              Batch · {batch.length} card{batch.length === 1 ? "" : "s"}
+            </span>
+            <button onClick={() => { setBatch([]); setApplied(null); }} className="text-[11px] text-ink/45 underline-offset-4 hover:underline">
+              Empty it
+            </button>
+          </div>
+          <ul className="mt-1.5 max-h-24 overflow-y-auto text-[11px] text-ink/60">
+            {batch.map((b, i) => (
+              <li key={b.id} className="flex items-center gap-1.5 truncate">
+                <span className="figures w-4 shrink-0 text-ink/35">{i + 1}</span>
+                <span className="truncate">{[b.year, b.set_name, b.player].filter(Boolean).join(" ") || b.sku}</span>
+                <button
+                  onClick={() => setBatch(batch.filter((x) => x.id !== b.id))}
+                  aria-label={`Remove ${b.sku ?? "card"} from the batch`}
+                  className="ml-auto shrink-0 px-1 text-ink/30 hover:text-neg"
+                >
+                  &times;
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <select
+              value={action}
+              onChange={(e) => setAction(e.target.value)}
+              className="rounded-lg border border-hairline bg-white px-2 py-1.5 text-xs text-ink"
+            >
+              <option value="graded_out">Sent to grader</option>
+              <option value="booked">Back from grader / in inventory</option>
+              <option value="hold">Put on hold</option>
+              <option value="archived">Archive</option>
+            </select>
+            <button
+              onClick={() => void applyBatch()}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg bg-flag px-3 py-1.5 text-xs font-bold text-black disabled:opacity-50"
+            >
+              {busy === "find" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Apply to all
+            </button>
+            <button
+              onClick={() => setSheet(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-1.5 text-xs font-semibold text-ink/70"
+            >
+              <Printer size={13} /> Placement sheet
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sheet && <GradingSheet cards={batch} onClose={() => setSheet(false)} />}
 
       {cam && (
         <CameraSheet
