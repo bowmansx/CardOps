@@ -13,9 +13,11 @@ mistaken for a request to build something.
 
 ---
 
-last_seen_commit: 50857cf
-last_seen_at: 2026-07-25T23:20:00
-last_action: none — vault reviewed, no build requested
+last_seen_commit: a9b84cc
+last_seen_at: 2026-07-27T04:10:00
+last_action: built the photo notes out — template targets, the session menu,
+             FIND and the grading batch. OUTBOX rewritten with three migrations
+             waiting on Beau (20260745, 20260746, 20260747).
 
 ## How the loop uses it
 

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Loader2, Check, AlertTriangle, LayoutGrid } from "lucide-react";
 import { CameraSheet } from "./CameraSheet";
+import { sessionToShots, existingSlots, nextOpen, reorder, type CapturedShot } from "@/lib/cards/session";
+import type { SessionItem } from "./SessionMenu";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
 import { uploadCardPhotos, type PhotoShot } from "@/lib/cards/upload";
 import { recordCardPhotos } from "@/app/cards/intake/actions";
@@ -24,11 +26,12 @@ export function AddPhotos({ cardId, haveRoles }: { cardId: string; haveRoles: st
   const [templates, setTemplates] = useState<PhotoTemplate[]>([]);
   const [chosen, setChosen] = useState<PhotoTemplate | null>(null);
   const [queue, setQueue] = useState<TemplateShot[]>([]);
-  const [taken, setTaken] = useState<PhotoShot[]>([]);
-  // Position in the QUEUE. Not derived from `taken.length`: a shot can add
-  // two entries there (the uncropped frame and the crop), which would make
-  // a 12-shot template finish after six photos.
+  // One slot per queue entry, in lock step with it. NOT a growing list of
+  // uploads: the menu can delete and reorder mid-session, and only a parallel
+  // array keeps "which photo belongs to which shot" answerable afterwards.
+  const [captured, setCaptured] = useState<(CapturedShot | null)[]>([]);
   const [index, setIndex] = useState(0);
+  const [inspect, setInspect] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [donePhotos, setDonePhotos] = useState(0);
@@ -47,13 +50,19 @@ export function AddPhotos({ cardId, haveRoles }: { cardId: string; haveRoles: st
   function start(t: PhotoTemplate, onlyMissing: boolean) {
     const shots = onlyMissing ? missingShots(t, haveRoles) : t.shots;
     if (!shots.length) { setErr(`This card already has every shot in "${t.name}".`); return; }
-    setErr(null); setChosen(t); setQueue(shots); setTaken([]); setIndex(0); setOpen(true);
+    setErr(null); setChosen(t);
+    setQueue(shots); setCaptured(shots.map(() => null)); setIndex(0); setOpen(true);
   }
 
   const current = queue[index] ?? null;
+  const already = existingSlots(queue, haveRoles);
+  const items: SessionItem[] = queue.map((s, i) => ({
+    ...s, taken: captured[i]?.url ?? null, existing: already[i],
+  }));
 
   async function finish(shots: PhotoShot[]) {
     setOpen(false);
+    setChosen(null); setQueue([]); setCaptured([]); setIndex(0);
     if (!shots.length) return;
     setBusy(true); setErr(null);
     try {
@@ -68,13 +77,41 @@ export function AddPhotos({ cardId, haveRoles }: { cardId: string; haveRoles: st
       }
       setDonePhotos(up.photos.length);
       if (problems.length) setErr(`${up.photos.length} of ${shots.length} attached. ${problems.join(" · ")}`);
-      setChosen(null); setQueue([]); setTaken([]); setIndex(0);
       router.refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Couldn't attach the photos.");
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Move to the next slot that still wants a photo; finish when none do. */
+  function advance(caps: (CapturedShot | null)[]) {
+    const next = nextOpen(caps, index);
+    if (next < 0) void finish(sessionToShots(queue, caps));
+    else setIndex(next);
+  }
+
+  function removeAt(i: number) {
+    const q = queue.filter((_, k) => k !== i);
+    const c = captured.filter((_, k) => k !== i);
+    setQueue(q); setCaptured(c);
+    // Deleting every shot is how you abandon a session — nothing was kept, so
+    // nothing uploads.
+    if (!q.length) { setOpen(false); setChosen(null); setIndex(0); return; }
+    // Removing a slot BEFORE the current one shifts it down; removing the
+    // current one lets the next slide into its place.
+    setIndex(Math.min(i < index ? index - 1 : index, q.length - 1));
+  }
+
+  function move(from: number, to: number) {
+    const staying = queue[index];
+    const q = reorder(queue, from, to);
+    setQueue(q); setCaptured(reorder(captured, from, to));
+    // Follow the SHOT, not the slot — reordering the list must not silently
+    // switch which photo you are about to take.
+    const at = q.indexOf(staying);
+    if (at >= 0) setIndex(at);
   }
 
   return (
@@ -137,37 +174,38 @@ export function AddPhotos({ cardId, haveRoles }: { cardId: string; haveRoles: st
 
       {open && chosen && current && (
         <CameraSheet
-          // Remount per shot so the guide and the label track the queue.
-          key={`${chosen.id}-${index}`}
+          // One mount for the whole run. It used to remount per shot, which
+          // tore down and re-acquired the camera between every frame of a
+          // 12-shot template — and would now also throw away the menu.
+          key={chosen.id}
           prefs={prefs}
           title={chosen.name}
           shotLabel={current.label}
           shotStep={shotStep(index, queue.length)}
           shotHint={current.hint}
+          shotTarget={current}
+          session={{
+            items,
+            index,
+            onJump: setIndex,
+            onDelete: removeAt,
+            onReorder: move,
+            onKeep: () => advance(captured),
+            onDone: () => void finish(sessionToShots(queue, captured)),
+            inspect,
+            onInspectChange: setInspect,
+          }}
           onClose={() => {
             // Closing early keeps what was already taken — walking away from
             // shot 9 of 12 must not throw the first eight away.
             setOpen(false);
-            if (taken.length) void finish(taken);
+            void finish(sessionToShots(queue, captured));
           }}
           onCapture={(shot) => {
-            const next: PhotoShot[] = [...taken];
-            let srcIndex: number | undefined;
-            if (shot.original) {
-              srcIndex = next.length;
-              next.push({ dataUrl: shot.original, kind: current.role, variant: "original" });
-            }
-            next.push({
-              dataUrl: shot.url,
-              kind: current.role,
-              variant: shot.original ? "processed" : "original",
-              derivedFromIndex: srcIndex,
-              cropGeometry: shot.original ? { margin_pct: shot.meta.marginPct, deskewed: false } : null,
-              captureMeta: shot.meta,
-            });
-            setTaken(next);
-            setIndex(index + 1);
-            if (index + 1 >= queue.length) void finish(next);
+            const caps = [...captured];
+            caps[index] = shot;
+            setCaptured(caps);
+            advance(caps);
           }}
         />
       )}

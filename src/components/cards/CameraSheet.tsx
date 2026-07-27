@@ -1,12 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, X, Loader2, Images, Check, Wand2 } from "lucide-react";
+import { Camera, X, Loader2, Images, Check, Wand2, PanelLeft, RotateCcw } from "lucide-react";
+import { SessionMenu, type SessionItem } from "./SessionMenu";
+import type { CapturedShot } from "@/lib/cards/session";
 import { downscale } from "@/lib/cards/img";
 import {
   CARD_ASPECT, SLAB_ASPECT, withMargin, sharpness, frameDelta,
-  shouldAutoSnap, pickSharpest,
+  shouldAutoSnap, pickSharpest, type Rect,
 } from "@/lib/cards/camera";
+import { detectCard, releaseScratch, type Detection } from "@/lib/cards/edges";
+import { guideToTarget, type TemplateShot } from "@/lib/cards/templates";
 import { QUALITY_SPECS, PHOTO_PREF_DEFAULTS, type PhotoPrefs } from "@/lib/cards/photo-prefs";
 
 // Card-scanner aspect guides (w/h): raw card 2.5"x3.5", PSA-style slab ~3.32"x5.44".
@@ -18,14 +22,20 @@ type GuideKind = keyof typeof GUIDES;
 const PROBE_W = 96;      // downscaled probe frame, keeps the loop cheap
 const HISTORY = 8;
 
-export type CapturedShot = {
-  /** The framed, margin-preserved card image — what the app shows and scans. */
-  url: string;
-  /** The FULL uncropped frame. Kept so a crop can never be the only record of
-   *  an edge. Null for library picks, which have no camera frame behind them. */
-  original: string | null;
-  meta: { mode: "in_app" | "library"; auto: boolean; sharp: number | null; marginPct: number };
-};
+// Edge detection runs on its own, wider probe covering the WHOLE frame — the
+// card can sit anywhere, and the overlay has to land on it wherever it is.
+// 192px measures ~0.25ms a frame on a laptop; a phone is a few ms, which is a
+// small slice of a 150ms budget.
+const DETECT_W = 192;
+const DETECT_MS = 150;
+// A side needs this much real edge under it before it counts as locked.
+const LIT = 0.55;
+// How far outside the guide to search, so a card overhanging it slightly is
+// still measured whole. Wide enough to forgive framing, tight enough that the
+// table edge stays out.
+const DETECT_MARGIN = 0.12;
+
+export type { CapturedShot } from "@/lib/cards/session";
 
 /**
  * In-app camera via getUserMedia — the reliable way to "take a photo" inside an
@@ -44,6 +54,8 @@ export function CameraSheet({
   shotLabel,
   shotStep,
   shotHint,
+  shotTarget,
+  session,
   onCapture,
   onClose,
   multi = false,
@@ -58,9 +70,32 @@ export function CameraSheet({
   shotLabel?: string;
   /** Optional "2 of 4" progress, for template runs. */
   shotStep?: string;
+  /** The target framing and angle for THIS shot, when the template states
+   *  them. Drives the live "move closer" guidance and the on-target lock. */
+  shotTarget?: Pick<TemplateShot, "targetFill" | "targetTilt" | "tolerance">;
   /** One line of instruction for THIS shot, e.g. "Fill the frame with the
    *  corner". Templates carry these; without one the frame is just a label. */
   shotHint?: string;
+  /**
+   * The whole run, when this camera is working through a template. Passing it
+   * turns the sheet from a WIZARD into a SESSION: a menu you can open mid-shoot
+   * to delete a shot, reorder the run, or jump back and retake one.
+   *
+   * Absent for one-off captures, which stay exactly as they were.
+   */
+  session?: {
+    items: SessionItem[];
+    index: number;
+    onJump: (i: number) => void;
+    onDelete: (i: number) => void;
+    onReorder: (from: number, to: number) => void;
+    /** Keep the shot already taken here and move on without re-shooting. */
+    onKeep: () => void;
+    /** Finish the run now with whatever has been taken. */
+    onDone: () => void;
+    inspect: boolean;
+    onInspectChange: (v: boolean) => void;
+  };
   onCapture: (shot: CapturedShot) => void;
   onClose: () => void;
   multi?: boolean;
@@ -86,10 +121,28 @@ export function CameraSheet({
   const [auto, setAuto] = useState(prefs.auto_snap);
   const [locked, setLocked] = useState(false); // sharp + steady right now
   const probeRef = useRef<HTMLCanvasElement | null>(null);
+  const detectRef = useRef<HTMLCanvasElement | null>(null);
+  // The live edge read. Null means "no card found" and the overlay shows
+  // nothing at all — a wrong outline is worse than no outline.
+  const [det, setDet] = useState<Detection | null>(null);
+  const [detSize, setDetSize] = useState<{ w: number; h: number; src: Rect } | null>(null);
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null);
   const histRef = useRef<{ sharp: number; delta: number }[]>([]);
   const busyRef = useRef(false); // one capture at a time
+  // Read inside the auto-snap interval, which closes over its first render.
+  const guideRef = useRef(true);
   const cooldownRef = useRef(0); // don't re-fire on the same card
+  const [menu, setMenu] = useState(false);
+  // Which slot the user has already looked at, so the inspect overlay shows
+  // once per visit rather than on every render.
+  const [seen, setSeen] = useState<number | null>(null);
+
+  // "Show me a shot I already have before re-taking it." Jumping back to a
+  // taken shot puts the photo on screen first - the point of going back is
+  // usually to LOOK, and pointing the live camera at it answers the wrong
+  // question.
+  const cur = session?.items[session.index] ?? null;
+  const review = !!(session?.inspect && cur?.taken && seen !== session.index);
 
   function stop() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -264,12 +317,102 @@ export function CameraSheet({
     return { sharp: sharpness(gray, w, h), delta };
   }
 
+  /**
+   * Grayscale the GUIDE AREA at detection resolution.
+   *
+   * NOT the whole frame. quadFromLines takes the OUTERMOST edge of each
+   * family, so anything rectangular enclosing the card wins it: a sorting mat,
+   * a tray, a binder page — or, far more commonly, the toploader the card is
+   * sitting in. A toploader's aspect is 0.72 against a card's 0.71, close
+   * enough that the size guess still fires and the HUD prints a confident
+   * wrong distance with all four sides lit. Measured: 3.79 in for the holder
+   * against 4.92 for the card.
+   *
+   * Detecting inside the guide keeps the reading about the object that will
+   * actually be photographed, which is the same rect shoot() crops to. The
+   * margin lets the card's real edge sit inside the search area even when it
+   * overhangs the guide slightly.
+   */
+  function detectProbe(): { gray: Uint8ClampedArray; w: number; h: number; src: Rect } | null {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return null;
+    const g = guideInVideoPixels();
+    const bounds = { w: v.videoWidth, h: v.videoHeight };
+    const src = g ? withMargin({ x: g.x, y: g.y, w: g.w, h: g.h }, DETECT_MARGIN, bounds)
+                  : { x: 0, y: 0, w: bounds.w, h: bounds.h };
+    if (src.w < 8 || src.h < 8) return null;
+    const c = (detectRef.current ??= document.createElement("canvas"));
+    const w = DETECT_W;
+    const h = Math.max(1, Math.round((src.h / src.w) * w));
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(v, src.x, src.y, src.w, src.h, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    const gray = new Uint8ClampedArray(w * h);
+    for (let i = 0, q = 0; i < data.length; i += 4, q++) {
+      gray[q] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+    }
+    return { gray, w, h, src };
+  }
+
+  // Live edge detection. Runs whenever the camera is open — it drives the
+  // lock-on outline and the distance/angle readout, neither of which depend on
+  // auto-snap being on.
+  useEffect(() => {
+    if (!ready || osMode || !guideRect) return;
+    let alive = true;
+    const id = setInterval(() => {
+      if (!alive || busyRef.current) return;
+      const p = detectProbe();
+      if (!p) { setDet(null); return; }
+      // The probe is a CROP, so its own long edge says nothing about the
+      // lens. Scale the real frame's FOV down by how much of the frame this
+      // crop covers, and hand detectCard the equivalent field for these pixels.
+      const v = videoRef.current;
+      const cover = v && v.videoWidth ? Math.max(p.src.w / v.videoWidth, p.src.h / v.videoHeight) : 1;
+      const fov = (2 * Math.atan(Math.tan((65 * Math.PI) / 360) * Math.max(0.05, cover)) * 180) / Math.PI;
+      const d = detectCard(p.gray, p.w, p.h, { fovDegrees: fov });
+      setDet(d);
+      setDetSize({ w: p.w, h: p.h, src: p.src });
+    }, DETECT_MS);
+    return () => { alive = false; clearInterval(id); releaseScratch(); };
+    // detectProbe reads refs and guideRect; re-creating the interval on every
+    // render of it would restart the loop constantly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, osMode, guideRect]);
+
+  // Live aim toward the template's target for this shot. Pure function,
+  // so what the HUD says is testable without a camera.
+  const aim = guideToTarget(shotTarget, { fill: det?.fill ?? null, tilt: det?.tilt ?? null });
+  // No target stated means nothing to wait for, so auto-snap behaves as before.
+  guideRef.current = shotTarget?.targetFill == null && shotTarget?.targetTilt == null ? true : aim.onTarget;
+
+  /**
+   * Detection-probe pixels → coordinates inside the overlay box.
+   * Two hops, because the probe is a CROP of the video: probe → video pixels
+   * via the crop rect, then video pixels → the video's displayed rect.
+   */
+  function toScreen(pt: { x: number; y: number }) {
+    const v = videoRef.current;
+    const box = boxRef.current;
+    if (!v || !box || !detSize || !v.videoWidth) return { x: 0, y: 0 };
+    const vr = v.getBoundingClientRect();
+    const br = box.getBoundingClientRect();
+    const vx = detSize.src.x + (pt.x / detSize.w) * detSize.src.w;
+    const vy = detSize.src.y + (pt.y / detSize.h) * detSize.src.h;
+    return {
+      x: vr.left - br.left + (vx / v.videoWidth) * vr.width,
+      y: vr.top - br.top + (vy / v.videoHeight) * vr.height,
+    };
+  }
+
   // Auto-snap: sample ~8x/sec, fire once the frame has been sharp AND still for
   // several consecutive samples. Consecutive matters — a single sharp frame
   // happens while sweeping the phone across a table and would fire on whatever
   // was underneath.
   useEffect(() => {
-    if (!auto || !ready) return;
+    if (!auto || !ready || menu || review) return;
     let alive = true;
     const id = setInterval(() => {
       if (!alive || busyRef.current || Date.now() < cooldownRef.current) return;
@@ -278,13 +421,16 @@ export function CameraSheet({
       const hist = histRef.current;
       hist.push(p);
       if (hist.length > HISTORY) hist.shift();
-      const go = shouldAutoSnap(hist);
+      // Sharp and still is not enough when the template asked for a specific
+      // framing — firing early gets a perfectly exposed photo of the wrong
+      // distance, which is exactly what a template exists to prevent.
+      const go = shouldAutoSnap(hist) && guideRef.current;
       setLocked(go);
       if (go) void burstShoot();
     }, 120);
     return () => { alive = false; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, ready, guide, guideRect]);
+  }, [auto, ready, guide, guideRect, menu, review]);
 
   async function fromFile(file: File) {
     const url = await downscale(file);
@@ -297,8 +443,18 @@ export function CameraSheet({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/95" style={{ colorScheme: "dark" }}>
       <div className="flex items-center justify-between px-4 py-3 text-white">
-        <span className="text-sm font-semibold">
-          {title}
+        <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+          {session && (
+            <button
+              onClick={() => setMenu(true)}
+              aria-label="Open session menu"
+              className="flex shrink-0 items-center gap-1 rounded-lg border border-white/25 px-2 py-1 text-[11px] font-semibold text-white/70"
+            >
+              <PanelLeft size={13} />
+              {session.items.filter((i) => i.taken || i.existing).length}/{session.items.length}
+            </button>
+          )}
+          <span className="truncate">{title}</span>
           {multi && shots > 0 && <span className="figures ml-2 rounded bg-white/15 px-1.5 py-0.5 text-xs">{shots}</span>}
         </span>
         <span className="flex items-center gap-2">
@@ -327,6 +483,76 @@ export function CameraSheet({
 
       <div ref={boxRef} className="relative flex flex-1 items-center justify-center overflow-hidden">
         <video ref={videoRef} playsInline muted onLoadedMetadata={layoutGuide} className="max-h-full max-w-full" />
+        {/* THE LOCK-ON. Each side lights thin yellow the moment there is real
+            edge under it, so three lit and one dark tells you exactly which
+            way to move your thumb. Nothing draws unless a card was actually
+            found — a wrong outline is worse than no outline. */}
+        {det && detSize && ready && (
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" style={{ overflow: "visible" }}>
+            {det.edges.map((seg, i) => {
+              const a = toScreen(seg[0]);
+              const b = toScreen(seg[1]);
+              const lit = det.support[i] >= LIT;
+              return (
+                <line
+                  key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                  stroke={lit ? "#ffd400" : "#ffffff"}
+                  strokeOpacity={lit ? 0.95 : 0.22}
+                  strokeWidth={lit ? 2 : 1}
+                  strokeDasharray={lit ? undefined : "4 5"}
+                  strokeLinecap="round"
+                />
+              );
+            })}
+          </svg>
+        )}
+
+        {/* Distance and angle. Each reads a dash rather than a stale number
+            when the geometry can't support it — a confident wrong distance on
+            grading evidence is worse than an empty one. */}
+        {ready && !osMode && (
+          <span className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
+            {/* ONE instruction at a time. "Move closer and tilt back and hold
+                still" is a HUD nobody acts on; distance comes first because
+                the angle barely matters until the card is the right size. */}
+            {aim.message && (
+              <span className="rounded-full bg-[#c9a227] px-3 py-1 text-[12px] font-bold text-black">
+                {aim.message}
+              </span>
+            )}
+            {aim.onTarget && (
+              <span className="rounded-full bg-emerald-500 px-3 py-1 text-[12px] font-bold text-black">
+                On target
+              </span>
+            )}
+            <span className="flex items-center gap-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold tabular-nums text-white/85">
+              <span className={aim.fill === "ok" ? "text-emerald-300" : aim.fill === "none" ? "" : "text-[#ffd400]"}>
+                {det?.inches != null ? `${det.inches.toFixed(1)} in` : "— in"}
+                {det?.fill != null && shotTarget?.targetFill != null && (
+                  <span className="ml-1 font-normal text-white/45">
+                    {Math.round(det.fill * 100)}/{Math.round(shotTarget.targetFill * 100)}%
+                  </span>
+                )}
+              </span>
+              <span className="text-white/25">|</span>
+              <span className={aim.tilt === "ok" ? "text-emerald-300" : aim.tilt === "none" ? "" : "text-[#ffd400]"}>
+                {det?.tilt != null ? `${det.tilt.toFixed(0)}°` : "—°"}
+                {shotTarget?.targetTilt != null && (
+                  <span className="ml-1 font-normal text-white/45">/ {shotTarget.targetTilt}°</span>
+                )}
+              </span>
+              {det && (
+                <>
+                  <span className="text-white/25">|</span>
+                  <span className={det.support.filter((v) => v >= LIT).length === 4 ? "text-[#ffd400]" : "text-white/55"}>
+                    {det.support.filter((v) => v >= LIT).length}/4
+                  </span>
+                </>
+              )}
+            </span>
+          </span>
+        )}
+
         {guideRect && ready && (
           <>
             {/* Turns green the moment the frame is sharp and steady, so you can
@@ -380,6 +606,45 @@ export function CameraSheet({
         {err && <p className="absolute inset-x-8 top-1/2 -translate-y-1/2 text-center text-sm text-white/80">{err}</p>}
       </div>
 
+      {/* Inspect what you already have. Two ways out and both explicit - no
+          dead end, and no silent overwrite of a shot you were only checking. */}
+      {review && cur?.taken && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-black/95 px-6 py-4">
+          <p className="text-center text-[11px] font-semibold uppercase tracking-wider text-white/50">
+            Already taken - {cur.label}
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */}
+          <img src={cur.taken} alt={cur.label} className="mx-auto my-3 min-h-0 flex-1 rounded-lg object-contain" />
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => setSeen(session?.index ?? null)}
+              className="flex items-center gap-1.5 rounded-xl border border-white/30 px-4 py-2 text-sm font-semibold text-white"
+            >
+              <RotateCcw size={15} /> Retake
+            </button>
+            <button
+              onClick={() => { setSeen(null); session?.onKeep(); }}
+              className="flex items-center gap-1.5 rounded-xl bg-[#c9a227] px-4 py-2 text-sm font-bold text-black"
+            >
+              <Check size={16} /> Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {menu && session && (
+        <SessionMenu
+          items={session.items}
+          index={session.index}
+          onClose={() => setMenu(false)}
+          onJump={(i) => { setMenu(false); setSeen(null); session.onJump(i); }}
+          onDelete={session.onDelete}
+          onReorder={session.onReorder}
+          inspect={session.inspect}
+          onInspectChange={session.onInspectChange}
+        />
+      )}
+
       <input
         ref={fileRef}
         type="file"
@@ -416,6 +681,17 @@ export function CameraSheet({
             className="flex items-center gap-1.5 justify-self-end rounded-xl bg-[#c9a227] px-4 py-2 text-sm font-bold text-black active:scale-95"
           >
             <Check size={16} /> Done{shots > 0 ? ` (${shots})` : ""}
+          </button>
+        ) : session ? (
+          // Reordering and retaking mean a run no longer ends by simply
+          // reaching the last slot - there has to be a way to say "that is
+          // enough" that is not closing the camera and hoping.
+          <button
+            onClick={() => { stop(); session.onDone(); }}
+            disabled={!session.items.some((i) => i.taken)}
+            className="flex items-center gap-1.5 justify-self-end rounded-xl bg-[#c9a227] px-4 py-2 text-sm font-bold text-black active:scale-95 disabled:opacity-40"
+          >
+            <Check size={16} /> Done ({session.items.filter((i) => i.taken).length})
           </button>
         ) : (
           <span />

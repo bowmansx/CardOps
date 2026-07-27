@@ -144,6 +144,7 @@ export type UploadedPhotoRef = {
   path: string; bytes: number; kind: string;
   variant: "original" | "processed";
   shotIndex: number;
+  position?: number;
   derivedFromIndex?: number;
   cropGeometry?: unknown; captureMeta?: unknown;
 };
@@ -216,6 +217,11 @@ export async function recordCardPhotos(
           derived_from: derivedFrom,
           crop_geometry: geom,
           capture_meta: p.captureMeta ?? null,
+          // The session's order, so a reordered run reads back the way it was
+          // shot. Falls back to the payload index for callers that predate
+          // sessions (Speed Book, batch intake) - still stable, just not
+          // rearrangeable.
+          position: p.position ?? i,
         })
         .select("id")
         .single();

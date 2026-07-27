@@ -25,6 +25,9 @@ export type PhotoShot = {
   derivedFromIndex?: number;
   cropGeometry?: unknown;
   captureMeta?: unknown;
+  /** Which slot of the capture session this came from. A crop and the frame
+   *  it was cut from share one - they are a single shot. */
+  position?: number;
 };
 
 export type UploadedPhoto = {
@@ -37,6 +40,7 @@ export type UploadedPhoto = {
   derivedFromIndex?: number;
   cropGeometry?: unknown;
   captureMeta?: unknown;
+  position?: number;
 };
 
 /** Turn a data URL into bytes without a round trip through the network. */
@@ -97,6 +101,7 @@ export async function uploadCardPhotos(
       derivedFromIndex: s.derivedFromIndex,
       cropGeometry: s.cropGeometry,
       captureMeta: s.captureMeta,
+      position: s.position,
     });
   }
   return { photos, failures };

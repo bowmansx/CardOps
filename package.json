@@ -15,7 +15,8 @@
     "check:types": "tsc --noEmit",
     "check:test": "vitest run",
     "check:forbidden": "node scripts/check-forbidden.mjs",
-    "check:lint": "eslint src app --max-warnings 0"
+    "check:lint": "eslint src app --max-warnings 0",
+    "backup": "node scripts/backup.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.101.0",
