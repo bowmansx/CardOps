@@ -113,10 +113,13 @@ export function CameraSheet({
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const osCamRef = useRef<HTMLInputElement>(null);
-  // Has the user asked for the camera yet? Until they have, nothing calls
-  // getUserMedia: no sensor, no permission prompt, no detection loop grinding
-  // against a lap or a ceiling. On a twelve-shot template the old behaviour
-  // did all three twelve times.
+  // Has the user asked for the SCAN yet? The camera and the guide come up
+  // straight away — you cannot frame a card against a black screen — but
+  // detection, the readout, auto-snap and the light sampling all wait for this.
+  // Framing is what you do first and it needs the picture; scanning is what you
+  // commit to, and it should not begin while the phone is still swinging up
+  // from your side.
+  //
   // DERIVED, not synced. usePhotoPrefs returns the defaults first and the saved
   // values a moment later, so an effect mirroring the pref into state both
   // trips react-hooks/set-state-in-effect and can un-start a running camera.
@@ -194,7 +197,7 @@ export function CameraSheet({
   }, [guide]);
 
   useEffect(() => {
-    if (osMode || !started) return;
+    if (osMode) return;
     let cancelled = false;
     (async () => {
       try {
@@ -234,7 +237,7 @@ export function CameraSheet({
       cancelled = true;
       stop();
     };
-  }, [osMode, started]);
+  }, [osMode]);
 
   useEffect(() => {
     layoutGuide();
@@ -428,7 +431,7 @@ export function CameraSheet({
   // lock-on outline and the distance/angle readout, neither of which depend on
   // auto-snap being on.
   useEffect(() => {
-    if (!ready || osMode || !guideRect) return;
+    if (!ready || osMode || !guideRect || !started) return;
     let alive = true;
     const id = setInterval(() => {
       if (!alive || busyRef.current) return;
@@ -470,7 +473,7 @@ export function CameraSheet({
     // detectProbe reads refs and guideRect; re-creating the interval on every
     // render of it would restart the loop constantly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, osMode, guideRect]);
+  }, [ready, osMode, guideRect, started]);
 
   // How many sides are actually locked. Read in three places below, and the
   // single most important thing on the screen: it is the answer to "is it even
@@ -512,7 +515,7 @@ export function CameraSheet({
   // happens while sweeping the phone across a table and would fire on whatever
   // was underneath.
   useEffect(() => {
-    if (!auto || !ready || menu || review) return;
+    if (!auto || !ready || menu || review || !started) return;
     let alive = true;
     const id = setInterval(() => {
       if (!alive || busyRef.current || Date.now() < cooldownRef.current) return;
@@ -533,7 +536,7 @@ export function CameraSheet({
     }, 120);
     return () => { alive = false; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, ready, guide, guideRect, menu, review]);
+  }, [auto, ready, guide, guideRect, menu, review, started]);
 
   async function fromFile(file: File) {
     const url = await downscale(file);
@@ -615,7 +618,7 @@ export function CameraSheet({
         {/* Distance and angle. Each reads a dash rather than a stale number
             when the geometry can't support it — a confident wrong distance on
             grading evidence is worse than an empty one. */}
-        {ready && !osMode && (
+        {ready && !osMode && started && (
           /*
            * THE READOUT, SIZED FOR A PHONE AT ARM'S LENGTH.
            *
@@ -780,7 +783,7 @@ export function CameraSheet({
             {/* Sits just BELOW the guide, not at the bottom of the screen —
                 down there it stacked under the readout panel, which is how
                 three unreadable black boxes ended up on top of each other. */}
-            {auto && (
+            {auto && started && (
               <span
                 className={"pointer-events-none absolute -translate-x-1/2 rounded-xl px-4 py-1.5 text-[14px] font-bold shadow-lg " +
                   (locked ? "bg-emerald-400 text-black" : "bg-black/80 text-white")}
@@ -803,44 +806,40 @@ export function CameraSheet({
           </div>
         )}
         {/*
-          * START SCAN. Beau asked for it, and it earns its place twice: the
-          * camera is not taken until it is wanted, and this screen is legible
-          * BEFORE any of the live overlay exists - so "I can't read the text"
-          * has somewhere to be answered that does not depend on a video
-          * stream, a detection result or an overlay position.
+          * START SCAN — sitting in the viewfinder, exactly where the readout
+          * will appear once tapped.
+          *
+          * Beau: "make the start scan button be at the bottom of the regular
+          * scanning overlay.... so you can see your camera space and position
+          * your camera and item into position... then you hit start scan."
+          *
+          * So the camera and the guide come up immediately and you frame the
+          * card against them; what waits is the SCAN — detection, the readout,
+          * auto-snap and the light sampling. Framing is the thing you do
+          * first, and it needs the picture; scanning is the thing you commit
+          * to, and it should not begin while the phone is still swinging up
+          * from your side.
+          *
+          * Deliberately in the same position and width as the readout panel.
+          * Tap it and the numbers take its place, so nothing jumps — and if
+          * this button is readable while the readout is not, the difference is
+          * the content, not the position.
           */}
-        {!started && !osMode && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-black px-8 text-center">
-            <Camera size={44} className="text-[#e8b923]" />
-            {shotLabel && (
-              <span className="rounded-lg bg-[#e8b923] px-4 py-1.5 text-xl font-black uppercase tracking-widest text-black">
-                {shotLabel}
-              </span>
-            )}
-            {shotHint && <p className="text-[15px] font-semibold leading-snug text-white">{shotHint}</p>}
-            {shotStep && <p className="text-[13px] font-bold text-white/70">{shotStep}</p>}
-
+        {ready && !osMode && !started && (
+          <div className="absolute bottom-3 left-1/2 flex w-[92vw] max-w-md -translate-x-1/2 flex-col items-center gap-2">
             <button
               onClick={() => setManualStart(true)}
-              className="rounded-2xl bg-[#e8b923] px-8 py-4 text-lg font-black uppercase tracking-wide text-black active:scale-95"
+              className="w-full rounded-2xl bg-[#e8b923] py-4 text-lg font-black uppercase tracking-wide text-black shadow-lg active:scale-95"
             >
               Start scan
             </button>
-
-            <p className="max-w-xs text-[13px] leading-snug text-white/60">
-              Nothing opens the camera until you tap. Turn this off in
-              Settings &rarr; Photos to go straight to the viewfinder.
-            </p>
-
-            {/* If THIS is readable and the live readout is not, the problem is
-                the overlay, not the type - which is a different bug. */}
-            <p className="text-[12px] font-semibold tabular-nums text-white/40">
-              build {process.env.NEXT_PUBLIC_BUILD ?? "dev"}
-            </p>
+            <span className="rounded-lg bg-black/80 px-3 py-1.5 text-center text-[12px] font-semibold leading-snug text-white/80">
+              Line the card up in the frame first · build {process.env.NEXT_PUBLIC_BUILD ?? "dev"}
+            </span>
           </div>
         )}
 
-        {started && !ready && !err && !osMode && (
+        {!ready && !err && !osMode && (
           <div className="absolute inset-0 flex items-center justify-center text-white/70">
             <Loader2 className="animate-spin" size={28} />
           </div>
@@ -911,7 +910,7 @@ export function CameraSheet({
         </button>
         <button
           onClick={() => (osMode ? osCamRef.current?.click() : shoot(false))}
-          disabled={!osMode && (!started || !ready)}
+          disabled={!ready && !osMode}
           aria-label="Take photo"
           className="h-16 w-16 justify-self-center rounded-full border-4 border-white bg-white/25 transition active:scale-95 disabled:opacity-40"
         >

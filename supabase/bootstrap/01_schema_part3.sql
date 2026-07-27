@@ -2310,29 +2310,34 @@ create index if not exists card_photos_card_position_idx
 
 -- ═══════════ 20260748000000_scan_on_open.sql ═══════════
 -- ══════════════════════════════════════════════════════════════════════════
--- ASK BEFORE TAKING THE CAMERA (2026-07-27)
+-- FRAME FIRST, THEN SCAN (2026-07-27)
 --
 -- Beau: "i would like for there to be a 'start scan' button before immediately
 --        jumping into it when loading into the camera.... this is a setting
 --        that can be toggled on/off."
+--        "make the start scan button be at the bottom of the regular scanning
+--         overlay.... so you can see your camera space and position your camera
+--         and item into position... then you hit start scan at the bottom"
 --
--- Opening a camera surface currently calls getUserMedia immediately: the
--- sensor spins up, the permission prompt fires on a first run, and the
--- detection loop starts running against whatever the lens happens to be
--- pointed at - usually a lap or a ceiling - before the user has decided they
--- are ready. On a twelve-shot template that happens twelve times.
+-- The camera and the guide frame come up immediately — you cannot line a card
+-- up against a black screen. What waits is the SCAN: edge detection, the
+-- distance/angle readout, auto-snap, and the light sampling. Those all used to
+-- begin the instant the sheet opened, which meant they spent their first
+-- seconds measuring a lap or a ceiling while the phone was still on its way to
+-- the card, and on a twelve-shot template that happened twelve times.
 --
--- DEFAULT FALSE, meaning the start screen IS shown. That is the behaviour
--- asked for, and it is also the better default on its own merits: nothing
--- reaches for a camera until someone asks it to. Setting it true restores the
--- old straight-to-viewfinder behaviour for anyone who prefers the speed.
+-- DEFAULT FALSE, meaning the Start scan button IS shown. That is the behaviour
+-- asked for, and it is the better default on its own: framing is what a person
+-- does first, and scanning is a thing they should commit to rather than have
+-- begin around them. Setting it true starts the scan the moment the viewfinder
+-- is live, for anyone who prefers the speed.
 --
 -- Sits on card_user_prefs with the rest of the photo settings for the reason
--- 20260741 gives - one row per user, own-row RLS, one upsert path.
+-- 20260741 gives — one row per user, own-row RLS, one upsert path.
 -- ══════════════════════════════════════════════════════════════════════════
 
 alter table public.card_user_prefs
   add column if not exists scan_on_open boolean not null default false;
 
 comment on column public.card_user_prefs.scan_on_open is
-  'When true the camera opens straight into the live viewfinder. When false (the default) it shows a Start scan screen first, and no getUserMedia call is made until the user taps it.';
+  'When true, edge detection and auto-snap begin as soon as the viewfinder is live. When false (the default) the camera still opens for framing, but scanning waits for the Start scan button.';
