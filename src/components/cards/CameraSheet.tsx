@@ -467,6 +467,10 @@ export function CameraSheet({
   // seeing the card", which is what someone is asking when they wave a phone
   // around and nothing appears to happen.
   const litCount = det ? det.support.filter((v) => v >= LIT).length : 0;
+  // Is the view actually changing? The light reading is only worth anything if
+  // the ANGLE moved - a bar that fills while the phone rests on the table
+  // proves nothing and would earn a confident verdict off no evidence.
+  const [moving, setMoving] = useState(false);
 
   // Live aim toward the template's target for this shot. Pure function,
   // so what the HUD says is testable without a camera.
@@ -506,6 +510,9 @@ export function CameraSheet({
       if (!p) return;
       const hist = histRef.current;
       hist.push(p);
+      // frameDelta is already computed here for auto-snap; the threshold is
+      // deliberately well above the noise floor of a hand-held-but-static shot.
+      setMoving(p.delta > 6);
       if (hist.length > HISTORY) hist.shift();
       // Sharp and still is not enough when the template asked for a specific
       // framing — firing early gets a perfectly exposed photo of the wrong
@@ -627,15 +634,27 @@ export function CameraSheet({
               </span>
             )}
 
-            <span className="flex w-full items-stretch justify-around rounded-2xl bg-black/80 py-2 shadow-lg">
+            {/* STATE, IN WORDS, ALWAYS. An empty panel of dashes does not
+                distinguish "looking for the card" from "this is broken", and
+                someone waving a phone around deserves to know which. */}
+            <span className={"w-full rounded-t-2xl px-3 py-1.5 text-center text-[13px] font-bold uppercase tracking-wider " +
+              (!det ? "bg-white/15 text-white"
+                : litCount === 4 ? "bg-emerald-400 text-black"
+                : "bg-[#e8b923] text-black")}>
+              {!det ? "Looking for the card…"
+                : litCount === 4 ? "Card locked"
+                : `Found ${litCount} of 4 edges`}
+            </span>
+
+            <span className="-mt-2 flex w-full items-stretch justify-around rounded-b-2xl bg-black/85 py-2 shadow-lg">
               {/* EDGES FIRST. "Is it even seeing the card" is the question
                   being asked when someone waves a phone around and nothing
                   seems to happen, and it was buried at the end of the row in
                   the smallest colour on screen. */}
               <span className="flex flex-1 flex-col items-center">
                 <span className={"text-[26px] font-black leading-none tabular-nums " +
-                  (!det ? "text-white/35" : litCount === 4 ? "text-emerald-400" : "text-[#ffd400]")}>
-                  {det ? `${litCount}/4` : "\u2014"}
+                  (!det ? "text-white/70" : litCount === 4 ? "text-emerald-400" : "text-[#ffd400]")}>
+                  {det ? `${litCount}/4` : "—"}
                 </span>
                 <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">Edges</span>
               </span>
@@ -644,10 +663,10 @@ export function CameraSheet({
 
               <span className="flex flex-1 flex-col items-center">
                 <span className={"text-[26px] font-black leading-none tabular-nums " +
-                  (det?.inches == null ? "text-white/35"
+                  (det?.inches == null ? "text-white/70"
                     : aim.fill === "ok" ? "text-emerald-400"
                     : aim.fill === "none" ? "text-white" : "text-[#ffd400]")}>
-                  {det?.inches != null ? det.inches.toFixed(1) : "\u2014"}
+                  {det?.inches != null ? det.inches.toFixed(1) : "—"}
                 </span>
                 <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">
                   Inches
@@ -660,10 +679,10 @@ export function CameraSheet({
 
               <span className="flex flex-1 flex-col items-center">
                 <span className={"text-[26px] font-black leading-none tabular-nums " +
-                  (det?.tilt == null ? "text-white/35"
+                  (det?.tilt == null ? "text-white/70"
                     : aim.tilt === "ok" ? "text-emerald-400"
                     : aim.tilt === "none" ? "text-white" : "text-[#ffd400]")}>
-                  {det?.tilt != null ? `${det.tilt.toFixed(0)}\u00b0` : "\u2014"}
+                  {det?.tilt != null ? `${det.tilt.toFixed(0)}\u00b0` : "—"}
                 </span>
                 <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">
                   Angle{shotTarget?.targetTilt != null && ` / ${shotTarget.targetTilt}\u00b0`}
@@ -674,6 +693,30 @@ export function CameraSheet({
             {/* The verdict on the LIGHT, not on the photo. Shown only when
                 there is real glare and enough samples to have earned an
                 opinion - see readGlare, which returns "unknown" freely. */}
+            {/* Collecting. Beau: "i have no idea if i'm getting the app the
+                info it needs as i move around" - and he was right, there was
+                nothing on screen until a verdict existed. `moving` is the
+                honest half: the reading only means something if the ANGLE
+                changed, so a still phone is told to move rather than left to
+                fill a bar that proves nothing. */}
+            {glare && glare.verdict === "unknown" && glare.n > 0 && (
+              <span className="w-full rounded-xl bg-black/85 px-3 py-2 shadow-lg">
+                <span className="flex items-center justify-between text-[12px] font-bold uppercase tracking-wider text-white">
+                  <span>Reading your light</span>
+                  <span className="tabular-nums text-white/70">{Math.min(glare.n, 8)}/8</span>
+                </span>
+                <span className="mt-1.5 block h-2 w-full overflow-hidden rounded-full bg-white/20">
+                  <span
+                    className="block h-full rounded-full bg-[#e8b923] transition-[width] duration-200"
+                    style={{ width: `${Math.min(100, (glare.n / 8) * 100)}%` }}
+                  />
+                </span>
+                <span className="mt-1.5 block text-center text-[12px] font-semibold text-white/80">
+                  {moving ? "Good — keep moving around the card" : "Move the phone around the card"}
+                </span>
+              </span>
+            )}
+
             {glare && glareAdvice(glare) && (
               <span className={"w-full rounded-xl px-3 py-2 text-center text-[13px] font-semibold leading-snug shadow-lg " +
                 (glare.verdict === "fixed" ? "bg-amber-400 text-black" : "bg-black/80 text-white")}>
