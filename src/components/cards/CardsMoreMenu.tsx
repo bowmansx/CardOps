@@ -21,6 +21,7 @@ export function CardsMoreMenu({ isOwner }: { isOwner: boolean }) {
   }, [open]);
 
   const items: [string, string][] = [
+    ["Find", "/cards/find"],
     ["Import", "/cards/import"],
     ["Export", "/cards/export"],
     ["Lots", "/cards/lots"],

@@ -29,7 +29,15 @@ export default async function IntakePage({
             <h1 className="text-2xl font-bold tracking-tight">Intake</h1>
             <div className="mt-1 h-[3px] w-14 bg-flag" />
           </div>
-          <Link href="/cards" className="text-xs text-ink/50 underline-offset-4 hover:text-ink hover:underline">← Cards</Link>
+          <span className="flex items-center gap-3">
+            {/* Already own it? Intake creates a row; FIND goes to the one you
+                have. Offered here because this is the screen you are on when
+                you are about to photograph a card. */}
+            <Link href="/cards/find" className="text-xs font-semibold text-flag underline-offset-4 hover:underline">
+              Already own it?
+            </Link>
+            <Link href="/cards" className="text-xs text-ink/50 underline-offset-4 hover:text-ink hover:underline">← Cards</Link>
+          </span>
         </header>
 
         <div className="mt-3 flex gap-2">
