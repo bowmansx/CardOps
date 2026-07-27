@@ -462,6 +462,12 @@ export function CameraSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, osMode, guideRect]);
 
+  // How many sides are actually locked. Read in three places below, and the
+  // single most important thing on the screen: it is the answer to "is it even
+  // seeing the card", which is what someone is asking when they wave a phone
+  // around and nothing appears to happen.
+  const litCount = det ? det.support.filter((v) => v >= LIT).length : 0;
+
   // Live aim toward the template's target for this shot. Pure function,
   // so what the HUD says is testable without a camera.
   const aim = guideToTarget(shotTarget, { fill: det?.fill ?? null, tilt: det?.tilt ?? null });
@@ -542,15 +548,15 @@ export function CameraSheet({
             onClick={() => { const next = !auto; setAuto(next); if (!next) { setLocked(false); histRef.current = []; } }}
             aria-pressed={auto}
             title="Snap automatically once the card is sharp and still"
-            className={"flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold " +
-              (auto ? "border-[#c9a227] bg-[#c9a227]/25 text-white" : "border-white/25 text-white/50")}
+            className={"flex items-center gap-1 rounded-lg border px-3 py-1.5 text-[13px] font-bold " +
+              (auto ? "border-[#e8b923] bg-[#e8b923]/30 text-white" : "border-white/30 text-white/70")}
           >
             <Wand2 size={13} /> Auto
           </button>}
-          {!osMode && <span className="flex overflow-hidden rounded-lg border border-white/25 text-[11px] font-semibold">
+          {!osMode && <span className="flex overflow-hidden rounded-lg border border-white/30 text-[13px] font-bold">
             {(["raw", "slab"] as const).map((g) => (
               <button key={g} onClick={() => setGuide(g)}
-                className={"px-2.5 py-1 " + (guide === g ? "bg-white/25 text-white" : "text-white/50")}>
+                className={"px-3 py-1.5 " + (guide === g ? "bg-white/30 text-white" : "text-white/60")}>
                 {g === "raw" ? "Card" : "Slab"}
               </button>
             ))}
@@ -577,9 +583,11 @@ export function CameraSheet({
                 <line
                   key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
                   stroke={lit ? "#ffd400" : "#ffffff"}
-                  strokeOpacity={lit ? 0.95 : 0.22}
-                  strokeWidth={lit ? 2 : 1}
-                  strokeDasharray={lit ? undefined : "4 5"}
+                  strokeOpacity={lit ? 1 : 0.35}
+                  // 2px was a hairline on a 500ppi phone. The whole point of
+                  // this overlay is being seen at arm's length.
+                  strokeWidth={lit ? 4 : 2}
+                  strokeDasharray={lit ? undefined : "5 6"}
                   strokeLinecap="round"
                 />
               );
@@ -591,67 +599,97 @@ export function CameraSheet({
             when the geometry can't support it — a confident wrong distance on
             grading evidence is worse than an empty one. */}
         {ready && !osMode && (
-          <span className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
+          /*
+           * THE READOUT, SIZED FOR A PHONE AT ARM'S LENGTH.
+           *
+           * This first shipped at 10-12px in white/45 on black/45, which is
+           * legible on a laptop 50cm away and is three grey smudges on a
+           * phone held over a card in daylight - Beau's words were "i cannot
+           * read it at all". Every number here is glanced at WHILE holding
+           * something in the other hand, which is the opposite of the
+           * conditions it was designed under.
+           *
+           * So: full-opacity white on solid black, one panel instead of four
+           * stacked boxes, and the numbers at a size that survives sunlight.
+           */
+          <span className="pointer-events-none absolute bottom-3 left-1/2 flex w-[92vw] max-w-md -translate-x-1/2 flex-col items-center gap-2">
             {/* ONE instruction at a time. "Move closer and tilt back and hold
                 still" is a HUD nobody acts on; distance comes first because
                 the angle barely matters until the card is the right size. */}
             {aim.message && (
-              <span className="rounded-full bg-[#c9a227] px-3 py-1 text-[12px] font-bold text-black">
+              <span className="rounded-xl bg-[#e8b923] px-5 py-2 text-[17px] font-black uppercase tracking-wide text-black shadow-lg">
                 {aim.message}
               </span>
             )}
             {aim.onTarget && (
-              <span className="rounded-full bg-emerald-500 px-3 py-1 text-[12px] font-bold text-black">
+              <span className="rounded-xl bg-emerald-400 px-5 py-2 text-[17px] font-black uppercase tracking-wide text-black shadow-lg">
                 On target
               </span>
             )}
-            <span className="flex items-center gap-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold tabular-nums text-white/85">
-              <span className={aim.fill === "ok" ? "text-emerald-300" : aim.fill === "none" ? "" : "text-[#ffd400]"}>
-                {det?.inches != null ? `${det.inches.toFixed(1)} in` : "— in"}
-                {det?.fill != null && shotTarget?.targetFill != null && (
-                  <span className="ml-1 font-normal text-white/45">
-                    {Math.round(det.fill * 100)}/{Math.round(shotTarget.targetFill * 100)}%
-                  </span>
-                )}
+
+            <span className="flex w-full items-stretch justify-around rounded-2xl bg-black/80 py-2 shadow-lg">
+              {/* EDGES FIRST. "Is it even seeing the card" is the question
+                  being asked when someone waves a phone around and nothing
+                  seems to happen, and it was buried at the end of the row in
+                  the smallest colour on screen. */}
+              <span className="flex flex-1 flex-col items-center">
+                <span className={"text-[26px] font-black leading-none tabular-nums " +
+                  (!det ? "text-white/35" : litCount === 4 ? "text-emerald-400" : "text-[#ffd400]")}>
+                  {det ? `${litCount}/4` : "\u2014"}
+                </span>
+                <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">Edges</span>
               </span>
-              <span className="text-white/25">|</span>
-              <span className={aim.tilt === "ok" ? "text-emerald-300" : aim.tilt === "none" ? "" : "text-[#ffd400]"}>
-                {det?.tilt != null ? `${det.tilt.toFixed(0)}°` : "—°"}
-                {shotTarget?.targetTilt != null && (
-                  <span className="ml-1 font-normal text-white/45">/ {shotTarget.targetTilt}°</span>
-                )}
+
+              <span className="w-px shrink-0 bg-white/15" />
+
+              <span className="flex flex-1 flex-col items-center">
+                <span className={"text-[26px] font-black leading-none tabular-nums " +
+                  (det?.inches == null ? "text-white/35"
+                    : aim.fill === "ok" ? "text-emerald-400"
+                    : aim.fill === "none" ? "text-white" : "text-[#ffd400]")}>
+                  {det?.inches != null ? det.inches.toFixed(1) : "\u2014"}
+                </span>
+                <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">
+                  Inches
+                  {det?.fill != null && shotTarget?.targetFill != null &&
+                    ` ${Math.round(det.fill * 100)}/${Math.round(shotTarget.targetFill * 100)}%`}
+                </span>
               </span>
-              {det && (
-                <>
-                  <span className="text-white/25">|</span>
-                  <span className={det.support.filter((v) => v >= LIT).length === 4 ? "text-[#ffd400]" : "text-white/55"}>
-                    {det.support.filter((v) => v >= LIT).length}/4
-                  </span>
-                </>
-              )}
+
+              <span className="w-px shrink-0 bg-white/15" />
+
+              <span className="flex flex-1 flex-col items-center">
+                <span className={"text-[26px] font-black leading-none tabular-nums " +
+                  (det?.tilt == null ? "text-white/35"
+                    : aim.tilt === "ok" ? "text-emerald-400"
+                    : aim.tilt === "none" ? "text-white" : "text-[#ffd400]")}>
+                  {det?.tilt != null ? `${det.tilt.toFixed(0)}\u00b0` : "\u2014"}
+                </span>
+                <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">
+                  Angle{shotTarget?.targetTilt != null && ` / ${shotTarget.targetTilt}\u00b0`}
+                </span>
+              </span>
             </span>
+
             {/* The verdict on the LIGHT, not on the photo. Shown only when
                 there is real glare and enough samples to have earned an
                 opinion - see readGlare, which returns "unknown" freely. */}
             {glare && glareAdvice(glare) && (
-              <span className={"max-w-[80vw] rounded-lg px-2 py-1 text-center text-[10px] leading-snug " +
-                (glare.verdict === "fixed" ? "bg-amber-500/90 text-black" : "bg-black/60 text-white/70")}>
+              <span className={"w-full rounded-xl px-3 py-2 text-center text-[13px] font-semibold leading-snug shadow-lg " +
+                (glare.verdict === "fixed" ? "bg-amber-400 text-black" : "bg-black/80 text-white")}>
                 {glareAdvice(glare)}
-                <span className="ml-1 tabular-nums opacity-60">
-                  ({Math.round(glare.peak * 100)}% blown)
+                <span className="ml-1 tabular-nums opacity-70">
+                  ({Math.round(glare.peak * 100)}% blown out)
                 </span>
               </span>
             )}
-            {/* What this shot will ACTUALLY come out at, next to what the
-                preset asked for. A quality setting is a ceiling and the sensor
-                decides — saying so here is the difference between "Archive"
-                meaning something and "Archive" being a word. */}
-            {delivered && (
-              <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] tabular-nums text-white/45">
-                {delivered.src} sensor · {delivered.out}px shot
-                {delivered.out < quality.maxEdge && (
-                  <span className="text-white/35"> · {quality.label} wanted {quality.maxEdge}</span>
-                )}
+
+            {/* What this shot will ACTUALLY come out at. Only shown when it
+                DISAGREES with the preset - the rest of the time it is noise on
+                a screen that has no room for any. */}
+            {delivered && delivered.out < quality.maxEdge && (
+              <span className="rounded-lg bg-black/80 px-3 py-1 text-[12px] font-semibold tabular-nums text-white/80">
+                {delivered.out}px shot \u00b7 {quality.label} wanted {quality.maxEdge}
               </span>
             )}
           </span>
@@ -673,19 +711,28 @@ export function CameraSheet({
                 className="pointer-events-none absolute flex flex-col items-center gap-0.5"
                 style={{ left: guideRect.left, width: guideRect.width, top: Math.max(4, guideRect.top - 46) }}
               >
-                <span className="rounded-lg bg-[#c9a227] px-3 py-1 text-base font-black uppercase tracking-widest text-black">
+                <span className="rounded-lg bg-[#e8b923] px-4 py-1.5 text-xl font-black uppercase tracking-widest text-black shadow-lg">
                   {shotLabel}
                 </span>
-                {shotStep && <span className="text-[11px] font-semibold text-white/70">{shotStep}</span>}
+                {shotStep && (
+                  <span className="rounded bg-black/75 px-2 py-0.5 text-[13px] font-bold text-white">{shotStep}</span>
+                )}
                 {shotHint && (
-                  <span className="max-w-full rounded bg-black/55 px-2 py-0.5 text-center text-[11px] leading-snug text-white/80">
+                  <span className="max-w-full rounded-lg bg-black/80 px-2.5 py-1 text-center text-[13px] font-semibold leading-snug text-white">
                     {shotHint}
                   </span>
                 )}
               </span>
             )}
+            {/* Sits just BELOW the guide, not at the bottom of the screen —
+                down there it stacked under the readout panel, which is how
+                three unreadable black boxes ended up on top of each other. */}
             {auto && (
-              <span className="pointer-events-none absolute bottom-4 rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold text-white/85">
+              <span
+                className={"pointer-events-none absolute -translate-x-1/2 rounded-xl px-4 py-1.5 text-[14px] font-bold shadow-lg " +
+                  (locked ? "bg-emerald-400 text-black" : "bg-black/80 text-white")}
+                style={{ left: guideRect.left + guideRect.width / 2, top: guideRect.top + guideRect.height + 10 }}
+              >
                 {locked ? "Hold still…" : "Fill the frame · hold steady"}
               </span>
             )}
