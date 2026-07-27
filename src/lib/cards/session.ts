@@ -16,7 +16,25 @@ export type CapturedShot = {
   /** The FULL uncropped frame. Kept so a crop can never be the only record of
    *  an edge. Null for library picks, which have no camera frame behind them. */
   original: string | null;
-  meta: { mode: "in_app" | "library"; auto: boolean; sharp: number | null; marginPct: number };
+  meta: {
+    mode: "in_app" | "library";
+    auto: boolean;
+    sharp: number | null;
+    marginPct: number;
+    /**
+     * The pixels this shot ACTUALLY came out at, and what the sensor was
+     * delivering when it was taken.
+     *
+     * Recorded because the quality preset is a ceiling, not a promise. Asking
+     * for a 4000px "Archive" image gets you 4000px only if the camera had that
+     * many to give; for a long time it silently did not, and nothing anywhere
+     * recorded the difference. A stored figure is the only thing that can
+     * settle later whether a card's evidence was shot at the resolution its
+     * settings claimed.
+     */
+    px?: { w: number; h: number };
+    srcPx?: { w: number; h: number };
+  };
 };
 
 /**

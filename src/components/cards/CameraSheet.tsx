@@ -11,6 +11,7 @@ import {
 } from "@/lib/cards/camera";
 import { detectCard, releaseScratch, type Detection } from "@/lib/cards/edges";
 import { guideToTarget, type TemplateShot } from "@/lib/cards/templates";
+import { clipFraction, globalMedian, readGlare, glareAdvice } from "@/lib/cards/exposure";
 import { QUALITY_SPECS, PHOTO_PREF_DEFAULTS, type PhotoPrefs } from "@/lib/cards/photo-prefs";
 
 // Card-scanner aspect guides (w/h): raw card 2.5"x3.5", PSA-style slab ~3.32"x5.44".
@@ -113,6 +114,10 @@ export function CameraSheet({
   const fileRef = useRef<HTMLInputElement>(null);
   const osCamRef = useRef<HTMLInputElement>(null);
   const [ready, setReady] = useState(false);
+  // What the sensor is actually delivering, and what a shot would come out at.
+  // A preset that promises more than the camera has is the defect this exists
+  // to make visible.
+  const [delivered, setDelivered] = useState<{ src: string; out: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [guide, setGuide] = useState<GuideKind>("raw");
   const [guideRect, setGuideRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
@@ -133,6 +138,12 @@ export function CameraSheet({
   const guideRef = useRef(true);
   const cooldownRef = useRef(0); // don't re-fire on the same card
   const [menu, setMenu] = useState(false);
+  // A rolling window of how much of the frame is blown out, and how the
+  // exposure is drifting. Whether Beau's glare could EVER be swept around is a
+  // property of his light, not of any code - so it gets measured rather than
+  // assumed. See lib/cards/exposure.
+  const glareRef = useRef<{ clip: number; median: number }[]>([]);
+  const [glare, setGlare] = useState<ReturnType<typeof readGlare> | null>(null);
   // Which slot the user has already looked at, so the inspect overlay shows
   // once per visit rather than on every render.
   const [seen, setSeen] = useState<number | null>(null);
@@ -221,8 +232,34 @@ export function CameraSheet({
     return () => window.removeEventListener("resize", layoutGuide);
   }, [ready, layoutGuide]);
 
-  /** Draw a region of the video into a JPEG data URL, bounded by maxEdge. */
-  function frameToUrl(sx: number, sy: number, sw: number, sh: number, maxEdge = quality.maxEdge): string | null {
+  // Report what a shot would ACTUALLY come out at, from the real crop rect and
+  // the real track size - not from the preset's ceiling.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!ready || osMode || !v?.videoWidth || !guideRect) { setDelivered(null); return; }
+    const g = guideInVideoPixels();
+    const long = g
+      ? Math.max(g.w, g.h) * (prefs.auto_crop === "off" ? 0 : 1 + prefs.crop_margin_pct / 100)
+      : Math.max(v.videoWidth, v.videoHeight);
+    setDelivered({
+      src: `${v.videoWidth}×${v.videoHeight}`,
+      out: Math.round(Math.min(long, quality.maxEdge)),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, osMode, guideRect, prefs.auto_crop, prefs.crop_margin_pct, quality.maxEdge]);
+
+  /**
+   * Draw a region of the video into a JPEG data URL, bounded by maxEdge.
+   *
+   * Returns the size it actually produced, because maxEdge is a CEILING and
+   * never an upscale - `Math.min(1, ...)`. The difference between what a
+   * preset asks for and what the sensor had to give is the whole reason
+   * "Archive" quietly meant nothing for months, and it is only visible if
+   * something records it.
+   */
+  function frameToUrl(
+    sx: number, sy: number, sw: number, sh: number, maxEdge = quality.maxEdge,
+  ): { url: string; w: number; h: number } | null {
     const v = videoRef.current;
     if (!v) return null;
     const outScale = Math.min(1, maxEdge / Math.max(sw, sh));
@@ -232,7 +269,7 @@ export function CameraSheet({
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(v, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", quality.jpegQuality);
+    return { url: canvas.toDataURL("image/jpeg", quality.jpegQuality), w: canvas.width, h: canvas.height };
   }
 
   /** The guide, expressed in intrinsic video pixels. */
@@ -263,15 +300,15 @@ export function CameraSheet({
     const crop = g && prefs.auto_crop !== "off"
       ? withMargin({ x: g.x, y: g.y, w: g.w, h: g.h }, marginPct, bounds)
       : { x: 0, y: 0, w: bounds.w, h: bounds.h };
-    const url = frameToUrl(crop.x, crop.y, crop.w, crop.h);
-    if (!url) return;
+    const shot = frameToUrl(crop.x, crop.y, crop.w, crop.h);
+    if (!shot) return;
 
     // Keep the full frame alongside the crop, so a crop is never the only
     // record of an edge. Skipped when nothing was cropped (the frame IS the
     // original) or when the user has turned originals off to save space.
     const cropped = !!g && prefs.auto_crop !== "off";
     const original = cropped && prefs.keep_originals
-      ? frameToUrl(0, 0, bounds.w, bounds.h)
+      ? frameToUrl(0, 0, bounds.w, bounds.h)?.url ?? null
       : null;
 
     if (multi) {
@@ -283,8 +320,13 @@ export function CameraSheet({
     // froze the video, and a chained front→back flow would capture the frozen
     // FRONT frame as the "back" (day-review finding).
     onCapture({
-      url, original,
-      meta: { mode: "in_app", auto: isAuto, sharp: sharpScore, marginPct: cropped ? marginPct : 0 },
+      url: shot.url, original,
+      meta: {
+        mode: "in_app", auto: isAuto, sharp: sharpScore,
+        marginPct: cropped ? marginPct : 0,
+        px: { w: shot.w, h: shot.h },
+        srcPx: { w: bounds.w, h: bounds.h },
+      },
     });
   }
 
@@ -346,7 +388,7 @@ export function CameraSheet({
    * margin lets the card's real edge sit inside the search area even when it
    * overhangs the guide slightly.
    */
-  function detectProbe(): { gray: Uint8ClampedArray; w: number; h: number; src: Rect } | null {
+  function detectProbe(): { gray: Uint8ClampedArray; rgba: Uint8ClampedArray; w: number; h: number; src: Rect } | null {
     const v = videoRef.current;
     if (!v || !v.videoWidth) return null;
     const g = guideInVideoPixels();
@@ -366,7 +408,10 @@ export function CameraSheet({
     for (let i = 0, q = 0; i < data.length; i += 4, q++) {
       gray[q] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
     }
-    return { gray, w, h, src };
+    // The RGBA was already fetched and was being discarded. Clipping has to be
+    // read from COLOUR - a warm lamp reflection is (255,255,140), two channels
+    // dead and a luma of 242, invisible to anything computed off `gray`.
+    return { gray, rgba: data, w, h, src };
   }
 
   // Live edge detection. Runs whenever the camera is open — it drives the
@@ -388,6 +433,28 @@ export function CameraSheet({
       const d = detectCard(p.gray, p.w, p.h, { fovDegrees: fov });
       setDet(d);
       setDetSize({ w: p.w, h: p.h, src: p.src });
+
+      // Measured over the CARD when we have one, over the whole probe when we
+      // do not - which is exactly when it matters most, because glare washing
+      // out the edges is one of the reasons detectCard returns nothing.
+      const region = d
+        ? (() => {
+            const xs = [d.quad.tl.x, d.quad.tr.x, d.quad.br.x, d.quad.bl.x];
+            const ys = [d.quad.tl.y, d.quad.tr.y, d.quad.br.y, d.quad.bl.y];
+            const x = Math.min(...xs), y = Math.min(...ys);
+            return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+          })()
+        : null;
+      const clip = clipFraction(p.rgba, p.w, p.h, region);
+      const med = globalMedian(p.rgba, p.w, p.h, region);
+      if (clip && med != null) {
+        const win = glareRef.current;
+        win.push({ clip: clip.fraction, median: med });
+        // ~6 seconds at this cadence: long enough to have swung the phone
+        // somewhere, short enough that moving to a new light shows up quickly.
+        if (win.length > 40) win.shift();
+        setGlare(readGlare(win));
+      }
     }, DETECT_MS);
     return () => { alive = false; clearInterval(id); releaseScratch(); };
     // detectProbe reads refs and guideRect; re-creating the interval on every
@@ -563,6 +630,30 @@ export function CameraSheet({
                 </>
               )}
             </span>
+            {/* The verdict on the LIGHT, not on the photo. Shown only when
+                there is real glare and enough samples to have earned an
+                opinion - see readGlare, which returns "unknown" freely. */}
+            {glare && glareAdvice(glare) && (
+              <span className={"max-w-[80vw] rounded-lg px-2 py-1 text-center text-[10px] leading-snug " +
+                (glare.verdict === "fixed" ? "bg-amber-500/90 text-black" : "bg-black/60 text-white/70")}>
+                {glareAdvice(glare)}
+                <span className="ml-1 tabular-nums opacity-60">
+                  ({Math.round(glare.peak * 100)}% blown)
+                </span>
+              </span>
+            )}
+            {/* What this shot will ACTUALLY come out at, next to what the
+                preset asked for. A quality setting is a ceiling and the sensor
+                decides — saying so here is the difference between "Archive"
+                meaning something and "Archive" being a word. */}
+            {delivered && (
+              <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] tabular-nums text-white/45">
+                {delivered.src} sensor · {delivered.out}px shot
+                {delivered.out < quality.maxEdge && (
+                  <span className="text-white/35"> · {quality.label} wanted {quality.maxEdge}</span>
+                )}
+              </span>
+            )}
           </span>
         )}
 
