@@ -10,19 +10,24 @@ file will get overwritten.
 
 ---
 
-## Paste these
+## Paste these, then merge
 
-Three migrations are written and waiting on you. Nothing auto-applies. In this
-order:
+Nothing auto-applies and nothing auto-merges — a branch carrying a migration is
+always yours to land. There are **two branches** and **three migrations**, and
+they don't line up one-to-one, so here they are together:
 
-| File | What it does | Safe to skip? |
+| Branch | Migration to paste first | What it does |
 |---|---|---|
-| `20260745000000_identity_auto_relic.sql` | Autographs and relics stop colliding with the base card in `card_identities` | No — until it lands, a signed copy shares market history with an unsigned one |
-| `20260746000000_template_targets.sql` | Proximity + angle targets on the built-in photo templates, plus the **Front only** template you asked to sit second in the list | Yes, but the camera's new guidance has nothing to aim at without it |
-| `20260747000000_photo_position.sql` | `card_photos.position` — so the order of a photo session is the order the photos are saved in | Yes; without it a reordered session still uploads in order but reads back by capture time |
+| `identity-auto-relic` | `20260745000000_identity_auto_relic.sql` | Autographs and relics stop colliding with the base card in `card_identities`. **Do this one first** — until it lands, a signed copy shares market history with an unsigned one. |
+| `edge-detection` | `20260746000000_template_targets.sql` | Proximity + angle targets on the built-in photo templates, plus the **Front only** template you asked to sit second in the list. |
+| `edge-detection` | `20260747000000_photo_position.sql` | `card_photos.position` — so the order of a photo session is the order the photos are saved in. |
+
+Paste the SQL **before** merging the branch it belongs to: the new code reads
+columns and rows the migration creates.
 
 None of them touch existing rows destructively. 20260746 rewrites the four
 **built-in** templates only; anything you made yourself is untouched.
+`edge-detection` is ten commits — everything under *Shipped* below.
 
 ---
 
