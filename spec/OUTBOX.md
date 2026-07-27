@@ -30,6 +30,23 @@ None of them touch existing rows destructively. 20260746 rewrites the four
 
 Newest first. Full record in the git log and `reference/next-steps.md`.
 
+**Find, and update a batch** — `/cards/find`, linked from the Intake header
+("Already own it?") and the cards menu. Point the camera at a card you already
+own and it goes to that card's page. Typing works too, and costs nothing — which
+matters, because the case you described this for is a card already boxed up for
+a grader. Every candidate shows *why* it matched and what disagreed, labelled
+Certain / Likely / Possible; nothing is auto-selected. Then the update half:
+add each match to a batch, and change all of them at once — **Sent to grader**
+is the default. It reports what did *not* change too, so eight-of-ten never
+reads as ten.
+
+**The placement sheet** you asked about — print it, lay each card on its
+numbered slot, and the stack, the list, and the app are all in one order.
+Slots are true card size, so print at 100%. It is not a substitute for PSA's or
+BGS's own submission form, and the value column says "your recorded value"
+rather than "declared value" — that one is yours and your grader's call, with
+insurance consequences the app has no business deciding.
+
 **The session menu** — the expand/collapse window from the left you described.
 The whole run in a list: reorder by dragging the grip, delete any shot (taken,
 current, or upcoming), tap a taken one to go back and retake it. Your *"order
