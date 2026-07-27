@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, X, Loader2, Images, Check, Wand2 } from "lucide-react";
+import { Camera, X, Loader2, Images, Check, Wand2, PanelLeft, RotateCcw } from "lucide-react";
+import { SessionMenu, type SessionItem } from "./SessionMenu";
+import type { CapturedShot } from "@/lib/cards/session";
 import { downscale } from "@/lib/cards/img";
 import {
   CARD_ASPECT, SLAB_ASPECT, withMargin, sharpness, frameDelta,
@@ -33,14 +35,7 @@ const LIT = 0.55;
 // table edge stays out.
 const DETECT_MARGIN = 0.12;
 
-export type CapturedShot = {
-  /** The framed, margin-preserved card image — what the app shows and scans. */
-  url: string;
-  /** The FULL uncropped frame. Kept so a crop can never be the only record of
-   *  an edge. Null for library picks, which have no camera frame behind them. */
-  original: string | null;
-  meta: { mode: "in_app" | "library"; auto: boolean; sharp: number | null; marginPct: number };
-};
+export type { CapturedShot } from "@/lib/cards/session";
 
 /**
  * In-app camera via getUserMedia — the reliable way to "take a photo" inside an
@@ -60,6 +55,7 @@ export function CameraSheet({
   shotStep,
   shotHint,
   shotTarget,
+  session,
   onCapture,
   onClose,
   multi = false,
@@ -80,6 +76,26 @@ export function CameraSheet({
   /** One line of instruction for THIS shot, e.g. "Fill the frame with the
    *  corner". Templates carry these; without one the frame is just a label. */
   shotHint?: string;
+  /**
+   * The whole run, when this camera is working through a template. Passing it
+   * turns the sheet from a WIZARD into a SESSION: a menu you can open mid-shoot
+   * to delete a shot, reorder the run, or jump back and retake one.
+   *
+   * Absent for one-off captures, which stay exactly as they were.
+   */
+  session?: {
+    items: SessionItem[];
+    index: number;
+    onJump: (i: number) => void;
+    onDelete: (i: number) => void;
+    onReorder: (from: number, to: number) => void;
+    /** Keep the shot already taken here and move on without re-shooting. */
+    onKeep: () => void;
+    /** Finish the run now with whatever has been taken. */
+    onDone: () => void;
+    inspect: boolean;
+    onInspectChange: (v: boolean) => void;
+  };
   onCapture: (shot: CapturedShot) => void;
   onClose: () => void;
   multi?: boolean;
@@ -116,6 +132,17 @@ export function CameraSheet({
   // Read inside the auto-snap interval, which closes over its first render.
   const guideRef = useRef(true);
   const cooldownRef = useRef(0); // don't re-fire on the same card
+  const [menu, setMenu] = useState(false);
+  // Which slot the user has already looked at, so the inspect overlay shows
+  // once per visit rather than on every render.
+  const [seen, setSeen] = useState<number | null>(null);
+
+  // "Show me a shot I already have before re-taking it." Jumping back to a
+  // taken shot puts the photo on screen first - the point of going back is
+  // usually to LOOK, and pointing the live camera at it answers the wrong
+  // question.
+  const cur = session?.items[session.index] ?? null;
+  const review = !!(session?.inspect && cur?.taken && seen !== session.index);
 
   function stop() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -385,7 +412,7 @@ export function CameraSheet({
   // happens while sweeping the phone across a table and would fire on whatever
   // was underneath.
   useEffect(() => {
-    if (!auto || !ready) return;
+    if (!auto || !ready || menu || review) return;
     let alive = true;
     const id = setInterval(() => {
       if (!alive || busyRef.current || Date.now() < cooldownRef.current) return;
@@ -403,7 +430,7 @@ export function CameraSheet({
     }, 120);
     return () => { alive = false; clearInterval(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, ready, guide, guideRect]);
+  }, [auto, ready, guide, guideRect, menu, review]);
 
   async function fromFile(file: File) {
     const url = await downscale(file);
@@ -416,8 +443,18 @@ export function CameraSheet({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/95" style={{ colorScheme: "dark" }}>
       <div className="flex items-center justify-between px-4 py-3 text-white">
-        <span className="text-sm font-semibold">
-          {title}
+        <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+          {session && (
+            <button
+              onClick={() => setMenu(true)}
+              aria-label="Open session menu"
+              className="flex shrink-0 items-center gap-1 rounded-lg border border-white/25 px-2 py-1 text-[11px] font-semibold text-white/70"
+            >
+              <PanelLeft size={13} />
+              {session.items.filter((i) => i.taken || i.existing).length}/{session.items.length}
+            </button>
+          )}
+          <span className="truncate">{title}</span>
           {multi && shots > 0 && <span className="figures ml-2 rounded bg-white/15 px-1.5 py-0.5 text-xs">{shots}</span>}
         </span>
         <span className="flex items-center gap-2">
@@ -569,6 +606,45 @@ export function CameraSheet({
         {err && <p className="absolute inset-x-8 top-1/2 -translate-y-1/2 text-center text-sm text-white/80">{err}</p>}
       </div>
 
+      {/* Inspect what you already have. Two ways out and both explicit - no
+          dead end, and no silent overwrite of a shot you were only checking. */}
+      {review && cur?.taken && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-black/95 px-6 py-4">
+          <p className="text-center text-[11px] font-semibold uppercase tracking-wider text-white/50">
+            Already taken - {cur.label}
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */}
+          <img src={cur.taken} alt={cur.label} className="mx-auto my-3 min-h-0 flex-1 rounded-lg object-contain" />
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => setSeen(session?.index ?? null)}
+              className="flex items-center gap-1.5 rounded-xl border border-white/30 px-4 py-2 text-sm font-semibold text-white"
+            >
+              <RotateCcw size={15} /> Retake
+            </button>
+            <button
+              onClick={() => { setSeen(null); session?.onKeep(); }}
+              className="flex items-center gap-1.5 rounded-xl bg-[#c9a227] px-4 py-2 text-sm font-bold text-black"
+            >
+              <Check size={16} /> Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {menu && session && (
+        <SessionMenu
+          items={session.items}
+          index={session.index}
+          onClose={() => setMenu(false)}
+          onJump={(i) => { setMenu(false); setSeen(null); session.onJump(i); }}
+          onDelete={session.onDelete}
+          onReorder={session.onReorder}
+          inspect={session.inspect}
+          onInspectChange={session.onInspectChange}
+        />
+      )}
+
       <input
         ref={fileRef}
         type="file"
@@ -605,6 +681,17 @@ export function CameraSheet({
             className="flex items-center gap-1.5 justify-self-end rounded-xl bg-[#c9a227] px-4 py-2 text-sm font-bold text-black active:scale-95"
           >
             <Check size={16} /> Done{shots > 0 ? ` (${shots})` : ""}
+          </button>
+        ) : session ? (
+          // Reordering and retaking mean a run no longer ends by simply
+          // reaching the last slot - there has to be a way to say "that is
+          // enough" that is not closing the camera and hoping.
+          <button
+            onClick={() => { stop(); session.onDone(); }}
+            disabled={!session.items.some((i) => i.taken)}
+            className="flex items-center gap-1.5 justify-self-end rounded-xl bg-[#c9a227] px-4 py-2 text-sm font-bold text-black active:scale-95 disabled:opacity-40"
+          >
+            <Check size={16} /> Done ({session.items.filter((i) => i.taken).length})
           </button>
         ) : (
           <span />

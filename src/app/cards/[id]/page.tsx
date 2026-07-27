@@ -88,7 +88,15 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
 
   // Stored photos (private bucket → short-lived signed URLs).
   const { data: photos } = await supabase
-    .from("card_photos").select("id, kind, role, bucket, path, variant, derived_from").eq("card_id", id).order("created_at");
+    .from("card_photos")
+    .select("id, kind, role, bucket, path, variant, derived_from, position")
+    .eq("card_id", id)
+    // Session order, as Beau asked - with created_at both as the tiebreak
+    // within a slot and as the fallback for photos taken before position
+    // existed. nullsFirst:false keeps those older rows after the ordered ones
+    // instead of ahead of everything.
+    .order("position", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: true });
 
   // Which template shots this card actually HAS. One shot can store two rows
   // (the uncropped frame and the crop derived from it), so counting rows would
