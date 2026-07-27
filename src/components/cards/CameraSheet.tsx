@@ -179,7 +179,20 @@ export function CameraSheet({
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("no camera api");
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } },
+          // ASK FOR EVERYTHING THE SENSOR HAS.
+          //
+          // This said 1920, and that quietly made three of the four quality
+          // presets fiction. The guide crop's long edge tops out around 1421px
+          // of a 1920 stream, and frameToUrl only ever DOWNSCALES
+          // (Math.min(1, maxEdge / …)) — so Standard (1600), High (2400) and
+          // Archive (4000) all produced the same ~1421px image at different
+          // JPEG qualities, while the storage estimate billed Archive at 3MB a
+          // shot for it. Someone choosing "Archive — grading evidence" was
+          // getting a 1.4MP crop.
+          //
+          // `ideal` degrades gracefully: a phone that cannot do 4K gives its
+          // best, exactly as before. Most rear cameras since ~2019 can.
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 } },
           audio: false,
         });
         if (cancelled) {
