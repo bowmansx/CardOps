@@ -177,6 +177,21 @@ export function PhotoSettings({ initial }: { initial: Partial<PhotoPrefs> }) {
             : "Uses your phone's camera app — better HDR and low light, but no guide or auto-snap."}
         </p>
         {p.capture_mode === "in_app" && (
+          <label className="mt-3 flex items-start gap-2">
+            <input type="checkbox" checked={p.scan_on_open}
+              onChange={(e) => set("scan_on_open", e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-flag" />
+            <span className="text-[11px] text-ink/70">
+              Start scanning the moment the camera opens
+              <span className="block text-ink/45">
+                Off by default: you get a <strong>Start scan</strong> screen first, and nothing touches
+                the camera until you tap it. On a 12-shot template that&apos;s 12 fewer times the
+                sensor spins up pointed at your lap.
+              </span>
+            </span>
+          </label>
+        )}
+        {p.capture_mode === "in_app" && (
           <>
             <label className="mt-3 flex items-start gap-2">
               <input type="checkbox" checked={p.auto_snap} onChange={(e) => set("auto_snap", e.target.checked)}

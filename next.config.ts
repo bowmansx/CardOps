@@ -12,6 +12,14 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // WHICH BUILD IS THIS. Three rounds of "I still can't read it" with no way
+  // to tell whether the phone had the fix yet is a debugging loop nobody can
+  // close. Vercel sets VERCEL_GIT_COMMIT_SHA at build time; this makes it
+  // readable from the client so the screen can say what it is.
+  env: {
+    NEXT_PUBLIC_BUILD:
+      (process.env.VERCEL_GIT_COMMIT_SHA ?? "dev").slice(0, 7),
+  },
   experimental: {
     // Card photos no longer travel through server actions at all — the browser
     // uploads them straight to Supabase Storage and only the paths are posted

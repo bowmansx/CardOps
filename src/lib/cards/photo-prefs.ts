@@ -34,6 +34,9 @@ export const QUALITY_SPECS: Record<PhotoQuality, {
 };
 
 export type PhotoPrefs = {
+  /** True opens straight into the live viewfinder; false shows Start scan
+   *  first and makes no getUserMedia call until it is tapped. */
+  scan_on_open: boolean;
   capture_mode: CaptureMode;
   photo_quality: PhotoQuality;
   auto_snap: boolean;
@@ -45,6 +48,10 @@ export type PhotoPrefs = {
 };
 
 export const PHOTO_PREF_DEFAULTS: PhotoPrefs = {
+  // FALSE means the Start scan screen is shown. Nothing reaches for a camera
+  // until someone asks it to - and on a twelve-shot template the old behaviour
+  // grabbed the sensor twelve times, each time pointed at a lap or a ceiling.
+  scan_on_open: false,
   capture_mode: "in_app",
   photo_quality: "standard",
   auto_snap: false,
@@ -68,7 +75,8 @@ export function normalizePhotoPrefs(raw: Partial<Record<keyof PhotoPrefs, unknow
     allowed.includes(v as T) ? (v as T) : dflt;
   const marginRaw = Number(r.crop_margin_pct);
   return {
-    capture_mode: pick(r.capture_mode, CAPTURE_MODES, PHOTO_PREF_DEFAULTS.capture_mode),
+      scan_on_open: typeof r.scan_on_open === "boolean" ? r.scan_on_open : PHOTO_PREF_DEFAULTS.scan_on_open,
+  capture_mode: pick(r.capture_mode, CAPTURE_MODES, PHOTO_PREF_DEFAULTS.capture_mode),
     photo_quality: pick(r.photo_quality, PHOTO_QUALITIES, PHOTO_PREF_DEFAULTS.photo_quality),
     auto_snap: typeof r.auto_snap === "boolean" ? r.auto_snap : PHOTO_PREF_DEFAULTS.auto_snap,
     burst_count: Number.isFinite(Number(r.burst_count))

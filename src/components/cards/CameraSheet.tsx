@@ -113,6 +113,16 @@ export function CameraSheet({
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const osCamRef = useRef<HTMLInputElement>(null);
+  // Has the user asked for the camera yet? Until they have, nothing calls
+  // getUserMedia: no sensor, no permission prompt, no detection loop grinding
+  // against a lap or a ceiling. On a twelve-shot template the old behaviour
+  // did all three twelve times.
+  // DERIVED, not synced. usePhotoPrefs returns the defaults first and the saved
+  // values a moment later, so an effect mirroring the pref into state both
+  // trips react-hooks/set-state-in-effect and can un-start a running camera.
+  // An OR cannot: once tapped it stays started, and a late `true` starts it.
+  const [manualStart, setManualStart] = useState(false);
+  const started = manualStart || prefs.scan_on_open;
   const [ready, setReady] = useState(false);
   // What the sensor is actually delivering, and what a shot would come out at.
   // A preset that promises more than the camera has is the defect this exists
@@ -184,7 +194,7 @@ export function CameraSheet({
   }, [guide]);
 
   useEffect(() => {
-    if (osMode) return;
+    if (osMode || !started) return;
     let cancelled = false;
     (async () => {
       try {
@@ -224,7 +234,7 @@ export function CameraSheet({
       cancelled = true;
       stop();
     };
-  }, [osMode]);
+  }, [osMode, started]);
 
   useEffect(() => {
     layoutGuide();
@@ -792,7 +802,45 @@ export function CameraSheet({
             </p>
           </div>
         )}
-        {!ready && !err && !osMode && (
+        {/*
+          * START SCAN. Beau asked for it, and it earns its place twice: the
+          * camera is not taken until it is wanted, and this screen is legible
+          * BEFORE any of the live overlay exists - so "I can't read the text"
+          * has somewhere to be answered that does not depend on a video
+          * stream, a detection result or an overlay position.
+          */}
+        {!started && !osMode && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-black px-8 text-center">
+            <Camera size={44} className="text-[#e8b923]" />
+            {shotLabel && (
+              <span className="rounded-lg bg-[#e8b923] px-4 py-1.5 text-xl font-black uppercase tracking-widest text-black">
+                {shotLabel}
+              </span>
+            )}
+            {shotHint && <p className="text-[15px] font-semibold leading-snug text-white">{shotHint}</p>}
+            {shotStep && <p className="text-[13px] font-bold text-white/70">{shotStep}</p>}
+
+            <button
+              onClick={() => setManualStart(true)}
+              className="rounded-2xl bg-[#e8b923] px-8 py-4 text-lg font-black uppercase tracking-wide text-black active:scale-95"
+            >
+              Start scan
+            </button>
+
+            <p className="max-w-xs text-[13px] leading-snug text-white/60">
+              Nothing opens the camera until you tap. Turn this off in
+              Settings &rarr; Photos to go straight to the viewfinder.
+            </p>
+
+            {/* If THIS is readable and the live readout is not, the problem is
+                the overlay, not the type - which is a different bug. */}
+            <p className="text-[12px] font-semibold tabular-nums text-white/40">
+              build {process.env.NEXT_PUBLIC_BUILD ?? "dev"}
+            </p>
+          </div>
+        )}
+
+        {started && !ready && !err && !osMode && (
           <div className="absolute inset-0 flex items-center justify-center text-white/70">
             <Loader2 className="animate-spin" size={28} />
           </div>
@@ -863,7 +911,7 @@ export function CameraSheet({
         </button>
         <button
           onClick={() => (osMode ? osCamRef.current?.click() : shoot(false))}
-          disabled={!ready && !osMode}
+          disabled={!osMode && (!started || !ready)}
           aria-label="Take photo"
           className="h-16 w-16 justify-self-center rounded-full border-4 border-white bg-white/25 transition active:scale-95 disabled:opacity-40"
         >

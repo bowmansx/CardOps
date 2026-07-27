@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 const AUTO = ["off", "A", "B", "both"];
 const DEPTH = ["light", "deep"];
 const PHOTO_COLS =
-  "capture_mode, photo_quality, auto_snap, burst_count, auto_crop, crop_margin_pct, keep_originals, default_template";
+  "capture_mode, photo_quality, auto_snap, burst_count, auto_crop, crop_margin_pct, keep_originals, default_template, scan_on_open";
 const COLS = `auto_estimate, estimate_model, ${PHOTO_COLS}`;
 
 async function guard() {
