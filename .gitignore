@@ -9,3 +9,6 @@ next-env.d.ts
 spec/.obsidian/workspace*.json
 spec/.obsidian/cache
 spec/.trash/
+
+# Local backups — real data, never committed
+backups/
