@@ -31,7 +31,32 @@ export type PhotoRole = (typeof PHOTO_ROLES)[number]["role"];
 const ROLE_SET = new Set<string>(PHOTO_ROLES.map((r) => r.role));
 const LABEL_BY_ROLE = new Map(PHOTO_ROLES.map((r) => [r.role as string, r.label]));
 
-export type TemplateShot = { role: PhotoRole; label: string; hint?: string };
+export type TemplateShot = {
+  role: PhotoRole;
+  label: string;
+  hint?: string;
+  /**
+   * How much of the frame the card should fill, 0..1. Beau's "proximity"
+   * (`Photo Process and Format`): *"it can be decided how far away the photo
+   * should be taken... a guide, when they have a proximity template set, to
+   * let them know how much further or closer they need to move."*
+   *
+   * Stored as FRAME FILL rather than inches deliberately. Inches drift with
+   * every phone's lens; the fraction of frame a card occupies is what actually
+   * determines whether two corner shots are comparable, and it needs no
+   * calibration to be right.
+   */
+  targetFill?: number;
+  /**
+   * Viewing angle in degrees, 0 = square on. Beau's "angles": *"a box that the
+   * user can input a number that would be the number of angle degree."* A
+   * surface shot wants a deliberate tilt to catch the light; a corner shot
+   * wants none.
+   */
+  targetTilt?: number;
+  /** How far either side of the target still counts as on-target. */
+  tolerance?: number;
+};
 
 export type PhotoTemplate = {
   id: string;
@@ -58,7 +83,22 @@ export function normalizeShots(raw: unknown): TemplateShot[] {
     if (typeof r !== "string" || !ROLE_SET.has(r)) continue;
     const label = String((s as Record<string, unknown>).label ?? "").trim() || LABEL_BY_ROLE.get(r) || r;
     const hint = String((s as Record<string, unknown>).hint ?? "").trim();
-    out.push({ role: r as PhotoRole, label: label.slice(0, 40), hint: hint ? hint.slice(0, 120) : undefined });
+    const num = (v: unknown, lo: number, hi: number): number | undefined => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= lo && n <= hi ? n : undefined;
+    };
+    const o = s as Record<string, unknown>;
+    out.push({
+      role: r as PhotoRole,
+      label: label.slice(0, 40),
+      hint: hint ? hint.slice(0, 120) : undefined,
+      // A target outside its plausible range is DROPPED, not clamped: a
+      // template asking to fill 300% of the frame is a mistake, and clamping
+      // it to 100% would silently invent a requirement nobody wrote.
+      targetFill: num(o.targetFill, 0.05, 0.98),
+      targetTilt: num(o.targetTilt, 0, 75),
+      tolerance: num(o.tolerance, 0.01, 0.5),
+    });
   }
   return out.slice(0, 40);
 }
@@ -81,4 +121,70 @@ export function missingShots(template: PhotoTemplate, haveRoles: string[]): Temp
 /** "3 of 12" — the progress a camera announces. */
 export function shotStep(index: number, total: number): string {
   return `${index + 1} of ${total}`;
+}
+
+
+// ── shooting to a target ───────────────────────────────────────────────────
+
+export type Guidance = {
+  /** What to tell the user, or null when they are on target. */
+  message: string | null;
+  /** True when every stated target is satisfied. */
+  onTarget: boolean;
+  /** Per-axis, for colouring the readouts independently. */
+  fill: "low" | "ok" | "high" | "none";
+  tilt: "low" | "ok" | "high" | "none";
+};
+
+const DEFAULT_TOL = 0.08;      // frame-fill fraction
+const TILT_TOL_DEG = 6;
+
+/**
+ * Turn a live reading into an instruction.
+ *
+ * Says ONE thing at a time. A HUD reading "move closer and tilt back and hold
+ * still" is a HUD nobody acts on — distance first, because framing is what the
+ * user is already thinking about, and the angle barely matters until the card
+ * is the right size in frame.
+ *
+ * A target the reading cannot measure produces no instruction at all rather
+ * than a guess: `null` tilt means the geometry could not support an angle, and
+ * inventing "tilt flatter" from that would send someone chasing a number that
+ * was never taken.
+ */
+export function guideToTarget(
+  shot: Pick<TemplateShot, "targetFill" | "targetTilt" | "tolerance"> | null | undefined,
+  reading: { fill: number | null; tilt: number | null },
+): Guidance {
+  const none: Guidance = { message: null, onTarget: true, fill: "none", tilt: "none" };
+  if (!shot) return none;
+
+  const tol = shot.tolerance ?? DEFAULT_TOL;
+  let fillState: Guidance["fill"] = "none";
+  let tiltState: Guidance["tilt"] = "none";
+  let message: string | null = null;
+
+  if (shot.targetFill != null && reading.fill != null) {
+    const d = reading.fill - shot.targetFill;
+    fillState = Math.abs(d) <= tol ? "ok" : d < 0 ? "low" : "high";
+    if (fillState === "low") message = "Move closer";
+    else if (fillState === "high") message = "Move back";
+  }
+
+  if (shot.targetTilt != null && reading.tilt != null) {
+    const d = reading.tilt - shot.targetTilt;
+    const tdeg = TILT_TOL_DEG;
+    tiltState = Math.abs(d) <= tdeg ? "ok" : d < 0 ? "low" : "high";
+    // Only speak about angle once distance is settled — one instruction at a
+    // time is the difference between a guide and a nag.
+    if (!message && tiltState !== "ok") {
+      message = shot.targetTilt === 0
+        ? "Hold the phone flatter"
+        : d < 0 ? `Tilt more — aiming for ${shot.targetTilt}°` : `Tilt less — aiming for ${shot.targetTilt}°`;
+    }
+  }
+
+  const stated = (shot.targetFill != null ? 1 : 0) + (shot.targetTilt != null ? 1 : 0);
+  const met = (fillState === "ok" ? 1 : 0) + (tiltState === "ok" ? 1 : 0);
+  return { message, onTarget: stated > 0 && met === stated, fill: fillState, tilt: tiltState };
 }

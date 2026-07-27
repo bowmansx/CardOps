@@ -144,6 +144,7 @@ export function AddPhotos({ cardId, haveRoles }: { cardId: string; haveRoles: st
           shotLabel={current.label}
           shotStep={shotStep(index, queue.length)}
           shotHint={current.hint}
+          shotTarget={current}
           onClose={() => {
             // Closing early keeps what was already taken — walking away from
             // shot 9 of 12 must not throw the first eight away.

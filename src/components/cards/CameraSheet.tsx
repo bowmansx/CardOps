@@ -8,6 +8,7 @@ import {
   shouldAutoSnap, pickSharpest, type Rect,
 } from "@/lib/cards/camera";
 import { detectCard, releaseScratch, type Detection } from "@/lib/cards/edges";
+import { guideToTarget, type TemplateShot } from "@/lib/cards/templates";
 import { QUALITY_SPECS, PHOTO_PREF_DEFAULTS, type PhotoPrefs } from "@/lib/cards/photo-prefs";
 
 // Card-scanner aspect guides (w/h): raw card 2.5"x3.5", PSA-style slab ~3.32"x5.44".
@@ -58,6 +59,7 @@ export function CameraSheet({
   shotLabel,
   shotStep,
   shotHint,
+  shotTarget,
   onCapture,
   onClose,
   multi = false,
@@ -72,6 +74,9 @@ export function CameraSheet({
   shotLabel?: string;
   /** Optional "2 of 4" progress, for template runs. */
   shotStep?: string;
+  /** The target framing and angle for THIS shot, when the template states
+   *  them. Drives the live "move closer" guidance and the on-target lock. */
+  shotTarget?: Pick<TemplateShot, "targetFill" | "targetTilt" | "tolerance">;
   /** One line of instruction for THIS shot, e.g. "Fill the frame with the
    *  corner". Templates carry these; without one the frame is just a label. */
   shotHint?: string;
@@ -108,6 +113,8 @@ export function CameraSheet({
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null);
   const histRef = useRef<{ sharp: number; delta: number }[]>([]);
   const busyRef = useRef(false); // one capture at a time
+  // Read inside the auto-snap interval, which closes over its first render.
+  const guideRef = useRef(true);
   const cooldownRef = useRef(0); // don't re-fire on the same card
 
   function stop() {
@@ -348,6 +355,12 @@ export function CameraSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, osMode, guideRect]);
 
+  // Live aim toward the template's target for this shot. Pure function,
+  // so what the HUD says is testable without a camera.
+  const aim = guideToTarget(shotTarget, { fill: det?.fill ?? null, tilt: det?.tilt ?? null });
+  // No target stated means nothing to wait for, so auto-snap behaves as before.
+  guideRef.current = shotTarget?.targetFill == null && shotTarget?.targetTilt == null ? true : aim.onTarget;
+
   /**
    * Detection-probe pixels → coordinates inside the overlay box.
    * Two hops, because the probe is a CROP of the video: probe → video pixels
@@ -381,7 +394,10 @@ export function CameraSheet({
       const hist = histRef.current;
       hist.push(p);
       if (hist.length > HISTORY) hist.shift();
-      const go = shouldAutoSnap(hist);
+      // Sharp and still is not enough when the template asked for a specific
+      // framing — firing early gets a perfectly exposed photo of the wrong
+      // distance, which is exactly what a template exists to prevent.
+      const go = shouldAutoSnap(hist) && guideRef.current;
       setLocked(go);
       if (go) void burstShoot();
     }, 120);
@@ -458,18 +474,45 @@ export function CameraSheet({
             when the geometry can't support it — a confident wrong distance on
             grading evidence is worse than an empty one. */}
         {ready && !osMode && (
-          <span className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold tabular-nums text-white/85">
-            <span>{det?.inches != null ? `${det.inches.toFixed(1)} in` : "— in"}</span>
-            <span className="text-white/25">|</span>
-            <span>{det?.tilt != null ? `${det.tilt.toFixed(0)}°` : "—°"}</span>
-            {det && (
-              <>
-                <span className="text-white/25">|</span>
-                <span className={det.support.filter((v) => v >= LIT).length === 4 ? "text-[#ffd400]" : "text-white/55"}>
-                  {det.support.filter((v) => v >= LIT).length}/4
-                </span>
-              </>
+          <span className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
+            {/* ONE instruction at a time. "Move closer and tilt back and hold
+                still" is a HUD nobody acts on; distance comes first because
+                the angle barely matters until the card is the right size. */}
+            {aim.message && (
+              <span className="rounded-full bg-[#c9a227] px-3 py-1 text-[12px] font-bold text-black">
+                {aim.message}
+              </span>
             )}
+            {aim.onTarget && (
+              <span className="rounded-full bg-emerald-500 px-3 py-1 text-[12px] font-bold text-black">
+                On target
+              </span>
+            )}
+            <span className="flex items-center gap-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold tabular-nums text-white/85">
+              <span className={aim.fill === "ok" ? "text-emerald-300" : aim.fill === "none" ? "" : "text-[#ffd400]"}>
+                {det?.inches != null ? `${det.inches.toFixed(1)} in` : "— in"}
+                {det?.fill != null && shotTarget?.targetFill != null && (
+                  <span className="ml-1 font-normal text-white/45">
+                    {Math.round(det.fill * 100)}/{Math.round(shotTarget.targetFill * 100)}%
+                  </span>
+                )}
+              </span>
+              <span className="text-white/25">|</span>
+              <span className={aim.tilt === "ok" ? "text-emerald-300" : aim.tilt === "none" ? "" : "text-[#ffd400]"}>
+                {det?.tilt != null ? `${det.tilt.toFixed(0)}°` : "—°"}
+                {shotTarget?.targetTilt != null && (
+                  <span className="ml-1 font-normal text-white/45">/ {shotTarget.targetTilt}°</span>
+                )}
+              </span>
+              {det && (
+                <>
+                  <span className="text-white/25">|</span>
+                  <span className={det.support.filter((v) => v >= LIT).length === 4 ? "text-[#ffd400]" : "text-white/55"}>
+                    {det.support.filter((v) => v >= LIT).length}/4
+                  </span>
+                </>
+              )}
+            </span>
           </span>
         )}
 
