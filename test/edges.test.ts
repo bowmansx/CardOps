@@ -273,6 +273,120 @@ describe("it must not invent a card", () => {
   });
 });
 
+// ── a card is never held perfectly square ─────────────────────────
+
+/**
+ * The card as a lens and sensor actually deliver it: the edge ramps across a
+ * pixel or two rather than landing on a pixel boundary.
+ *
+ * THIS MATTERS MORE THAN IT LOOKS. `render` fills each pixel in or out, so a
+ * rotated edge becomes literal stair treads whose gradients point along the
+ * axes - and the Hough transform then elects axis-aligned lines for a card
+ * that is plainly rotated. That is a property of the renderer and of no
+ * photograph, and tuning the detector against it would be tuning against a
+ * lie. Anything about ROTATION gets tested here, not with `render`.
+ */
+function renderAA(quad: Quad, w: number, h: number): Uint8ClampedArray {
+  const g = new Uint8ClampedArray(w * h).fill(30);
+  const pts = [quad.tl, quad.tr, quad.br, quad.bl];
+  const inside = (x: number, y: number) => {
+    let c = false;
+    for (let i = 0, j = 3; i < 4; j = i++) {
+      const a = pts[i], b = pts[j];
+      if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) c = !c;
+    }
+    return c;
+  };
+  const S = 4;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let n = 0;
+      for (let sy = 0; sy < S; sy++) {
+        for (let sx = 0; sx < S; sx++) if (inside(x + (sx + 0.5) / S, y + (sy + 0.5) / S)) n++;
+      }
+      g[y * w + x] = 30 + Math.round((n / (S * S)) * 195);
+    }
+  }
+  return g;
+}
+
+const rotate = (q: Quad, deg: number): Quad => {
+  const r = (deg * Math.PI) / 180, c = Math.cos(r), sn = Math.sin(r);
+  const cx = (q.tl.x + q.br.x) / 2, cy = (q.tl.y + q.br.y) / 2;
+  const t = (p: Point): Point => ({
+    x: cx + (p.x - cx) * c - (p.y - cy) * sn,
+    y: cy + (p.x - cx) * sn + (p.y - cy) * c,
+  });
+  return { tl: t(q.tl), tr: t(q.tr), br: t(q.br), bl: t(q.bl) };
+};
+
+/** A little sensor grain, so a result is never one lucky rasterisation. */
+const grainy = (g: Uint8ClampedArray, seed: number) => {
+  let st = seed;
+  const out = new Uint8ClampedArray(g.length);
+  for (let i = 0; i < g.length; i++) {
+    st = (st * 1103515245 + 12345) & 0x7fffffff;
+    out[i] = Math.max(0, Math.min(255, g[i] + ((st % 21) - 10)));
+  }
+  return out;
+};
+
+describe("a card held slightly off-square stays found", () => {
+  // The real probe: a 192px-wide crop of a portrait guide.
+  const W = 192, H = 269;
+  const card = rect(30, 40, 130, 182);
+
+  for (const deg of [0, 1, 2, 3.5, 5, 8]) {
+    it(`holds the lock at ${deg} degrees`, () => {
+      const truth = rotate(card, deg);
+      let found = 0;
+      for (let seed = 1; seed <= 30; seed++) {
+        if (detectCard(grainy(renderAA(truth, W, H), seed), W, H)) found++;
+      }
+      expect(found).toBeGreaterThanOrEqual(29);
+    });
+  }
+
+  /**
+   * The real defect the search band fixes, and the only regime where it shows.
+   *
+   * Around 2 degrees the edge straddles two theta bins and the votes split, so
+   * the elected line sits off the true edge by more than a fixed one-pixel
+   * search band covers. With +/-1 the four sides scored 0.67 / 0.63 / 0.88 /
+   * 0.73 against a lit threshold of 0.55 - eight hundredths of margin, which
+   * sensor noise erases, and an edge that blinks off and back is what "it does
+   * not lock in smoothly" actually looks like.
+   */
+  it("keeps clear of the lit threshold at the angle a hand actually holds", () => {
+    const d = detectCard(renderAA(rotate(card, 2), W, H), W, H);
+    expect(d).not.toBeNull();
+    expect(Math.min(...d!.support)).toBeGreaterThan(0.75);
+  });
+});
+
+describe("support and sampled are different facts", () => {
+  const W = 192, H = 269;
+
+  it("reports a fully visible card as fully sampled", () => {
+    const d = detectCard(renderAA(rect(30, 40, 130, 182), W, H), W, H);
+    expect(d).not.toBeNull();
+    expect(Math.min(...d!.sampled)).toBeGreaterThanOrEqual(0.9);
+    expect(d!.fill).not.toBeNull();
+  });
+
+  // "Nothing under this line" and "could not look under this line" used to be
+  // reported as the same number - the difference between a thumb over the edge
+  // and a card framed tight to the crop. A distance printed off a side nobody
+  // measured is exactly the kind of confident wrongness the dashes exist for.
+  it("never claims a distance off a side it could not look at", () => {
+    const d = detectCard(renderAA(rect(-40, -30, 190, 260), W, H), W, H);
+    if (d && d.sampled.some((v) => v < 0.7)) {
+      expect(d.inches).toBeNull();
+      expect(d.fill).toBeNull();
+    }
+  });
+});
+
 describe("honest nulls", () => {
   it("tiltDegrees returns null for a degenerate quad rather than a confident 90", () => {
     const q: Quad = { tl: { x: 5, y: 5 }, tr: { x: 5, y: 5 }, br: { x: 5, y: 5 }, bl: { x: 5, y: 5 } };

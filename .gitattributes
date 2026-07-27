@@ -1,0 +1,25 @@
+# Line endings, settled once.
+#
+# WHY THIS FILE EXISTS. Without it, Git on Windows converts LF to CRLF on
+# checkout, and anything that runs `git add -A` across the repo then commits
+# every converted file as changed. On 2026-07-27 the Obsidian Git plugin did
+# exactly that: commit 83ac9d8, titled "notes", rewrote 24 source files and
+# changed ZERO characters of content (`git diff -w` was empty). It then
+# conflicted with every real change in flight, and the conflict looked like a
+# genuine one - every line of every file, on both sides.
+#
+# `text=auto eol=lf` normalises to LF in the repository AND in the working
+# tree, so there is nothing left to convert and nothing left to churn. Node,
+# Next, vitest and every editor in use handle LF on Windows without complaint.
+* text=auto eol=lf
+
+# Binaries must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff  binary
+*.woff2 binary

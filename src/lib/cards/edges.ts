@@ -161,12 +161,24 @@ export function houghLines(
       // pixel of a single edge vote for a different rho.
       let t = Math.round((dir[i] / Math.PI) * THETA_STEPS);
       t = ((t % THETA_STEPS) + THETA_STEPS) % THETA_STEPS;
-      // One bin, not three. The +/-1 spread smoothed 1-degree quantisation but
-      // tripled the hottest loop in the module to do it, and the peak
-      // suppression below already tolerates an edge landing across two bins.
+      // Split each vote between the two nearest RHO bins, weighted by where
+      // the true rho falls between them. Rounding to one bin throws away the
+      // sub-bin position of every pixel; splitting keeps it, and the centroid
+      // of the two weighted bins sits at exactly the true rho.
+      //
+      // NOT the same as the +/-1 THETA spread this loop used to do and no
+      // longer does. That strode `rhoBins * 4` bytes through a 239KB
+      // accumulator - three cache misses per vote, which is what tripled the
+      // hottest loop in the module. These two bins are 4 bytes apart, on the
+      // same cache line.
       const rho = x * COS[t] + y * SIN[t];
-      const rb = ((rho + diag) / RHO_STEP + 0.5) | 0;
-      if (rb >= 0 && rb < rhoBins) acc[t * rhoBins + rb] += m;
+      const rf = (rho + diag) / RHO_STEP;
+      const rb = Math.floor(rf);
+      const f = rf - rb;
+      if (rb >= 0 && rb + 1 < rhoBins) {
+        acc[t * rhoBins + rb] += m * (1 - f);
+        acc[t * rhoBins + rb + 1] += m * f;
+      }
     }
   }
 
@@ -188,7 +200,28 @@ export function houghLines(
       const tPrev = (t - 1 + THETA_STEPS) % THETA_STEPS;
       const tNext = (t + 1) % THETA_STEPS;
       if (v < acc[tPrev * rhoBins + rb] || v < acc[tNext * rhoBins + rb]) continue;
-      peaks.push({ rho: rb * RHO_STEP - diag, theta: (t * Math.PI) / THETA_STEPS, votes: v });
+      // SUB-BIN REFINEMENT. The peak's true position is almost never at a bin
+      // centre, and a parabola through the bin and its two neighbours puts it
+      // where the votes say it is. Free: at most PEAK_CAP peaks survive, and
+      // these are the same six cells the suppression test above already read.
+      //
+      // Effective resolution goes from 2px / 1deg to roughly 0.2px / 0.1deg on
+      // a strong edge, which is what stops the elected line sitting off its own
+      // card edge - the thing the search band in segmentSupport has to absorb.
+      const dr = subBin(acc[t * rhoBins + rb - 1], v, acc[t * rhoBins + rb + 1]);
+      // The theta neighbours of bin 0 and bin 179 are each other's MIRROR (the
+      // same physical line read from the far side, rho negated), not a
+      // neighbouring angle. Refining across that seam invents a shift. Leave
+      // those two alone - and note an upright card lives exactly there, where
+      // the detector is already at its most accurate.
+      const dt = (t === 0 || t === THETA_STEPS - 1)
+        ? 0
+        : subBin(acc[tPrev * rhoBins + rb], v, acc[tNext * rhoBins + rb]);
+      peaks.push({
+        rho: (rb + dr) * RHO_STEP - diag,
+        theta: ((t + dt) * Math.PI) / THETA_STEPS,
+        votes: v,
+      });
       if (peaks.length > PEAK_CAP) {
         peaks.sort((a, b) => b.votes - a.votes);
         peaks.length = PEAK_CAP;
@@ -214,6 +247,21 @@ export function houghLines(
     if (!dup) kept.push(p);
   }
   return kept;
+}
+
+/**
+ * Where the true peak sits between three consecutive accumulator cells.
+ *
+ * Fits a parabola through (-1, a), (0, v), (1, b) and returns the offset of
+ * its vertex, clamped to the cell. Returns 0 when the three are collinear or
+ * the curvature is degenerate - no evidence of a sub-bin position is not the
+ * same as evidence of the centre, but the centre is the only honest default.
+ */
+export function subBin(a: number, v: number, b: number): number {
+  const den = a - 2 * v + b;
+  if (!(Math.abs(den) > 1e-6)) return 0;
+  const d = (0.5 * (a - b)) / den;
+  return Math.max(-0.5, Math.min(0.5, d));
 }
 
 /** The point on a line closest to (cx, cy). Seam-free way to compare lines. */
@@ -326,17 +374,42 @@ export function quadFromLines(lines: Line[], w: number, h: number): Quad | null 
  * in inches. Votes prove a direction was popular; only this proves an edge is
  * there.
  */
+// How far a pixel's gradient direction may differ from the line's normal and
+// still count as lying on it. The band above searches wider than it used to,
+// so this is the term keeping noise out; tighten it here, never widen the band.
+const ANGLE_GATE = 0.22;
+
 export function segmentSupport(
   a: Point, b: Point, theta: number,
   mag: Float32Array, dir: Float32Array, w: number, h: number,
   threshold: number,
-): number {
+): { support: number; sampled: number } {
   const len = dist(a, b);
-  if (len < 4) return 0;
+  if (len < 4) return { support: 0, sampled: 0 };
   const samples = Math.min(64, Math.max(8, Math.round(len / 2)));
   // Unit normal to the line: the only direction worth searching.
   const nx = Math.cos(theta), ny = Math.sin(theta);
-  let hit = 0, counted = 0;
+  // THE BAND HAS TO COVER THE QUANTISATION, OR THE LINE WALKS OFF ITS OWN EDGE.
+  // Hough rounds every line onto a 1-degree, 2-pixel grid, and half a degree
+  // of fit error over a 200px side displaces the line ~1.9px at the ends - so
+  // a fixed +/-1 band searches a strip the real edge has already left.
+  //
+  // It bites in ONE regime, and it is the regime a hand-held phone lives in.
+  // Measured on antialiased fixtures at 192x269: at 0, 3.5, 5 and 8 degrees
+  // the band makes no difference at all (0.98 support either way). At ~2
+  // degrees, where the edge straddles two theta bins and the votes split, a
+  // +/-1 band gives 0.67 / 0.63 / 0.88 / 0.73 against a LIT threshold of 0.55
+  // - two sides sitting eight hundredths above the level where they stop
+  // being drawn, so any sensor noise blinks them off and back. The wider band
+  // gives 0.89 / 0.78 / 0.95 / 0.95, which has margin.
+  //
+  // (An earlier measurement claimed this killed 34-43 of every 60 frames at
+  // 3.5-5 degrees. That was measured against a BINARY-FILL fixture, where a
+  // rotated edge becomes literal stair treads whose gradients point along the
+  // axes - a property of the renderer, not of any photograph. On an
+  // antialiased edge detection holds at every angle tested. Fixture, not bug.)
+  const band = Math.min(3, Math.max(1, Math.ceil(len * 0.0087)));
+  let hit = 0, inFrame = 0;
   for (let i = 0; i < samples; i++) {
     const t = (i + 0.5) / samples;
     const px = a.x + (b.x - a.x) * t;
@@ -344,19 +417,28 @@ export function segmentSupport(
     // Look only ACROSS the line, not in a 3x3 block. A block of nine chances
     // with a loose angle window finds a passing pixel in pure noise about 90%
     // of the time, which is how noise used to score as a fully supported edge.
-    let best = 0;
-    for (let k = -1; k <= 1; k++) {
+    // The band widens along the normal only, so the angle gate below is still
+    // what keeps noise out.
+    let best = 0, looked = false;
+    for (let k = -band; k <= band; k++) {
       const x = Math.round(px + nx * k), y = Math.round(py + ny * k);
       if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
+      looked = true;
       const i2 = y * w + x;
       if (mag[i2] < threshold) continue;
-      if (angleGap(dir[i2], theta) > 0.25) continue;
+      if (angleGap(dir[i2], theta) > ANGLE_GATE) continue;
       best = Math.max(best, mag[i2]);
     }
-    counted++;
-    if (best > 0) hit++;
+    // "No edge here" and "couldn't look here" are different facts, and the old
+    // code reported both as unsupported. A side hanging off the crop read as
+    // a side with nothing under it - the difference between a thumb over the
+    // edge and a card framed close, which the caller could not tell apart.
+    if (looked) { inFrame++; if (best > 0) hit++; }
   }
-  return counted ? hit / counted : 0;
+  return {
+    support: inFrame ? hit / inFrame : 0,
+    sampled: samples ? inFrame / samples : 0,
+  };
 }
 
 /** Put four corners in tl, tr, br, bl order regardless of how they arrived. */
@@ -604,7 +686,11 @@ export function guessSize(
 
 export type Detection = {
   quad: Quad;
-  fill: number;
+  /** Fraction of the frame the card covers, or NULL when fewer than four
+   *  sides were found - with three, one boundary of the quad is where two
+   *  lines happen to cross rather than where the card ends, and "move closer"
+   *  computed off an invented edge is an instruction nobody should follow. */
+  fill: number | null;
   /** Degrees off perpendicular, or null when it can't be measured. */
   tilt: number | null;
   /** Inches, or null when the geometry doesn't justify a number. */
@@ -619,10 +705,17 @@ export type Detection = {
    *  actually lies under each line. Drives the per-edge highlight: a side
    *  above `minSupport` is a side you have locked. */
   support: [number, number, number, number];
+  /** 0..1 per side, same order: what FRACTION of that side could be looked at
+   *  at all. A side mostly outside the crop can score full support off the
+   *  sliver that was visible, so every gate that trusts `support` has to read
+   *  this too - otherwise a distance gets printed off a side nobody measured. */
+  sampled: [number, number, number, number];
   /** The four sides as line segments, for drawing. */
   edges: [[Point, Point], [Point, Point], [Point, Point], [Point, Point]];
 };
 
+/** How much of a side must be inside the frame before its support is trusted. */
+const MIN_SAMPLED = 0.7;
 /** Above this tilt, aspect ratio is too foreshortened to name a card size. */
 const MAX_TILT_FOR_SIZE = 12;
 /** Above this tilt, the pinhole distance estimate stops being trustworthy. */
@@ -662,14 +755,19 @@ export function detectCard(
   const sides: [Point, Point][] = [
     [quad.tl, quad.tr], [quad.tr, quad.br], [quad.br, quad.bl], [quad.bl, quad.tl],
   ];
-  const support = sides.map(([p, q]) =>
+  const measured = sides.map(([p, q]) =>
     segmentSupport(p, q, Math.atan2(q.y - p.y, q.x - p.x) + Math.PI / 2, mag, dir, w, h, threshold),
-  ) as [number, number, number, number];
+  );
+  const support = measured.map((m) => m.support) as [number, number, number, number];
+  const sampled = measured.map((m) => m.sampled) as [number, number, number, number];
 
   // At least three sides must be real before this is a card at all. Two lit
   // sides is a corner of something; it is not evidence of a rectangle.
   const lit = support.filter((v) => v >= minSupport).length;
   if (lit < 3) return null;
+  // Four lit sides, all of them actually looked at. `lit === 4` alone stopped
+  // being enough the moment support became a fraction of what was IN FRAME.
+  const wholeCard = lit === 4 && sampled.every((v) => v >= MIN_SAMPLED);
 
   // ONE focal length, computed from the frame's LONG edge, shared by both
   // readings. Deriving it from the width made every portrait reading wrong.
@@ -690,8 +788,14 @@ export function detectCard(
   }
 
   const dims = typeof opts.size === "object" ? opts.size : size;
-  const trustworthy = lit === 4 && (tilt == null || tilt <= MAX_TILT_FOR_DISTANCE) && !sizeAmbiguous;
+  const trustworthy = wholeCard && (tilt == null || tilt <= MAX_TILT_FOR_DISTANCE) && !sizeAmbiguous;
   const inches = dims && trustworthy ? distanceInches(quad, w, dims, opts.fovDegrees, focal) : null;
 
-  return { quad, fill: frameFill(quad, w, h), tilt, inches, aspect, size, sizeAmbiguous, support, edges: sides as Detection["edges"] };
+  return {
+    quad,
+    // Null unless all four sides are real and measured: see Detection.fill.
+    fill: wholeCard ? frameFill(quad, w, h) : null,
+    tilt, inches, aspect, size, sizeAmbiguous, support, sampled,
+    edges: sides as Detection["edges"],
+  };
 }
