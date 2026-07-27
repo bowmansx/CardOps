@@ -7,6 +7,7 @@ import {
   CARD_ASPECT, SLAB_ASPECT, withMargin, sharpness, frameDelta,
   shouldAutoSnap, pickSharpest,
 } from "@/lib/cards/camera";
+import { detectCard, releaseScratch, type Detection } from "@/lib/cards/edges";
 import { QUALITY_SPECS, PHOTO_PREF_DEFAULTS, type PhotoPrefs } from "@/lib/cards/photo-prefs";
 
 // Card-scanner aspect guides (w/h): raw card 2.5"x3.5", PSA-style slab ~3.32"x5.44".
@@ -17,6 +18,15 @@ type GuideKind = keyof typeof GUIDES;
 // user's saved photo preferences — see lib/cards/photo-prefs.)
 const PROBE_W = 96;      // downscaled probe frame, keeps the loop cheap
 const HISTORY = 8;
+
+// Edge detection runs on its own, wider probe covering the WHOLE frame — the
+// card can sit anywhere, and the overlay has to land on it wherever it is.
+// 192px measures ~0.25ms a frame on a laptop; a phone is a few ms, which is a
+// small slice of a 150ms budget.
+const DETECT_W = 192;
+const DETECT_MS = 150;
+// A side needs this much real edge under it before it counts as locked.
+const LIT = 0.55;
 
 export type CapturedShot = {
   /** The framed, margin-preserved card image — what the app shows and scans. */
@@ -86,6 +96,11 @@ export function CameraSheet({
   const [auto, setAuto] = useState(prefs.auto_snap);
   const [locked, setLocked] = useState(false); // sharp + steady right now
   const probeRef = useRef<HTMLCanvasElement | null>(null);
+  const detectRef = useRef<HTMLCanvasElement | null>(null);
+  // The live edge read. Null means "no card found" and the overlay shows
+  // nothing at all — a wrong outline is worse than no outline.
+  const [det, setDet] = useState<Detection | null>(null);
+  const [detSize, setDetSize] = useState<{ w: number; h: number } | null>(null);
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null);
   const histRef = useRef<{ sharp: number; delta: number }[]>([]);
   const busyRef = useRef(false); // one capture at a time
@@ -264,6 +279,55 @@ export function CameraSheet({
     return { sharp: sharpness(gray, w, h), delta };
   }
 
+  /** Grayscale the WHOLE frame at detection resolution. */
+  function detectProbe(): { gray: Uint8ClampedArray; w: number; h: number } | null {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return null;
+    const c = (detectRef.current ??= document.createElement("canvas"));
+    const w = DETECT_W;
+    const h = Math.max(1, Math.round((v.videoHeight / v.videoWidth) * w));
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    const gray = new Uint8ClampedArray(w * h);
+    for (let i = 0, q = 0; i < data.length; i += 4, q++) {
+      gray[q] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+    }
+    return { gray, w, h };
+  }
+
+  // Live edge detection. Runs whenever the camera is open — it drives the
+  // lock-on outline and the distance/angle readout, neither of which depend on
+  // auto-snap being on.
+  useEffect(() => {
+    if (!ready || osMode) return;
+    let alive = true;
+    const id = setInterval(() => {
+      if (!alive || busyRef.current) return;
+      const p = detectProbe();
+      if (!p) { setDet(null); return; }
+      const d = detectCard(p.gray, p.w, p.h);
+      setDet(d);
+      setDetSize({ w: p.w, h: p.h });
+    }, DETECT_MS);
+    return () => { alive = false; clearInterval(id); releaseScratch(); };
+  }, [ready, osMode]);
+
+  /** Detection-probe pixels → coordinates inside the overlay box. */
+  function toScreen(pt: { x: number; y: number }) {
+    const v = videoRef.current;
+    const box = boxRef.current;
+    if (!v || !box || !detSize) return { x: 0, y: 0 };
+    const vr = v.getBoundingClientRect();
+    const br = box.getBoundingClientRect();
+    return {
+      x: vr.left - br.left + (pt.x / detSize.w) * vr.width,
+      y: vr.top - br.top + (pt.y / detSize.h) * vr.height,
+    };
+  }
+
   // Auto-snap: sample ~8x/sec, fire once the frame has been sharp AND still for
   // several consecutive samples. Consecutive matters — a single sharp frame
   // happens while sweeping the phone across a table and would fire on whatever
@@ -327,6 +391,49 @@ export function CameraSheet({
 
       <div ref={boxRef} className="relative flex flex-1 items-center justify-center overflow-hidden">
         <video ref={videoRef} playsInline muted onLoadedMetadata={layoutGuide} className="max-h-full max-w-full" />
+        {/* THE LOCK-ON. Each side lights thin yellow the moment there is real
+            edge under it, so three lit and one dark tells you exactly which
+            way to move your thumb. Nothing draws unless a card was actually
+            found — a wrong outline is worse than no outline. */}
+        {det && detSize && ready && (
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" style={{ overflow: "visible" }}>
+            {det.edges.map((seg, i) => {
+              const a = toScreen(seg[0]);
+              const b = toScreen(seg[1]);
+              const lit = det.support[i] >= LIT;
+              return (
+                <line
+                  key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                  stroke={lit ? "#ffd400" : "#ffffff"}
+                  strokeOpacity={lit ? 0.95 : 0.22}
+                  strokeWidth={lit ? 2 : 1}
+                  strokeDasharray={lit ? undefined : "4 5"}
+                  strokeLinecap="round"
+                />
+              );
+            })}
+          </svg>
+        )}
+
+        {/* Distance and angle. Each reads a dash rather than a stale number
+            when the geometry can't support it — a confident wrong distance on
+            grading evidence is worse than an empty one. */}
+        {ready && !osMode && (
+          <span className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold tabular-nums text-white/85">
+            <span>{det?.inches != null ? `${det.inches.toFixed(1)} in` : "— in"}</span>
+            <span className="text-white/25">|</span>
+            <span>{det?.tilt != null ? `${det.tilt.toFixed(0)}°` : "—°"}</span>
+            {det && (
+              <>
+                <span className="text-white/25">|</span>
+                <span className={det.support.filter((v) => v >= LIT).length === 4 ? "text-[#ffd400]" : "text-white/55"}>
+                  {det.support.filter((v) => v >= LIT).length}/4
+                </span>
+              </>
+            )}
+          </span>
+        )}
+
         {guideRect && ready && (
           <>
             {/* Turns green the moment the frame is sharp and steady, so you can

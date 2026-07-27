@@ -47,13 +47,60 @@ export const CARD_SIZES = {
 } as const;
 export type CardSizeKey = keyof typeof CARD_SIZES;
 
+const THETA_STEPS = 180;          // 1° resolution
+const RHO_STEP = 2;               // pixels per accumulator bin
+// Below this gradient magnitude a pixel can never reach any caller's vote
+// threshold, so its direction is never needed. Kept well under the default
+// threshold of 60 so a caller passing a lower one still gets correct answers.
+const ATAN_FLOOR = 20;
+
+// ── scratch ────────────────────────────────────────────────────────────────
+//
+// This runs ~10x a second on a phone that is simultaneously encoding video.
+// Allocating fresh typed arrays per frame was ~590 KB a call — 5.9 MB/s of
+// garbage — so the buffers are kept and reused. The probe frame size is
+// constant across a session, so after the first frame nothing is allocated at
+// all.
+
+type Scratch = { w: number; h: number; mag: Float32Array; dir: Float32Array; acc: Float32Array; rhoBins: number };
+let scratch: Scratch | null = null;
+
+function scratchFor(w: number, h: number): Scratch {
+  if (scratch && scratch.w === w && scratch.h === h) return scratch;
+  const diag = Math.ceil(Math.sqrt(w * w + h * h));
+  const rhoBins = Math.ceil((2 * diag) / RHO_STEP) + 1;
+  scratch = {
+    w, h, rhoBins,
+    mag: new Float32Array(w * h),
+    dir: new Float32Array(w * h),
+    acc: new Float32Array(THETA_STEPS * rhoBins),
+  };
+  return scratch;
+}
+
+/** Release the reused buffers — call when the camera closes. */
+export function releaseScratch(): void { scratch = null; }
+
+// The angle tables depend only on THETA_STEPS, a compile-time constant, so
+// they are built once for the life of the module rather than once per frame.
+const COS = new Float32Array(THETA_STEPS);
+const SIN = new Float32Array(THETA_STEPS);
+for (let t = 0; t < THETA_STEPS; t++) {
+  const a = (t * Math.PI) / THETA_STEPS;
+  COS[t] = Math.cos(a);
+  SIN[t] = Math.sin(a);
+}
+
 // ── gradients ──────────────────────────────────────────────────────────────
 
 /** Sobel magnitude and direction over a grayscale buffer. */
 export function sobel(gray: Uint8ClampedArray | Uint8Array, w: number, h: number):
   { mag: Float32Array; dir: Float32Array } {
-  const mag = new Float32Array(w * h);
-  const dir = new Float32Array(w * h);
+  const sc = scratchFor(w, h);
+  const mag = sc.mag;
+  const dir = sc.dir;
+  mag.fill(0);
+  dir.fill(0);
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
       const i = y * w + x;
@@ -62,8 +109,13 @@ export function sobel(gray: Uint8ClampedArray | Uint8Array, w: number, h: number
       const bl = gray[i + w - 1], b = gray[i + w], br = gray[i + w + 1];
       const gx = tr + 2 * r + br - tl - 2 * l - bl;
       const gy = bl + 2 * b + br - tl - 2 * t - tr;
-      mag[i] = Math.hypot(gx, gy);
-      dir[i] = Math.atan2(gy, gx);
+      // sqrt, not hypot: hypot guards against overflow we cannot reach here
+      // (values are bounded by 4*255) and costs ~8x for the privilege.
+      const m = Math.sqrt(gx * gx + gy * gy);
+      mag[i] = m;
+      // atan2 is the expensive part and ~half of all pixels never clear the
+      // vote threshold, so it is only computed for those that might.
+      if (m >= ATAN_FLOOR) dir[i] = Math.atan2(gy, gx);
     }
   }
   return { mag, dir };
@@ -71,8 +123,6 @@ export function sobel(gray: Uint8ClampedArray | Uint8Array, w: number, h: number
 
 // ── Hough ──────────────────────────────────────────────────────────────────
 
-const THETA_STEPS = 180;          // 1° resolution
-const RHO_STEP = 2;               // pixels per accumulator bin
 
 /**
  * Vote edge pixels into a (rho, theta) accumulator and return peaks.
@@ -95,16 +145,11 @@ export function houghLines(
   // full edge strength separates them cleanly.
   const minVotes = opts.minVotes ?? 0.25 * Math.min(w, h) * threshold;
 
-  const diag = Math.ceil(Math.hypot(w, h));
-  const rhoBins = Math.ceil((2 * diag) / RHO_STEP) + 1;
-  const acc = new Float32Array(THETA_STEPS * rhoBins);
-  const cos = new Float32Array(THETA_STEPS);
-  const sin = new Float32Array(THETA_STEPS);
-  for (let t = 0; t < THETA_STEPS; t++) {
-    const a = (t * Math.PI) / THETA_STEPS;
-    cos[t] = Math.cos(a);
-    sin[t] = Math.sin(a);
-  }
+  const sc = scratchFor(w, h);
+  const diag = Math.ceil(Math.sqrt(w * w + h * h));
+  const rhoBins = sc.rhoBins;
+  const acc = sc.acc;
+  acc.fill(0);
 
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
@@ -116,29 +161,39 @@ export function houghLines(
       // pixel of a single edge vote for a different rho.
       let t = Math.round((dir[i] / Math.PI) * THETA_STEPS);
       t = ((t % THETA_STEPS) + THETA_STEPS) % THETA_STEPS;
-      // Spread the vote over neighbouring bins — a hard 1° quantisation
-      // splits one real edge across two bins and halves its peak.
-      for (let dt = -1; dt <= 1; dt++) {
-        const tt = ((t + dt) % THETA_STEPS + THETA_STEPS) % THETA_STEPS;
-        const rho = x * cos[tt] + y * sin[tt];
-        const rb = Math.round((rho + diag) / RHO_STEP);
-        if (rb < 0 || rb >= rhoBins) continue;
-        acc[tt * rhoBins + rb] += dt === 0 ? m : m * 0.5;
-      }
+      // One bin, not three. The +/-1 spread smoothed 1-degree quantisation but
+      // tripled the hottest loop in the module to do it, and the peak
+      // suppression below already tolerates an edge landing across two bins.
+      const rho = x * COS[t] + y * SIN[t];
+      const rb = ((rho + diag) / RHO_STEP + 0.5) | 0;
+      if (rb >= 0 && rb < rhoBins) acc[t * rhoBins + rb] += m;
     }
   }
 
   // Non-maximum suppression, then take the strongest peaks.
+  //
+  // BOUNDED. This array used to be content-driven — 32 objects on the test
+  // fixture and 4,225 on a real frame — and every one of them an allocation
+  // inside a 10fps loop. Only the strongest few can survive the dedupe below,
+  // so anything weaker than the current worst survivor is dropped on sight.
+  const PEAK_CAP = 96;
   const peaks: Line[] = [];
+  let weakest = 0;
   for (let t = 0; t < THETA_STEPS; t++) {
     for (let rb = 1; rb < rhoBins - 1; rb++) {
       const v = acc[t * rhoBins + rb];
       if (v < minVotes) continue;
+      if (peaks.length >= PEAK_CAP && v <= weakest) continue;
       if (v < acc[t * rhoBins + rb - 1] || v < acc[t * rhoBins + rb + 1]) continue;
       const tPrev = (t - 1 + THETA_STEPS) % THETA_STEPS;
       const tNext = (t + 1) % THETA_STEPS;
       if (v < acc[tPrev * rhoBins + rb] || v < acc[tNext * rhoBins + rb]) continue;
       peaks.push({ rho: rb * RHO_STEP - diag, theta: (t * Math.PI) / THETA_STEPS, votes: v });
+      if (peaks.length > PEAK_CAP) {
+        peaks.sort((a, b) => b.votes - a.votes);
+        peaks.length = PEAK_CAP;
+        weakest = peaks[PEAK_CAP - 1].votes;
+      }
     }
   }
   peaks.sort((a, b) => b.votes - a.votes);
