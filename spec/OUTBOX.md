@@ -10,24 +10,50 @@ file will get overwritten.
 
 ---
 
-## Paste these, then merge
+## Where things stand — 2026-07-27 evening
 
-Nothing auto-applies and nothing auto-merges — a branch carrying a migration is
-always yours to land. There are **two branches** and **three migrations**, and
-they don't line up one-to-one, so here they are together:
+Everything below is **merged and live** on card-ops-zeta. Two migrations are
+waiting on you; nothing breaks until you run them.
 
-| Branch | Migration to paste first | What it does |
+### Paste when you're ready
+
+| Migration | What it does | If you skip it |
 |---|---|---|
-| `identity-auto-relic` | `20260745000000_identity_auto_relic.sql` | Autographs and relics stop colliding with the base card in `card_identities`. **Do this one first** — until it lands, a signed copy shares market history with an unsigned one. |
-| `edge-detection` | `20260746000000_template_targets.sql` | Proximity + angle targets on the built-in photo templates, plus the **Front only** template you asked to sit second in the list. |
-| `edge-detection` | `20260747000000_photo_position.sql` | `card_photos.position` — so the order of a photo session is the order the photos are saved in. |
+| `20260748000000_scan_on_open.sql` | The **Start scan** button — camera opens for framing, scanning waits for the tap | Nothing breaks. The default applies and you get the button anyway. Pasting it just lets you turn it OFF. |
+| `20260749000000_graded_template.sql` | The **Graded slab** template — front, back, label close-up, auto-picks the slab guide | The template doesn't appear in the list. Nothing else is affected. |
 
-Paste the SQL **before** merging the branch it belongs to: the new code reads
-columns and rows the migration creates.
+Still unpasted from earlier: `20260745000000_identity_auto_relic.sql`, on the
+unmerged `identity-auto-relic` branch. Autographs and relics still share market
+history with the unsigned base card until it lands.
 
-None of them touch existing rows destructively. 20260746 rewrites the four
-**built-in** templates only; anything you made yourself is untouched.
-`edge-detection` is ten commits — everything under *Shipped* below.
+### The one test that decides the next big piece
+
+Use a **raw card** — matte, on a dark non-glossy surface. Frame it, hit Start
+scan, then move the phone around it for ~10 seconds and read the verdict line.
+
+A PSA slab is the wrong test and that's a real finding, not a nitpick: polished
+plastic reflects a far wider slice of the room than cardstock, so a lamp that's
+sweepable on a raw card may be un-sweepable on a slab. It's also why the edge
+detector locks onto the holder rather than the card.
+
+What the answer decides:
+- *"small enough to sweep around"* → build the glare compositor (Stage 2, ~9 days)
+- *"doesn't move as you do"* → don't build it; the answer is a smaller lamp
+
+### Honest state of the multi-frame scan
+
+- **Stage 0, light measurement** — built, that's the readout you're testing
+- **Stage 1, deskew + derived corner crops** — *not started*. Ships value either
+  way: a square-on rectified front/back, and corner crops that beat hand-held
+  close-ups because a phone can't focus close enough to compete
+- **Stage 2, the glare-free compilation** — *not started, gated on the test above*
+
+### Also unfinished
+
+The **temporal tracker** — the piece that makes the lock glide instead of
+wobble. Designed, not written. Jitter currently sits around 2.9px at the ~2°
+angle a hand actually holds; the flat case is already 10× steadier than this
+morning.
 
 ---
 
