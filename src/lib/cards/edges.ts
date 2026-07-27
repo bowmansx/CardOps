@@ -459,14 +459,19 @@ export function clipToRect(pts: Point[], w: number, h: number): Point[] {
 }
 
 /**
- * Focal length in pixels, from the horizontal field of view.
+ * Focal length in pixels, from the field of view.
  *
- * Phone cameras cluster around 60-70° horizontal FOV; 65 is a reasonable
- * default and the error it introduces is a few percent, not a factor. When a
- * device reports its real FOV, pass it — and every reading gets better.
+ * PASS THE LONG EDGE. The 60-70° figure quoted for phone cameras is the
+ * angle across the SENSOR'S LONG AXIS. Feeding it the frame width is only
+ * correct in landscape — and a card is almost always shot in portrait, where
+ * the width is the SHORT side subtending nearer 39°. That mistake made every
+ * distance read ~45% low: a card at 12 inches reported 6.8.
+ *
+ * 65° is a reasonable default and the residual error is a few percent, not a
+ * factor. When a device reports its real FOV, pass it.
  */
-export function focalPx(frameWidth: number, fovDegrees = 65): number {
-  return frameWidth / 2 / Math.tan((fovDegrees * Math.PI) / 360);
+export function focalPx(frameLongEdge: number, fovDegrees = 65): number {
+  return frameLongEdge / 2 / Math.tan((fovDegrees * Math.PI) / 360);
 }
 
 /**
@@ -539,10 +544,14 @@ function norm3(x: number, y: number, z: number): [number, number, number] {
  * pair, which is the one nearer the lens and least foreshortened.
  */
 export function distanceInches(
-  q: Quad, w: number, size: CardSizeKey | { w: number; h: number } = "standard", fovDegrees = 65,
+  q: Quad, w: number, size: CardSizeKey | { w: number; h: number } = "standard",
+  fovDegrees = 65, focal?: number,
 ): number | null {
   const dims = typeof size === "string" ? CARD_SIZES[size] : size;
-  const f = focalPx(w, fovDegrees);
+  // Falls back to treating `w` as the long edge, which is right for a
+  // standalone landscape call and is what the tests exercise. detectCard
+  // always passes the real long edge.
+  const f = focal ?? focalPx(w, fovDegrees);
   const widthPx = Math.max(dist(q.tl, q.tr), dist(q.bl, q.br));
   const heightPx = Math.max(dist(q.tl, q.bl), dist(q.tr, q.br));
   if (widthPx < 1 || heightPx < 1) return null;
@@ -662,7 +671,10 @@ export function detectCard(
   const lit = support.filter((v) => v >= minSupport).length;
   if (lit < 3) return null;
 
-  const tilt = tiltDegrees(quad, w, h, focalPx(w, opts.fovDegrees));
+  // ONE focal length, computed from the frame's LONG edge, shared by both
+  // readings. Deriving it from the width made every portrait reading wrong.
+  const focal = focalPx(Math.max(w, h), opts.fovDegrees);
+  const tilt = tiltDegrees(quad, w, h, focal);
   const aspect = apparentAspect(quad);
 
   // Size from aspect is only honest when the card is near enough to square-on
@@ -679,7 +691,7 @@ export function detectCard(
 
   const dims = typeof opts.size === "object" ? opts.size : size;
   const trustworthy = lit === 4 && (tilt == null || tilt <= MAX_TILT_FOR_DISTANCE) && !sizeAmbiguous;
-  const inches = dims && trustworthy ? distanceInches(quad, w, dims, opts.fovDegrees) : null;
+  const inches = dims && trustworthy ? distanceInches(quad, w, dims, opts.fovDegrees, focal) : null;
 
   return { quad, fill: frameFill(quad, w, h), tilt, inches, aspect, size, sizeAmbiguous, support, edges: sides as Detection["edges"] };
 }

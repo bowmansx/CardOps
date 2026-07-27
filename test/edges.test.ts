@@ -309,3 +309,27 @@ describe("honest nulls", () => {
     expect(detectCard(new Uint8ClampedArray(1000 * 1000), 1000, 1000)).toBeNull();
   });
 });
+
+describe("the FOV axis", () => {
+  // The 60-70 degree figure quoted for phone cameras is across the sensor's
+  // LONG axis. Feeding it the frame WIDTH is only right in landscape, and a
+  // card is shot in portrait — where width is the short side. That mistake
+  // made every distance read ~45% low.
+  it("focal length is derived from whichever edge is longer", () => {
+    const portraitW = 192, portraitH = 341;
+    const wrong = focalPx(portraitW);            // the old behaviour
+    const right = focalPx(Math.max(portraitW, portraitH));
+    expect(right).toBeGreaterThan(wrong * 1.7);
+  });
+
+  it("a longer focal reports a greater distance for the same pixels", () => {
+    const q = rect(60, 100, 60, 84);
+    const short = distanceInches(q, 192, "standard", 65, focalPx(192))!;
+    const long = distanceInches(q, 192, "standard", 65, focalPx(341))!;
+    expect(long).toBeGreaterThan(short);
+  });
+
+  it("still works with no focal passed, treating w as the long edge", () => {
+    expect(distanceInches(rect(60, 100, 60, 84), 192, "standard")).not.toBeNull();
+  });
+});

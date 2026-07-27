@@ -5,7 +5,7 @@ import { Camera, X, Loader2, Images, Check, Wand2 } from "lucide-react";
 import { downscale } from "@/lib/cards/img";
 import {
   CARD_ASPECT, SLAB_ASPECT, withMargin, sharpness, frameDelta,
-  shouldAutoSnap, pickSharpest,
+  shouldAutoSnap, pickSharpest, type Rect,
 } from "@/lib/cards/camera";
 import { detectCard, releaseScratch, type Detection } from "@/lib/cards/edges";
 import { QUALITY_SPECS, PHOTO_PREF_DEFAULTS, type PhotoPrefs } from "@/lib/cards/photo-prefs";
@@ -27,6 +27,10 @@ const DETECT_W = 192;
 const DETECT_MS = 150;
 // A side needs this much real edge under it before it counts as locked.
 const LIT = 0.55;
+// How far outside the guide to search, so a card overhanging it slightly is
+// still measured whole. Wide enough to forgive framing, tight enough that the
+// table edge stays out.
+const DETECT_MARGIN = 0.12;
 
 export type CapturedShot = {
   /** The framed, margin-preserved card image — what the app shows and scans. */
@@ -100,7 +104,7 @@ export function CameraSheet({
   // The live edge read. Null means "no card found" and the overlay shows
   // nothing at all — a wrong outline is worse than no outline.
   const [det, setDet] = useState<Detection | null>(null);
-  const [detSize, setDetSize] = useState<{ w: number; h: number } | null>(null);
+  const [detSize, setDetSize] = useState<{ w: number; h: number; src: Rect } | null>(null);
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null);
   const histRef = useRef<{ sharp: number; delta: number }[]>([]);
   const busyRef = useRef(false); // one capture at a time
@@ -279,52 +283,87 @@ export function CameraSheet({
     return { sharp: sharpness(gray, w, h), delta };
   }
 
-  /** Grayscale the WHOLE frame at detection resolution. */
-  function detectProbe(): { gray: Uint8ClampedArray; w: number; h: number } | null {
+  /**
+   * Grayscale the GUIDE AREA at detection resolution.
+   *
+   * NOT the whole frame. quadFromLines takes the OUTERMOST edge of each
+   * family, so anything rectangular enclosing the card wins it: a sorting mat,
+   * a tray, a binder page — or, far more commonly, the toploader the card is
+   * sitting in. A toploader's aspect is 0.72 against a card's 0.71, close
+   * enough that the size guess still fires and the HUD prints a confident
+   * wrong distance with all four sides lit. Measured: 3.79 in for the holder
+   * against 4.92 for the card.
+   *
+   * Detecting inside the guide keeps the reading about the object that will
+   * actually be photographed, which is the same rect shoot() crops to. The
+   * margin lets the card's real edge sit inside the search area even when it
+   * overhangs the guide slightly.
+   */
+  function detectProbe(): { gray: Uint8ClampedArray; w: number; h: number; src: Rect } | null {
     const v = videoRef.current;
     if (!v || !v.videoWidth) return null;
+    const g = guideInVideoPixels();
+    const bounds = { w: v.videoWidth, h: v.videoHeight };
+    const src = g ? withMargin({ x: g.x, y: g.y, w: g.w, h: g.h }, DETECT_MARGIN, bounds)
+                  : { x: 0, y: 0, w: bounds.w, h: bounds.h };
+    if (src.w < 8 || src.h < 8) return null;
     const c = (detectRef.current ??= document.createElement("canvas"));
     const w = DETECT_W;
-    const h = Math.max(1, Math.round((v.videoHeight / v.videoWidth) * w));
+    const h = Math.max(1, Math.round((src.h / src.w) * w));
     c.width = w; c.height = h;
     const ctx = c.getContext("2d", { willReadFrequently: true });
     if (!ctx) return null;
-    ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, 0, 0, w, h);
+    ctx.drawImage(v, src.x, src.y, src.w, src.h, 0, 0, w, h);
     const { data } = ctx.getImageData(0, 0, w, h);
     const gray = new Uint8ClampedArray(w * h);
     for (let i = 0, q = 0; i < data.length; i += 4, q++) {
       gray[q] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
     }
-    return { gray, w, h };
+    return { gray, w, h, src };
   }
 
   // Live edge detection. Runs whenever the camera is open — it drives the
   // lock-on outline and the distance/angle readout, neither of which depend on
   // auto-snap being on.
   useEffect(() => {
-    if (!ready || osMode) return;
+    if (!ready || osMode || !guideRect) return;
     let alive = true;
     const id = setInterval(() => {
       if (!alive || busyRef.current) return;
       const p = detectProbe();
       if (!p) { setDet(null); return; }
-      const d = detectCard(p.gray, p.w, p.h);
+      // The probe is a CROP, so its own long edge says nothing about the
+      // lens. Scale the real frame's FOV down by how much of the frame this
+      // crop covers, and hand detectCard the equivalent field for these pixels.
+      const v = videoRef.current;
+      const cover = v && v.videoWidth ? Math.max(p.src.w / v.videoWidth, p.src.h / v.videoHeight) : 1;
+      const fov = (2 * Math.atan(Math.tan((65 * Math.PI) / 360) * Math.max(0.05, cover)) * 180) / Math.PI;
+      const d = detectCard(p.gray, p.w, p.h, { fovDegrees: fov });
       setDet(d);
-      setDetSize({ w: p.w, h: p.h });
+      setDetSize({ w: p.w, h: p.h, src: p.src });
     }, DETECT_MS);
     return () => { alive = false; clearInterval(id); releaseScratch(); };
-  }, [ready, osMode]);
+    // detectProbe reads refs and guideRect; re-creating the interval on every
+    // render of it would restart the loop constantly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, osMode, guideRect]);
 
-  /** Detection-probe pixels → coordinates inside the overlay box. */
+  /**
+   * Detection-probe pixels → coordinates inside the overlay box.
+   * Two hops, because the probe is a CROP of the video: probe → video pixels
+   * via the crop rect, then video pixels → the video's displayed rect.
+   */
   function toScreen(pt: { x: number; y: number }) {
     const v = videoRef.current;
     const box = boxRef.current;
-    if (!v || !box || !detSize) return { x: 0, y: 0 };
+    if (!v || !box || !detSize || !v.videoWidth) return { x: 0, y: 0 };
     const vr = v.getBoundingClientRect();
     const br = box.getBoundingClientRect();
+    const vx = detSize.src.x + (pt.x / detSize.w) * detSize.src.w;
+    const vy = detSize.src.y + (pt.y / detSize.h) * detSize.src.h;
     return {
-      x: vr.left - br.left + (pt.x / detSize.w) * vr.width,
-      y: vr.top - br.top + (pt.y / detSize.h) * vr.height,
+      x: vr.left - br.left + (vx / v.videoWidth) * vr.width,
+      y: vr.top - br.top + (vy / v.videoHeight) * vr.height,
     };
   }
 
