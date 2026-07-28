@@ -1,0 +1,293 @@
+<title>CardOps — State of Play</title>
+<style>
+  :root {
+    --ink:      #1c1a15;
+    --ink-2:    #4a463c;
+    --ink-3:    #777264;
+    --paper:    #faf8f3;
+    --card:     #ffffff;
+    --rule:     #e0dbcd;
+    --flag:     #a8801a;
+    --flag-bg:  #f7edd2;
+    --pos:      #2f6b3a;
+    --pos-bg:   #e4efe1;
+    --warn:     #8a5a10;
+    --warn-bg:  #fbeed6;
+    --stop:     #9a2f22;
+    --stop-bg:  #fae4e0;
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #ece7dc; --ink-2: #b5ae9e; --ink-3: #8b8474;
+      --paper: #16150f; --card: #1e1c16; --rule: #35322a;
+      --flag: #d9ad3c; --flag-bg: #33290f;
+      --pos: #7fbb85; --pos-bg: #172a19;
+      --warn: #d9a94a; --warn-bg: #302510;
+      --stop: #e08476; --stop-bg: #331714;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #ece7dc; --ink-2: #b5ae9e; --ink-3: #8b8474;
+    --paper: #16150f; --card: #1e1c16; --rule: #35322a;
+    --flag: #d9ad3c; --flag-bg: #33290f;
+    --pos: #7fbb85; --pos-bg: #172a19;
+    --warn: #d9a94a; --warn-bg: #302510;
+    --stop: #e08476; --stop-bg: #331714;
+  }
+  :root[data-theme="light"] {
+    --ink: #1c1a15; --ink-2: #4a463c; --ink-3: #777264;
+    --paper: #faf8f3; --card: #ffffff; --rule: #e0dbcd;
+    --flag: #a8801a; --flag-bg: #f7edd2;
+    --pos: #2f6b3a; --pos-bg: #e4efe1;
+    --warn: #8a5a10; --warn-bg: #fbeed6;
+    --stop: #9a2f22; --stop-bg: #fae4e0;
+  }
+
+  body { background: var(--paper); color: var(--ink); font-family: var(--sans);
+         font-size: 15px; line-height: 1.55; margin: 0; }
+  .wrap { max-width: 50rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+
+  header { border-bottom: 3px solid var(--ink); padding-bottom: 1rem; margin-bottom: .5rem; }
+  h1 { font-family: var(--serif); font-size: 2.4rem; line-height: 1.1; margin: 0 0 .3rem;
+       letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--ink-2); font-size: .95rem; margin: 0; }
+  .meta { font-family: var(--mono); font-size: .75rem; color: var(--ink-3);
+          margin-top: .6rem; letter-spacing: .02em; }
+
+  h2 { font-family: var(--serif); font-size: 1.45rem; margin: 2.6rem 0 .2rem;
+       padding-top: 1.1rem; border-top: 1px solid var(--rule); text-wrap: balance; }
+  h2 .n { font-family: var(--mono); font-size: .7rem; color: var(--flag);
+          display: block; letter-spacing: .14em; text-transform: uppercase;
+          margin-bottom: .35rem; font-weight: 700; }
+  h3 { font-size: .78rem; text-transform: uppercase; letter-spacing: .1em;
+       color: var(--ink-3); margin: 1.8rem 0 .6rem; font-weight: 700; }
+  .lede { color: var(--ink-2); margin: .4rem 0 1.2rem; }
+
+  ul.items { list-style: none; padding: 0; margin: 0; display: flex;
+             flex-direction: column; gap: .55rem; }
+  li.item { background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+            padding: .7rem .9rem; break-inside: avoid; }
+  li.item .t { font-weight: 650; }
+  li.item .d { color: var(--ink-2); font-size: .89rem; margin-top: .18rem; }
+  li.item.stop { border-left: 4px solid var(--stop); }
+  li.item.warn { border-left: 4px solid var(--warn); }
+  li.item.pos  { border-left: 4px solid var(--pos); }
+  li.item.flag { border-left: 4px solid var(--flag); }
+
+  .chip { display: inline-block; font-family: var(--mono); font-size: .66rem;
+          text-transform: uppercase; letter-spacing: .07em; font-weight: 700;
+          padding: .1rem .4rem; border-radius: 2px; vertical-align: .1em;
+          margin-right: .4rem; white-space: nowrap; }
+  .c-live { background: var(--pos-bg); color: var(--pos); }
+  .c-you  { background: var(--stop-bg); color: var(--stop); }
+  .c-half { background: var(--warn-bg); color: var(--warn); }
+  .c-idea { background: var(--flag-bg); color: var(--flag); }
+  .c-no   { background: var(--rule); color: var(--ink-2); }
+
+  code { font-family: var(--mono); font-size: .85em; background: var(--flag-bg);
+         color: var(--flag); padding: .05em .3em; border-radius: 2px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+          gap: .55rem; }
+  .box { background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+         padding: .7rem .9rem; break-inside: avoid; }
+  .box h4 { margin: 0 0 .3rem; font-size: .82rem; text-transform: uppercase;
+            letter-spacing: .07em; color: var(--flag); }
+  .box p { margin: 0; font-size: .87rem; color: var(--ink-2); }
+
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; margin-top: .5rem; }
+  th { text-align: left; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--ink-3); border-bottom: 2px solid var(--rule); padding: .35rem .5rem .3rem; }
+  td { border-bottom: 1px solid var(--rule); padding: .45rem .5rem; vertical-align: top; }
+  td.rank { font-family: var(--mono); font-weight: 700; color: var(--flag);
+            width: 2rem; font-variant-numeric: tabular-nums; }
+  td.eff { font-family: var(--mono); font-size: .8rem; color: var(--ink-3); white-space: nowrap; }
+  .scroll { overflow-x: auto; }
+
+  blockquote { margin: .9rem 0; padding: .5rem 0 .5rem 1rem;
+               border-left: 3px solid var(--flag); color: var(--ink-2);
+               font-family: var(--serif); font-size: 1.02rem; }
+  .foot { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule);
+          font-size: .8rem; color: var(--ink-3); }
+
+  @media print {
+    :root { --paper:#fff; --card:#fff; --ink:#000; --ink-2:#333; --ink-3:#555;
+            --rule:#ccc; --flag:#6b5210; --flag-bg:#f2f2f2; --pos-bg:#f2f2f2;
+            --warn-bg:#f2f2f2; --stop-bg:#f2f2f2; }
+    body { font-size: 10.5pt; }
+    .wrap { max-width: none; padding: 0; }
+    h2 { break-after: avoid; page-break-after: avoid; }
+    li.item, .box, tr { break-inside: avoid; page-break-inside: avoid; }
+    .noprint { display: none; }
+  }
+</style>
+
+<div class="wrap">
+<header>
+  <h1>CardOps — State of Play</h1>
+  <p class="sub">Everything started, where it stands, what's waiting on you, and what the market says to build next.</p>
+  <p class="meta">27 July 2026 · main @ aec18e3 · 424 tests · 30 test files · 29 card API routes</p>
+</header>
+
+<h2><span class="n">Read this first</span>One thing is actually broken</h2>
+<ul class="items">
+  <li class="item stop">
+    <span class="chip c-you">You</span><span class="t">Paste <code>20260745_identity_auto_relic.sql</code> — there is a live bug until you do</span>
+    <div class="d">I merged that branch this morning without pasting its SQL first, which is the exact ordering rule I'd rewritten hours earlier. The code now queries <code>card_market_sales.pre_auto_split</code>, a column that doesn't exist yet. Worse, the read discards its error and falls back to <code>[]</code> — so a price estimate reads "no market history" and prices the card anyway, silently. Real impact is small (that table is near-empty post-split) but it should not be sitting there. Two minutes to fix.</div>
+  </li>
+</ul>
+
+<ul class="items" style="margin-top:.55rem">
+  <li class="item stop">
+    <span class="chip c-you">You</span><span class="t">No card cron has run anywhere since 25 July — and it may be costing history</span>
+    <div class="d"><code>CRON_SECRET</code> is unset here (the six jobs 401 by design) and Master-Ops stopped scheduling them on the 25th. The interlock was right while Master-Ops ran them; that justification is gone. If thecardapi's free tier really has a 3-day lookback, every silent day is market history nothing can buy back. I have not touched it — there's a documented hardening gate first, and the charter forbids setting it unprompted. <strong>Verify the lookback, then decide.</strong></div>
+  </li>
+</ul>
+
+<h2><span class="n">Section 1</span>Live and working</h2>
+<p class="lede">Shipped, deployed, in use. This is a bigger app than it feels like from inside a single session.</p>
+<div class="grid">
+  <div class="box"><h4>Intake</h4><p>AI vision scan (front/back → player, year, set, number, parallel, grader, grade, cert). Speed Book rapid mode, batch intake with background AI, CSV import.</p></div>
+  <div class="box"><h4>The scanner</h4><p>Live edge detection with per-edge lock-on, distance in inches, viewing angle, framing targets per shot, auto-snap, Start-scan gate, light measurement.</p></div>
+  <div class="box"><h4>Photo sessions</h4><p>Six templates including Graded slab. Session menu: reorder, delete, retake, inspect. Session order is save order. Crop keeps its uncropped original, linked.</p></div>
+  <div class="box"><h4>Books</h4><p>Double-entry ledger, purchase lots, cost basis, cost lines (grading/shipping/appraisal), sell/unsell RPCs that draw basis and post P/L, Zoho connector, multi-entity.</p></div>
+  <div class="box"><h4>Identity &amp; market</h4><p>Shared cross-tenant card catalog on a deterministic fingerprint, pooled sales history, price refresh, strategies, comps, movers, scored news, alerts and watchlist.</p></div>
+  <div class="box"><h4>Selling</h4><p>eBay listing and sync, sell-side lots, public showcases, grade estimate and grade-EV from photos.</p></div>
+  <div class="box"><h4>Find &amp; update</h4><p><code>/cards/find</code> — photograph or type a card, match it against your own inventory with reasons shown. Grading batch, one bulk status change, printable placement sheet.</p></div>
+  <div class="box"><h4>Operations</h4><p>Storage metering per photo and per user, quality presets, credit ledger, <code>npm run backup</code> to local disk, audit log.</p></div>
+</div>
+
+<h2><span class="n">Section 2</span>Waiting on you</h2>
+<p class="lede">Nothing here needs code. Ordered by what actually costs you if it keeps waiting.</p>
+<ul class="items">
+  <li class="item stop"><span class="chip c-you">You</span><span class="t">Paste the three pending migrations</span>
+    <div class="d"><code>20260745</code> (above, has a live bug), <code>20260748</code> (Start scan setting), <code>20260749</code> (Graded slab template). 748 and 749 break nothing if skipped — you just can't turn the start gate off, and the slab template won't appear.</div></li>
+  <li class="item warn"><span class="chip c-you">You</span><span class="t">Decide what happens to the <code>retire-zones</code> branch</span>
+    <div class="d">Two commits stranded there, including the zone retirement you approved and <em>the market research this document's section 5 is built on</em>. It's been unmerged since yesterday. Merge it or tell me to drop it.</div></li>
+  <li class="item warn"><span class="chip c-you">You</span><span class="t">Put a real box of cards through the scanner</span>
+    <div class="d">Standing agreement: don't design the intake loop from imagination. <code>spec/10-intake.md</code> → <em>What hurts today</em> is deliberately empty and outranks any feature invented at a desk.</div></li>
+  <li class="item"><span class="chip c-you">You</span><span class="t">The light test — one raw card, ten seconds</span>
+    <div class="d">Decides whether the glare compositor gets built at all (~9 days). Must be a raw matte card on a dark surface, not a slab.</div></li>
+  <li class="item"><span class="chip c-you">You</span><span class="t">Re-add the businesses (AF, HOP), then connect Zoho</span>
+    <div class="d">That setup lived in the old database and didn't survive the split. Books can't close to anything until it exists.</div></li>
+  <li class="item"><span class="chip c-you">You</span><span class="t">Four open decisions</span>
+    <div class="d">Storage tier numbers · off-site backup destination (R2/Drive/S3 — gates the evidence archive) · PSA fee approach, flat or ladder · credits scoped per-org or per-user (cheap to change now, expensive later).</div></li>
+  <li class="item"><span class="chip c-you">You</span><span class="t">Install the GitHub CLI</span>
+    <div class="d"><code>winget install --id GitHub.cli</code>. Not product work — it's what lets an unattended loop merge its own work reliably.</div></li>
+</ul>
+
+<h2><span class="n">Section 3</span>Started, not finished</h2>
+<p class="lede">Designed or half-built. Each has a decision or a dependency named.</p>
+<ul class="items">
+  <li class="item flag"><span class="chip c-half">Half</span><span class="t">The temporal tracker — makes the scan lock glide instead of wobble</span>
+    <div class="d">Fully designed, not written. Smooth the four <em>lines</em>, not the eight corner points, so the quad can't bow or shear; plus a miss budget so one bad frame fades the outline instead of deleting it. Jitter is ~2.9px at the 2° angle a hand actually holds. The flat case is already 10× steadier than yesterday. <strong>~1 day.</strong></div></li>
+  <li class="item flag"><span class="chip c-half">Half</span><span class="t">Auto-capture that actually looks at the card</span>
+    <div class="d">Today it fires on sharpness + stillness and never consults detection — a steady phone over a wood table will trip it. The composite gate is designed: 4/4 edges, all properly sampled, quad stable for 4 frames, on-target. Needs the tracker first. <strong>~1 day.</strong></div></li>
+  <li class="item flag"><span class="chip c-half">Half</span><span class="t">Multi-frame scan — Stage 1, the geometry</span>
+    <div class="d">Not started. Deskewed square-on front/back, plus corner crops derived from the rectified image — which beat hand-held close-ups because a phone can't focus close enough to compete. Ships value regardless of the glare question. <strong>~3 days.</strong></div></li>
+  <li class="item"><span class="chip c-half">Half</span><span class="t">Multi-frame scan — Stage 2, the glare compositor</span>
+    <div class="d">Gated on the light test. If your lamp is too broad, no sweep clears it and this should never be built. <strong>~9 days if it passes.</strong></div></li>
+  <li class="item"><span class="chip c-half">Half</span><span class="t">Quality presets still aren't fully honest</span>
+    <div class="d">The 4K request landed, but Archive's 4000px is still unreachable (crop tops out ~2842px) and the storage estimate is a fixed guess presented as a figure. The camera now records what it actually produced; the presets should report it. <strong>~half a day.</strong></div></li>
+  <li class="item"><span class="chip c-half">Half</span><span class="t">Field-of-view calibration</span>
+    <div class="d">Distance maths assumes 65°; real phones run 60–78°, so inches can be meaningfully off. <code>MediaStreamTrack.getCapabilities()</code> may expose the real value — turns a guess into a measurement. <strong>~half a day.</strong></div></li>
+  <li class="item"><span class="chip c-half">Half</span><span class="t">Wave B UI, and Wave C org tenancy</span>
+    <div class="d">Wave B schema is built and the UI is not — you asked to be consulted first. Wave C is design only.</div></li>
+  <li class="item"><span class="chip c-half">Half</span><span class="t">An enforcement guard for the audit rules</span>
+    <div class="d">The 12 prevention rules hold because they're in front of me each session; nothing fails a build when one is broken. Today proved the point twice. Needs real static analysis, not grep — my one-line grep version was 43% false positives. <strong>~2 days.</strong></div></li>
+</ul>
+
+<h2><span class="n">Section 4</span>Discussed, never started</h2>
+<ul class="items">
+  <li class="item"><span class="chip c-idea">Idea</span><span class="t">Categories "Add New"</span><div class="d">Small, from your intake note.</div></li>
+  <li class="item"><span class="chip c-idea">Idea</span><span class="t">A separate Sold section</span><div class="d">You asked for it explicitly. Sold cards are excluded from FIND already; they have no home of their own.</div></li>
+  <li class="item"><span class="chip c-idea">Idea</span><span class="t">Watchlist for cards you don't own yet</span><div class="d"><code>/cards/watchlist</code> exists but is price alerts on cards you hold. What you described was a want-list.</div></li>
+  <li class="item"><span class="chip c-no">Held</span><span class="t">eBay cutover</span><div class="d">Blocked on registering a CardOps redirect URI in eBay's portal. Until then the UI links to Master-Ops on purpose.</div></li>
+  <li class="item"><span class="chip c-no">Held</span><span class="t">Crons stay off</span><div class="d"><code>CRON_SECRET</code> unset is deliberate double-run protection. Six cron jobs return 401 by design.</div></li>
+  <li class="item"><span class="chip c-no">Held</span><span class="t">Web push client stack</span><div class="d">Not ported. Deliberate.</div></li>
+</ul>
+
+<h2><span class="n">Section 5</span>What the market says</h2>
+<p class="lede">From the research done 26 July — the part worth re-reading, because it corrected a belief we'd both been building on.</p>
+<blockquote>"Nobody tracks cost basis" was true in 2022 and is false in 2026. Slabfy, Whuppit, CardLogx, Viewible, InVelocity, CardZen and Mascot all attack cost basis and margin, at $7–40/mo. It is table stakes for the segment.</blockquote>
+<p class="lede">The wedge that survived scrutiny is narrower and better: <strong>per-card inventory that closes into a real double-entry general ledger, across multiple legal entities, with every number traceable to a document.</strong> Of ~15 products surveyed, none advertises a QuickBooks/Xero/Zoho integration and none mentions journal entries or a chart of accounts. The reseller accounting tools that do have real books have no concept of a card, a purchase lot, a grading cost line or a cert number. CPAs writing for this hobby still recommend a spreadsheet — that's the real competitive baseline.</p>
+<p class="lede"><strong>Multi-entity is the sharp edge nobody else has.</strong> Zero of eight products checked let one operator keep two businesses' inventory and books apart. You built it reflexively because you run several businesses.</p>
+
+<h3>Confirmed gaps, from that research</h3>
+<div class="scroll"><table>
+  <thead><tr><th>Gap</th><th>Why it matters</th></tr></thead>
+  <tbody>
+    <tr><td><strong>PSA fee default is $25</strong></td><td>PSA paused every tier under $80 in June 2026; realistic all-in is ~$100. Every "should I grade this?" answer is computed against a price that no longer exists — and it errs toward <em>yes</em>. One-line fix; the real gap is no declared-value → service-level ladder.</td></tr>
+    <tr><td><strong>eBay integration is sell-side only</strong></td><td>Every route is list/relist/revise/ship/sync. Nothing ingests <em>purchases</em>. Basis is born on the buy side. Auto-ingesting your own eBay buys with price, shipping, tax and fees split out is a competitor's entire wedge — and the OAuth plumbing already exists.</td></tr>
+    <tr><td><strong>Import is hardcoded</strong></td><td>Fixed headers, no mapping UI. <code>card_format_profiles</code> exists and is never read on the import path. Nobody switches products if it means re-keying 5,000 cards.</td></tr>
+    <tr><td><strong>AI confidence is captured and nothing consumes it</strong></td><td>No review queue, and no record of "AI said X, corrected to Y". Identification accuracy is where the market spread is enormous, and this training data is unrecoverable retroactively.</td></tr>
+    <tr><td><strong>Flat running average is wrong for mixed lump-sum buys</strong></td><td>IRS Pub 551 prescribes relative-FMV allocation when one payment buys multiple assets. Fine for bulk commons; wrong for a $10k collection holding one $2,000 rookie and 900 commons.</td></tr>
+    <tr><td><strong>1099-K reverted to $20,000 <em>and</em> 200 transactions</strong></td><td>Retroactive for TY2025–26. The naive read is that basis tracking got less urgent; the correct read is the reverse — most serious sellers now get <em>no form at all</em>, so their own records <em>are</em> the tax record with nothing to check them against.</td></tr>
+    <tr><td><strong>Consignment inflates the 1099-K</strong></td><td>The marketplace reports the consignor's full sale price as your gross. Reconciling needs the sale booked as revenue and the payout as an expense line. That's a double-entry problem — which is why competitors ship consignment tracking and still don't solve it.</td></tr>
+  </tbody>
+</table></div>
+
+<h3>What the research says <em>not</em> to build</h3>
+<ul class="items">
+  <li class="item"><span class="chip c-no">Avoid</span><span class="t">Scanning and price guides as the headline</span><div class="d">eBay's own price guide is free, in-app, scans to the exact parallel, and added portfolios in June 2026. The venue where cards sell is giving away the layer others charge $10/mo for. Scanning must be good enough not to lose the deal; it can never be why you win.</div></li>
+  <li class="item"><span class="chip c-no">Avoid</span><span class="t">A marketplace, or holding anyone's money or cards</span><div class="d">Competitors' worst reviews are payment and shipping disputes — and those reviewers abandon the tracker too.</div></li>
+  <li class="item"><span class="chip c-no">Avoid</span><span class="t">A sales-tax engine or nexus determination</span><div class="d">Jurisdictional quicksand, and it violates the posture that has kept this product honest. Record and flag; never compute an obligation.</div></li>
+  <li class="item"><span class="chip c-no">Avoid</span><span class="t">Set registry / completion / census</span><div class="d">Needs a catalog of what <em>exists</em>. <code>card_identities</code> is a catalog of what has been <em>seen</em>. Unbridgeable without licensed checklist data.</div></li>
+  <li class="item"><span class="chip c-no">Avoid</span><span class="t">Any projected future value, or "cards as an asset class" framing</span><div class="d">Also a dead commercial category — Collectable wound down Nov 2024, Dibbs Mar 2023, Mythic Markets 2021. Report what happened, never what will.</div></li>
+  <li class="item"><span class="chip c-no">Avoid</span><span class="t">Grade estimates shown to a buyer</span><div class="d">Internal EV is the entire point. The moment "likely PSA 9" appears on a showcase or in listing copy it's a representation to a buyer about a third party's future act, using PSA's marks. Every card that returns lower is a dispute.</div></li>
+  <li class="item"><span class="chip c-no">Avoid</span><span class="t">A tax package that computes tax</span><div class="d">No rate applied, no form line numbers as headers, no short/long label — raw day counts, and classification shown as <em>"as classified by you on &lt;date&gt;: &lt;reason&gt;"</em>. A once-a-year artifact used under deadline by someone whose CPA disagrees generates urgent March tickets forever.</div></li>
+  <li class="item"><span class="chip c-no">Avoid</span><span class="t">An AI-grading accuracy race</span><div class="d">Photo quality matters more than the model. The defensible thing is the capture <em>standard</em> — edge detection, deskew, sharpness gating, templates, retained originals with crop geometry. Market the standard and the evidence trail; never claim a percentage you can't source.</div></li>
+</ul>
+
+<h2><span class="n">Section 6</span>What to build, ranked</h2>
+<p class="lede">Revised after a 2026 landscape pass that read the actual source and corrected four things — including my own first recommendation, which turned out to be blocked.</p>
+
+<h3>The one thing</h3>
+<ul class="items">
+  <li class="item flag"><span class="chip c-idea">2–3 weeks</span><span class="t">A forward money engine — &ldquo;what you keep&rdquo;</span>
+    <div class="d">Net proceeds, break-even ask, and answer-this-offer, computed from basis that traces to a real row.
+    <br><br>Every money number in the app today is written <em>after</em> the sale. The only forward-looking one in the entire codebase is <code>suggestedListPrice()</code> — <code>max(market, landed_cost &times; 1.15)</code>. A hardcoded 15% that knows nothing about eBay's 13.25% final value fee, the per-order fee, promoted listing rates, or which shipping service a card qualifies for.
+    <br><br>It's the question actually asked all day — not <em>what is this worth</em> (eBay answers that free now) but <em>an offer came in at $340, do I take it</em>. It's the only feature that spends the moat at the moment of decision: a break-even that decomposes into &ldquo;lot #7 draw $88 + grading $32 + shipping-in $4&rdquo; is a sentence no competitor can produce, because none of them have a basis they could defend.
+    <br><br>And the structural trick — the same pure function renders the forecast <em>and</em> feeds <code>cardSaleLines()</code>, so after the sale it can show <em>&ldquo;forecast net $412, actual $407, delta $5 — fee tier changed.&rdquo;</em> That line requires the forecast and the booked journal entry to come out of one code path. It is the clearest possible proof the numbers are real.
+    <br><br>No vendor, no API, no interlock. It must never pick the price, and it refuses to render a break-even at all where <code>basis_entered</code> is false — that card gets &ldquo;no stated basis&rdquo;, never a floor of $0.</div></li>
+</ul>
+
+<h3>The rest</h3>
+<div class="scroll"><table>
+  <thead><tr><th class="rank">#</th><th>What</th><th class="eff">Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="rank">1</td><td><strong>Fix the grading fee reality.</strong> Defaults are PSA 25 / BGS 22 / SGC 18 / CGC 18 + $8 ship; 2026 reality is PSA Economy $50, Regular $79.99, Value tiers paused since June. Worse, <code>GradeEV.tsx:125</code> captions it &ldquo;~$20&rdquo; while the engine uses 25 — the screen misdescribes its own math. Add a tier picker so the answer is <em>which tier, or none</em>.</td><td class="eff">hours</td></tr>
+    <tr><td class="rank">2</td><td><strong>Price provenance on every displayed value.</strong> A chip: which source, fetched when, how many sales it rests on. A cron value and your own 130point paste currently render with identical authority — and the paste is the honest one. The strongest single finding across six competitors: none of them show where the number came from. <code>MarketSaleRow</code> already carries <code>source</code>.</td><td class="eff">2–3 days</td></tr>
+    <tr><td class="rank">3</td><td><strong>The forward money engine</strong> — above.</td><td class="eff">2–3 weeks</td></tr>
+    <tr><td class="rank">4</td><td><strong>Cert verification against PSA.</strong> Intake already reads grader, grade and cert off the slab. <code>GetByCertNumber</code> is free and cert data never changes, so cache forever. Turns a vision guess into a checked fact and catches the one fraud that costs resellers money. <em>Sources conflict on the free rate limit — test with a live token first. Population fields return null.</em></td><td class="eff">2–3 days</td></tr>
+    <tr><td class="rank">5</td><td><strong>Year-end COGS close with a named exception list.</strong> Partitioned by SOURCE, read through <code>readAllSafe</code>. The differentiator is the header: <em>&ldquo;debits = credits across 1,204 entries; 0 partial reads; 4 cards have no stated basis.&rdquo;</em></td><td class="eff">~1 week</td></tr>
+    <tr><td class="rank">6</td><td><strong>Close the grading loop.</strong> The EV screen takes the midpoint of low and high (<code>grade-ev/route.ts:53</code>), so it can't say &ldquo;expected +$61, but 30% of outcomes lose money&rdquo;. And <code>card_grading_submissions</code> <strong>already exists and is completely dead</strong> — zero references in <code>src/</code>. PSA Value Bulk is 140–160 <em>business</em> days, making a submission the longest-duration position in the business, and the app cannot see it at all. <em>Migration — never auto-merges.</em></td><td class="eff">2–4 weeks</td></tr>
+    <tr><td class="rank">7</td><td><strong>Free, complete, one-click export — stated as a promise.</strong> <code>export.ts</code> exists; this is a page, a commitment, and a test that it's complete rather than capped at 1000 rows. CSV export is paywalled across the entire category. For a one-man product against funded incumbents it's the most credible trust signal available, and it costs almost nothing.</td><td class="eff">2–3 days</td></tr>
+    <tr><td class="rank">8</td><td><strong>Bulk image ingest.</strong> A folder or ZIP of flatbed images through the existing vision and identity trigger. A phone rig tops out at 80–120 cards/hour against 250 overhead; a 5,000-card collection buy currently never enters the system. <strong>Identification-grade only, labelled as such</strong> — it can never back a condition claim, because the geometry isn't there.</td><td class="eff">2–3 weeks</td></tr>
+    <tr><td class="rank">9</td><td><strong>Review queue ranked by money at risk.</strong> Not a better model — triage. Surface the ambiguous /25 parallel first, auto-accept the base card, and when vision is torn between two identities, name the discriminating attribute. Corrections write back to the shared catalog once, for everyone.</td><td class="eff">1–2 weeks</td></tr>
+    <tr><td class="rank">10</td><td><strong>Surface the capture record + a dispute pack.</strong> Distance, angle, per-edge lock, sharpness and clipping are all measured and none of it is visible. <em>Audit first — <code>capture_meta</code> writes from two call sites only and <code>width</code>/<code>height</code> are unpopulated, so today it renders blanks for most of the library.</em></td><td class="eff">1–2 weeks</td></tr>
+    <tr><td class="rank">11</td><td><strong>The buy sheet.</strong> Scan a stack, get a defensible offer: matched identities at a chosen haircut, bulk residual stated separately, days-to-sell, and an explicit band for how much rests on weak matches. Every other tool tells you what a card you own is worth; this tells you what to pay before you own it.</td><td class="eff">~3 weeks</td></tr>
+  </tbody>
+</table></div>
+
+<h3>What the research corrected</h3>
+<ul class="items">
+  <li class="item stop"><span class="chip c-you">Mine</span><span class="t">My first recommendation was blocked and I didn't check</span>
+    <div class="d">I ranked buy-side eBay ingestion #1. It's blocked on the eBay cutover — the RuName is registered against the Master-Ops origin, documented in <code>CLAUDE.md</code> under an interlock I've read many times. I recommended a week of work that cannot start.</div></li>
+  <li class="item warn"><span class="chip c-half">Dead</span><span class="t"><code>card_grading_submissions</code> already exists, and nothing uses it</span>
+    <div class="d">Shipped in the original schema with grader, cost, expected and returned grade, ROI predicted and realized. Zero references in <code>src/</code>. The modelling argument was half-won and then forgotten.</div></li>
+  <li class="item warn"><span class="chip c-half">Bug</span><span class="t">Grade EV averages the low and high estimate</span>
+    <div class="d"><code>grade-ev/route.ts:53</code> takes the midpoint, then snaps to the nearest ladder cell — so the screen can never express a distribution, which is the whole point of an expected value.</div></li>
+  <li class="item"><span class="chip c-half">Partial</span><span class="t">Consignment isn't absent — outbound already exists</span>
+    <div class="d"><code>at_auction_house_on_consignment</code> is a real asset state with a due-date rule tested in the money-core harness. What's missing is <em>inbound</em> — holding someone else's card. Different feature, months of work, and a CardOps-as-product decision rather than a CardOps-for-you one.</div></li>
+</ul>
+
+<h2><span class="n">Section 7</span>The uncomfortable part, restated</h2>
+<p class="lede">The research's conclusion was that the variety is the trap. The casual collector is served free by eBay; the flipper lane filled in 2025–26 at under $10/mo; the high-end investor needs population and census data CardOps can't source. The winnable market is small and rich — dealers who have crossed into being a business, with an LLC, a CPA, and increasingly consignors whose money is mixed with theirs.</p>
+<p class="lede">Your own answer differed, and may be better: Claude-style metered pricing, mostly free up to a level of compute and storage, pay when you exceed it. That reaches the same place by a different route — a dealer at volume consumes real compute and storage and pays accordingly, a hobbyist costs nothing and pays nothing. It also fits what's already built: the credit ledger, per-run cost metering, per-photo byte accounting. Worth holding the tension rather than resolving it early.</p>
+
+<p class="foot">Assembled from the git log, <code>reference/</code>, your Obsidian vault, and the market research of 26 July. Updated 27 July after a 2026 landscape pass returned. This page is generated from <code>spec/strategy/STRATEGY.md</code> and refreshed every three days; what changed each time is logged in <code>spec/strategy/CHANGES.md</code>. Never edit this page directly.</p>
+</div>

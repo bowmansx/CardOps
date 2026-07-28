@@ -1,0 +1,206 @@
+# CardOps — Product Strategy
+
+**Source of truth.** The published page at
+<https://claude.ai/code/artifact/73cd1984-c3e3-44b6-be27-b3ec2e4a6baf> is
+rendered from this file. Edit here, never there.
+
+*Last substantive update: 2026-07-27 · main @ aec18e3 · 424 tests*
+
+---
+
+## The wedge
+
+**Per-card inventory that closes into a real double-entry general ledger,
+across multiple legal entities, with every number traceable to a document.**
+
+This survived scrutiny after a belief we had both been building on turned out
+to be false:
+
+> "Nobody tracks cost basis" was true in 2022 and is false in 2026. Slabfy,
+> Whuppit, CardLogx, Viewible, InVelocity, CardZen and Mascot all attack cost
+> basis and margin, at $7–40/mo. It is table stakes for the segment.
+
+What is *not* table stakes:
+
+- Of ~15 card products surveyed, **none** advertises a QuickBooks / Xero / Zoho
+  integration and none mentions journal entries or a chart of accounts. They
+  stop at "margin" and hand off a CSV.
+- The reseller accounting tools that *do* have real books — Seller Ledger, My
+  Reseller Genie — are marketplace-generic and have no concept of a card, a
+  purchase lot, a grading cost line or a cert number.
+- CPAs writing for this hobby in 2025–26 still recommend **a spreadsheet** as
+  the cost-basis system of record. That is the real competitive baseline.
+
+**Multi-entity is the sharp edge nobody else has.** Zero of eight products
+checked let one operator keep two businesses' inventory and books apart. Beau
+built it reflexively because he runs several businesses.
+
+Defensible because it is architectural, not a feature: a scanner app cannot
+grow a general ledger without rebuilding its data model, while CardOps can
+reach scanning parity in a sprint.
+
+---
+
+## The market, honestly
+
+The winnable market is **small and rich**: dealers who have crossed into being
+a business — an LLC, a CPA, and increasingly consignors whose money is mixed
+with theirs.
+
+The variety is the trap. The casual collector is served free by eBay and TCDB.
+The flipper lane filled in 2025–26 at under $10/mo. The high-end investor needs
+population and census data CardOps cannot source.
+
+**Beau's own answer differs and may be better.** Claude-style metered pricing —
+mostly free to a level of compute and storage, pay past it — reaches the same
+place by a different route, and fits what is already built: the credit ledger,
+per-run cost metering, per-photo byte accounting. Tension held, not resolved.
+
+---
+
+## Leaking right now
+
+**No card cron has run anywhere since 2026-07-25.** `CRON_SECRET` is unset here
+(the six jobs return 401 by design) and Master-Ops stopped scheduling them on
+the 25th. The interlock was correct while Master-Ops ran them; that
+justification is gone, and the hold now costs something money cannot buy back --
+if thecardapi's free tier really has a 3-day lookback, each silent day is market
+history that cannot be backfilled at any price. **Verify the lookback, then
+decide.** There is a documented hardening gate before `CRON_SECRET` is set, and
+it should be walked, not skipped.
+
+---
+
+## What to build, ranked
+
+### The one thing
+
+**A forward money engine -- "what you keep."** Net proceeds, break-even ask, and
+answer-this-offer, computed from basis that traces to a real row.
+
+Everything money-shaped in CardOps today is written *after* the sale. The only
+forward-looking number in the whole app is `suggestedListPrice()` in
+`valuation.ts:285` -- `max(market, landed_cost x 1.15)`. A hardcoded 15% that
+knows nothing about eBay's 13.25% final value fee, the per-order fee, promoted
+listing rates, or which shipping service a card qualifies for.
+
+- It is the question actually asked all day. Not *what is this worth* -- eBay
+  answers that free now -- but *an offer came in at $340, do I take it.*
+- It is the only feature that spends the moat **at the moment of decision**. A
+  break-even that decomposes into "lot #7 draw $88 + grading $32 + shipping-in
+  $4" is a sentence no competitor can produce, because none of them have a basis
+  they could defend.
+- It is a shared primitive, not a screen. The same fee-and-net function is the
+  missing input in grade EV, the buy sheet, shipping-service choice, and the
+  1099-K walk.
+- The structural trick: the same pure function renders the forecast **and**
+  feeds `cardSaleLines()`. After the sale it can show *"forecast net $412,
+  actual $407, delta $5 -- fee tier changed."* That line requires the forecast
+  and the booked journal entry to come out of one code path, and it is the
+  clearest possible proof the numbers are real.
+- No vendor, no API, no approval, no interlock. Fee schedules are public.
+
+It must never pick the price or present a forecast as fact. It states which fee
+schedule it used and that schedule's date, and it **refuses to render a
+break-even at all** where `basis_entered` is false -- that card gets "no stated
+basis", never a floor of $0.
+
+**2-3 weeks.**
+
+### The rest
+
+| # | What | Effort |
+|---|---|---|
+| 1 | **Fix the grading fee reality.** Defaults are PSA 25 / BGS 22 / SGC 18 / CGC 18 + $8 ship; 2026 reality is PSA Economy $50, Regular $79.99, Value tiers paused since June. Worse, `GradeEV.tsx:125` captions it "~$20" while the engine uses 25 -- the screen misdescribes its own math. Add a tier picker so the answer is *which tier, or none*. | hours |
+| 2 | **Price provenance on every displayed value.** A chip: which source, fetched when, how many sales it rests on. A cron-derived value and Beau's own 130point paste currently render with identical authority, and the paste is the honest one. The strongest single finding across six competitors: none of them show where the number came from. `MarketSaleRow` already carries `source` and `platform`. | 2-3 days |
+| 3 | **The forward money engine** -- above. | 2-3 weeks |
+| 4 | **Cert verification against PSA.** Intake already reads grader/grade/cert off the slab. `GetByCertNumber` is free and cert data never changes, so cache forever. Converts a vision guess into a checked fact, and catches the one fraud that costs resellers money. *Sources conflict on the free rate limit -- test with a live token before designing around volume. Population fields return null; do not plan on pop data.* | 2-3 days |
+| 5 | **Year-end COGS close with a named exception list.** Beginning inventory + purchases - ending inventory, partitioned by SOURCE, read through `readAllSafe`. The differentiator is the header: *"debits = credits across 1,204 entries; 0 partial reads; 4 cards have no stated basis."* | ~1 week |
+| 6 | **Close the grading loop.** (a) Replace the midpoint EV -- `grade-ev/route.ts:53` averages low and high, so the screen cannot say "expected +$61, but 30% of outcomes lose money". (b) `card_grading_submissions` **already exists and is dead** -- zero references in `src/`. Extend it to order level: grader, tier, order #, declared value, ship date. PSA Value Bulk is 140-160 *business* days, making a submission the longest-duration position in the business, and the app cannot see it at all. (c) Capture returned certs. *Migration -- never auto-merges.* | 2-4 weeks |
+| 7 | **Free, complete, one-click export, stated as a promise.** `export.ts` exists; this is a page, a commitment, and a test that it is complete rather than capped at 1000 rows. CSV export is paywalled across the entire category. For a one-man product competing with funded incumbents this is the most credible trust signal available, and it costs almost nothing. | 2-3 days |
+| 8 | **Bulk image ingest.** A folder or ZIP of flatbed images, fronts paired to backs, through the existing vision and identity trigger. A phone rig tops out at 80-120 cards/hour against 250/hour overhead. A 5,000-card collection buy currently never enters the system, or enters as an unpriced lump. **Hard constraint: identification-grade only, labelled as such -- it can never back a condition claim, because the geometry is not there.** | 2-3 weeks |
+| 9 | **Review queue ranked by money at risk.** Not a better model -- triage. Surface the ambiguous /25 parallel first, auto-accept the base card, and when vision is torn between two identities name the discriminating attribute. Corrections write back to the shared catalog once, for everyone. The constraint is Beau's hours, not model accuracy. | 1-2 weeks |
+| 10 | **Surface the capture record + a dispute pack.** Distance, angle, per-edge lock, sharpness and clipping are all measured and none of it is visible. Bundle a sold card's pre-ship set with timestamps and per-image sha256 (`evidence.ts` already hashes). *Audit first: `capture_meta` writes from two call sites only and `card_photos.width/height` are unpopulated, so this renders blanks for most of the library today.* | 1-2 weeks |
+| 11 | **The buy sheet.** Scan a stack and get a defensible offer: matched identities at a chosen haircut, bulk residual stated separately, days-to-sell, and an explicit band for how much rests on weak matches. Depends on the money engine. Every other tool tells you what a card you own is worth; this tells you what to pay before you own it. | ~3 weeks |
+
+**Below the line, named so they are not forgotten:** card-show offline mode (the
+offline write must queue as a *proposed* transaction, never an auto-post); eBay
+own-sales ingest for real fees and payouts (**blocked on the RuName / cutover**);
+inbound consignment (months, and a CardOps-as-product decision rather than a
+CardOps-for-Beau one -- decide it, do not drift into it).
+
+## What not to build
+
+- **Scanning and price guides as the headline.** eBay's own price guide is
+  free, in-app, scans to the exact parallel, and added portfolios in June 2026.
+  The venue where cards sell is giving away the layer others charge $10/mo for.
+  Scanning must be good enough not to lose the deal; it can never be why you win.
+- **A marketplace, or holding anyone's money or cards.** Competitors' worst
+  reviews are payment and shipping disputes, and those reviewers abandon the
+  tracker too.
+- **Card-show POS.** The lane filled in 2025–26 and one entrant is free.
+  Capturing show-day cash and trades *into the ledger* is the part worth having.
+- **A sales-tax engine or nexus determination.** Jurisdictional quicksand, and
+  it violates the posture that has kept this product honest. Record and flag;
+  never compute an obligation.
+- **Set registry / completion / census.** Needs a catalog of what *exists*;
+  `card_identities` is a catalog of what has been *seen*. Unbridgeable without
+  licensed checklist data.
+- **A cheap tier chasing the casual collector.** Served free elsewhere, and it
+  drags the roadmap toward features a dealer does not need.
+- **Any projected future value or "cards as an asset class" framing.** Also a
+  dead commercial category -- Collectable wound down Nov 2024, Dibbs Mar 2023,
+  Mythic Markets 2021. Report what happened, never what will.
+- **Grade estimates shown to a buyer.** Internal EV is the entire point. The
+  moment "likely PSA 9" appears on a showcase or in listing copy it is a
+  representation to a buyer about a third party's future act, using PSA marks.
+  Every card that returns lower is a dispute. Keep it private.
+- **A tax package that computes tax.** No rate applied, no form line numbers as
+  headers, no ordering by tax advantage, no short/long label -- raw day counts,
+  and classification shown as *"as classified by you on <date>: <reason>."* A
+  once-a-year artifact used under deadline by someone whose CPA disagrees
+  generates urgent March tickets forever.
+- **An AI-grading accuracy race.** Photo quality matters more than the model.
+  The defensible thing is the capture STANDARD — edge detection, deskew,
+  sharpness gating, templates, retained originals with crop geometry. Market
+  the standard and the evidence trail; never claim a percentage you cannot
+  source.
+
+---
+
+## Confirmed gaps
+
+| Gap | Why it matters |
+|---|---|
+| eBay integration is sell-side only | Nothing ingests purchases. Basis is born on the buy side. |
+| Import is hardcoded | Fixed headers, no mapping UI; `card_format_profiles` never read. |
+| AI confidence captured, nothing consumes it | No review queue, no record of "AI said X, corrected to Y". Unrecoverable retroactively. |
+| Flat running average on mixed lump-sum buys | IRS Pub 551 prescribes relative-FMV allocation. `CLAUDE.md`'s claim needs narrowing to *bulk*. |
+| 1099-K reverted to $20,000 **and** 200 transactions | Retroactive for TY2025–26. Most serious sellers now get **no form at all** — their own records *are* the tax record, with nothing to check them against. |
+| Consignment inflates the 1099-K | The marketplace reports the consignor's full sale price as your gross. Reconciling is a double-entry problem. |
+| PSA fee default of $25 | Off by ~4×, and it biases every grading decision toward yes. |
+
+---
+
+## Posture
+
+These constrain every recommendation above and outrank any of them.
+
+- **Never present a figure or an image as something it is not.** Grading
+  evidence traces to what came off the sensor.
+- **Tax classification is recorded, never determined.** The app stores Beau's
+  call and his stated reason. It is bookkeeping hygiene and flags to raise with
+  a CPA — never filing, never advice.
+- **Money-critical and outward-facing writes are gated on explicit human
+  decision.** Nothing posts to real books from a cron.
+- **Surface merges or deletions that would lose work** rather than doing them.
+
+---
+
+## Open questions
+
+- Metered pricing versus flat subscription — Beau's instinct against the
+  research's recommendation. Not resolved, and does not need to be yet.
+- Credits scoped per-org or per-user. Cheap to change now.
+- Whether the multi-frame glare compositor is worth building at all — gated on
+  a light measurement that has not been taken.

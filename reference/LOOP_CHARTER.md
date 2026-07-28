@@ -48,10 +48,16 @@ Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
      something nobody asked for. An idea becomes real only when Beau moves it
      into an area note or writes it in INBOX — promotion is his act, never
      the loop's.
-   - **READ ONLY, with exactly one exception: `spec/OUTBOX.md`.** That file is
-     the loop's side of the conversation and the loop owns it. Everything else
-     under `spec/` is never written, tidied, reformatted, reorganised, ticked
-     off, or "updated to match the code".
+   - **READ ONLY, with exactly two exceptions: `spec/OUTBOX.md` and
+     `spec/strategy/`.** Those are the loop's side of the conversation and the
+     loop owns them. Everything else under `spec/` is never written, tidied,
+     reformatted, reorganised, ticked off, or "updated to match the code".
+   - **`spec/strategy/` is the standing product strategy**, maintained by the
+     `cardops-strategy-review` scheduled task every three days. Inside it,
+     `BRIEF.md` is BEAU'S — read it, fold it in, never delete his words.
+     `STRATEGY.md`, `CHANGES.md` and `journal/` are the loop's. `STRATEGY.md`
+     is the source of the published page; the page is rendered FROM it and is
+     never the place an edit is made.
    - **Ask in `spec/OUTBOX.md`, not only in chat.** A question asked in chat
      while Beau is away sits in a transcript he may never reopen; a question in
      OUTBOX is sitting in Obsidian next to his notes when he comes back. Chat
