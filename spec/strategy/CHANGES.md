@@ -7,6 +7,26 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-07-27 (retraction) - there was no live bug
+
+I claimed 20260745 was unpasted and that production was querying a column that
+did not exist. Wrong. Beau pasted 745, 746 and 747 on the morning of the 27th
+and screenshotted each success. I checked the git log, saw the code merged, and
+reasoned from the OUTBOX note I had written BEFORE he pasted rather than from
+what happened. Stale state.
+
+What survives: `estimate-run.ts:47` really does discard the error on the market
+history read and fall back to `[]`. Not failing today, but a future read error
+would read as "no history" and price the card anyway. Worth fixing.
+
+Also reframed: "Leaking right now" is now "The card-data question, for later".
+Beau is buying real API subscriptions and the lookup schedule is an unhad
+design conversation - the free tier's 3-day window is not the thing to optimise
+against. The one question worth carrying forward is whether any tier below
+Enterprise can backfill.
+
+---
+
 ## 2026-07-27 (later) - the research came back and displaced my own #1
 
 A 2026 landscape pass returned after the first entry was written. It read the

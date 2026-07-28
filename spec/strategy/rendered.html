@@ -132,19 +132,22 @@
   <p class="meta">27 July 2026 · main @ aec18e3 · 424 tests · 30 test files · 29 card API routes</p>
 </header>
 
-<h2><span class="n">Read this first</span>One thing is actually broken</h2>
+<h2><span class="n">Read this first</span>Two migrations, and nothing is broken</h2>
 <ul class="items">
-  <li class="item stop">
-    <span class="chip c-you">You</span><span class="t">Paste <code>20260745_identity_auto_relic.sql</code> — there is a live bug until you do</span>
-    <div class="d">I merged that branch this morning without pasting its SQL first, which is the exact ordering rule I'd rewritten hours earlier. The code now queries <code>card_market_sales.pre_auto_split</code>, a column that doesn't exist yet. Worse, the read discards its error and falls back to <code>[]</code> — so a price estimate reads "no market history" and prices the card anyway, silently. Real impact is small (that table is near-empty post-split) but it should not be sitting there. Two minutes to fix.</div>
+  <li class="item pos">
+    <span class="chip c-live">Done</span><span class="t">20260745, 20260746 and 20260747 are applied</span>
+    <div class="d">You pasted all three on the morning of 27 July. An earlier version of this page claimed 20260745 was outstanding and described a live bug from it — that was wrong. I read a stale note instead of what actually happened. There is no bug; the column exists.</div>
   </li>
-</ul>
-
-<ul class="items" style="margin-top:.55rem">
-  <li class="item stop">
-    <span class="chip c-you">You</span><span class="t">No card cron has run anywhere since 25 July — and it may be costing history</span>
-    <div class="d"><code>CRON_SECRET</code> is unset here (the six jobs 401 by design) and Master-Ops stopped scheduling them on the 25th. The interlock was right while Master-Ops ran them; that justification is gone. If thecardapi's free tier really has a 3-day lookback, every silent day is market history nothing can buy back. I have not touched it — there's a documented hardening gate first, and the charter forbids setting it unprompted. <strong>Verify the lookback, then decide.</strong></div>
+  <li class="item warn">
+    <span class="chip c-you">You</span><span class="t">Two migrations still to paste, neither urgent</span>
+    <div class="d"><code>20260748_scan_on_open.sql</code> lets you turn the Start scan gate OFF — without it you simply always get the button, which is the intended default. <code>20260749_graded_template.sql</code> adds the Graded slab template; without it, it just doesn't appear in the list. Nothing else is affected either way.</div>
   </li>
+  <li class="item warn">
+    <span class="chip c-half">Code</span><span class="t">One unchecked read worth fixing</span>
+    <div class="d"><code>estimate-run.ts:47</code> destructures <code>{ data: histRows }</code> and discards the error, then falls back to <code>[]</code>. Not failing today, but it means any future read error on market history reads as "this card has no history" and prices it anyway. Prevention rule 1.</div>
+  </li>
+  <li class="item"><span class="chip c-idea">Later</span><span class="t">No card cron runs anywhere, and that is fine for now</span>
+    <div class="d"><code>CRON_SECRET</code> is unset here (the six jobs 401 by design) and Master-Ops stopped scheduling them on 25 July. I first wrote this up as urgent; it isn't, because you're replacing thecardapi's free tier with real API subscriptions and the lookup schedule is a design conversation we haven't had. <strong>One question to carry into that conversation:</strong> whether any tier below Enterprise can backfill. If none can, the gap between now and "proper APIs" is history no subscription buys back &mdash; an input into <em>when</em> you subscribe, not into flipping a cron today. Unverified; check against vendor docs when comparing.</div></li>
 </ul>
 
 <h2><span class="n">Section 1</span>Live and working</h2>

@@ -58,16 +58,21 @@ per-run cost metering, per-photo byte accounting. Tension held, not resolved.
 
 ---
 
-## Leaking right now
+## The card-data question, for later
 
-**No card cron has run anywhere since 2026-07-25.** `CRON_SECRET` is unset here
-(the six jobs return 401 by design) and Master-Ops stopped scheduling them on
-the 25th. The interlock was correct while Master-Ops ran them; that
-justification is gone, and the hold now costs something money cannot buy back --
-if thecardapi's free tier really has a 3-day lookback, each silent day is market
-history that cannot be backfilled at any price. **Verify the lookback, then
-decide.** There is a documented hardening gate before `CRON_SECRET` is set, and
-it should be walked, not skipped.
+No card cron runs anywhere: `CRON_SECRET` is unset here (the six jobs 401 by
+design) and Master-Ops stopped scheduling them on 2026-07-25.
+
+This was first written up as urgent. It is not. Beau is replacing thecardapi's
+free tier with real API subscriptions, and the lookup schedule is a design
+conversation that has not happened yet -- turning on a cron to hoard data from
+a source about to be replaced would optimise the wrong thing and spend the
+hardening gate for nothing.
+
+**One question to carry into that conversation:** whether any tier below
+Enterprise can backfill. If none can, the gap between now and "proper APIs" is
+history no subscription buys back, which is an input into *when* to subscribe.
+Unverified -- check against vendor docs when comparing them.
 
 ---
 
