@@ -4,7 +4,8 @@
 <https://claude.ai/code/artifact/73cd1984-c3e3-44b6-be27-b3ec2e4a6baf> is
 rendered from this file. Edit here, never there.
 
-*Last substantive update: 2026-07-27 · main @ aec18e3 · 424 tests*
+*Last substantive update: 2026-07-28 · main @ 006273b · 424 tests*
+*(The build work it describes was done Mon 2026-07-27.)*
 
 ---
 
