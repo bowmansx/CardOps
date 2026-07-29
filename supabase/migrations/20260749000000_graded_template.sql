@@ -1,4 +1,28 @@
 -- ══════════════════════════════════════════════════════════════════════════
+-- WRONG-DATABASE GUARD. Runs first, changes nothing, refuses everything after
+-- it if this is not CardOps.
+--
+-- On 2026-07-28 a whole evening of diagnostics ran against the OLD SHARED
+-- Master-Ops project (wjcalfuwqantwhizkdks) instead of CardOps
+-- (zgkydwvmdnnrxcacegth), because the Supabase URL autocompleted to whichever
+-- project was typed first. Seven migrations looked like they had vanished. One
+-- stray column got added to the wrong database.
+--
+-- card_identities exists ONLY in CardOps - it was created after the split - so
+-- its absence is a reliable "you are in the wrong place".
+-- ══════════════════════════════════════════════════════════════════════════
+do $$
+begin
+  if to_regclass('public.card_identities') is null then
+    raise exception using
+      errcode = '42P01',
+      message = 'WRONG DATABASE - this is a CardOps migration',
+      detail  = 'public.card_identities is missing, so this is almost certainly the old shared Master-Ops project (wjcalfuwqantwhizkdks). Nothing has been changed.',
+      hint    = 'CardOps is https://supabase.com/dashboard/project/zgkydwvmdnnrxcacegth/sql/new';
+  end if;
+end $$;
+
+-- ══════════════════════════════════════════════════════════════════════════
 -- A GRADED CARD IS NOT A RAW CARD (2026-07-27)
 --
 -- Beau, testing the scanner on a PSA slab:

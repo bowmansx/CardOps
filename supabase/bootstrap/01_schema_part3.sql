@@ -2310,6 +2310,30 @@ create index if not exists card_photos_card_position_idx
 
 -- ═══════════ 20260748000000_scan_on_open.sql ═══════════
 -- ══════════════════════════════════════════════════════════════════════════
+-- WRONG-DATABASE GUARD. Runs first, changes nothing, refuses everything after
+-- it if this is not CardOps.
+--
+-- On 2026-07-28 a whole evening of diagnostics ran against the OLD SHARED
+-- Master-Ops project (wjcalfuwqantwhizkdks) instead of CardOps
+-- (zgkydwvmdnnrxcacegth), because the Supabase URL autocompleted to whichever
+-- project was typed first. Seven migrations looked like they had vanished. One
+-- stray column got added to the wrong database.
+--
+-- card_identities exists ONLY in CardOps - it was created after the split - so
+-- its absence is a reliable "you are in the wrong place".
+-- ══════════════════════════════════════════════════════════════════════════
+do $$
+begin
+  if to_regclass('public.card_identities') is null then
+    raise exception using
+      errcode = '42P01',
+      message = 'WRONG DATABASE - this is a CardOps migration',
+      detail  = 'public.card_identities is missing, so this is almost certainly the old shared Master-Ops project (wjcalfuwqantwhizkdks). Nothing has been changed.',
+      hint    = 'CardOps is https://supabase.com/dashboard/project/zgkydwvmdnnrxcacegth/sql/new';
+  end if;
+end $$;
+
+-- ══════════════════════════════════════════════════════════════════════════
 -- FRAME FIRST, THEN SCAN (2026-07-27)
 --
 -- Beau: "i would like for there to be a 'start scan' button before immediately
@@ -2343,6 +2367,30 @@ comment on column public.card_user_prefs.scan_on_open is
   'When true, edge detection and auto-snap begin as soon as the viewfinder is live. When false (the default) the camera still opens for framing, but scanning waits for the Start scan button.';
 
 -- ═══════════ 20260749000000_graded_template.sql ═══════════
+-- ══════════════════════════════════════════════════════════════════════════
+-- WRONG-DATABASE GUARD. Runs first, changes nothing, refuses everything after
+-- it if this is not CardOps.
+--
+-- On 2026-07-28 a whole evening of diagnostics ran against the OLD SHARED
+-- Master-Ops project (wjcalfuwqantwhizkdks) instead of CardOps
+-- (zgkydwvmdnnrxcacegth), because the Supabase URL autocompleted to whichever
+-- project was typed first. Seven migrations looked like they had vanished. One
+-- stray column got added to the wrong database.
+--
+-- card_identities exists ONLY in CardOps - it was created after the split - so
+-- its absence is a reliable "you are in the wrong place".
+-- ══════════════════════════════════════════════════════════════════════════
+do $$
+begin
+  if to_regclass('public.card_identities') is null then
+    raise exception using
+      errcode = '42P01',
+      message = 'WRONG DATABASE - this is a CardOps migration',
+      detail  = 'public.card_identities is missing, so this is almost certainly the old shared Master-Ops project (wjcalfuwqantwhizkdks). Nothing has been changed.',
+      hint    = 'CardOps is https://supabase.com/dashboard/project/zgkydwvmdnnrxcacegth/sql/new';
+  end if;
+end $$;
+
 -- ══════════════════════════════════════════════════════════════════════════
 -- A GRADED CARD IS NOT A RAW CARD (2026-07-27)
 --
