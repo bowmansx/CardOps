@@ -1,7 +1,7 @@
 import { pricecharting } from "./pricecharting";
 import { scryfall } from "./scryfall";
 import { thecardapi } from "./thecardapi";
-import type { CardForPricing, PriceSourceAdapter } from "./types";
+import type { CardForPricing, PriceSourceAdapter, SourceRights } from "./types";
 
 // The registry, in display order. Add a new vendor by dropping an adapter file
 // here — the refresh route and the card page pick it up automatically.
@@ -10,6 +10,22 @@ export const ADAPTERS: PriceSourceAdapter[] = [thecardapi, pricecharting, scryfa
 /** Adapters that are BOTH configured and cover this card — the ones to run. */
 export function runnableAdapters(card: CardForPricing): PriceSourceAdapter[] {
   return ADAPTERS.filter((a) => a.enabled() && a.handles(card));
+}
+
+/** A source's declared licence rights, or null if the id isn't a known source. */
+export function sourceRights(id: string): SourceRights | null {
+  return ADAPTERS.find((a) => a.id === id)?.rights ?? null;
+}
+
+/**
+ * May rows attributed to this source id be written to card_market_sales?
+ *
+ * DEFAULT-DENY. An unrecognised source id returns false rather than true,
+ * because the only way to reach that branch is a source nobody has stated the
+ * terms for — and "we never checked" must not read the same as "permitted".
+ */
+export function mayPersist(id: string): boolean {
+  return sourceRights(id)?.persist ?? false;
 }
 
 export type SourceAvailability = { id: string; label: string; enabled: boolean; handles: boolean };

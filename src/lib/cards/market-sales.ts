@@ -2,6 +2,7 @@
 // dedup-keyed rows we accumulate in card_market_sales, and builds a price-over-time
 // series for the card graph. Pure — no I/O.
 import type { CardApiSale } from "./price-sources/thecardapi";
+import { mayPersist } from "./price-sources";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -41,6 +42,11 @@ export function saleToRow(
 ): MarketSaleRow | null {
   const price = Number(s.price);
   if (!Number.isFinite(price) || price <= 0) return null;
+  // A fast-settle estimate is not a realized sale. It must not be stored: the
+  // accumulator upserts with ignoreDuplicates, so a provisional number written
+  // once is never corrected — it would sit in the shared history at the wrong
+  // price permanently. Only an explicit false is provisional.
+  if (s.price_confirmed === false) return null;
   const grade = s.grade != null && Number.isFinite(Number(s.grade)) ? Number(s.grade) : null;
   return {
     identity_id: identityId, card_id: cardId, source, external_id: saleKey(s), title: s.title ?? null,
@@ -49,16 +55,40 @@ export function saleToRow(
   };
 }
 
+export type RowBatch = {
+  rows: MarketSaleRow[];
+  /**
+   * Set when the SOURCE itself may not be stored — its licence permits live
+   * display only. Rows is empty in that case and the caller must say so; a
+   * silent empty batch reads exactly like "the vendor had no sales".
+   */
+  refusedSource: string | null;
+  /** Provisional prices held back, to be picked up once the vendor settles them. */
+  unconfirmed: number;
+};
+
+/**
+ * Turn a vendor's sales into storable rows — CONSULTING THE LICENCE FIRST.
+ *
+ * The persist decision is structural rather than remembered. A display-only
+ * vendor (permits showing a sale inside your product, forbids storing it "for
+ * the purposes of creating or populating a database") can be wired in as a live
+ * source and cannot reach this table, whoever writes the next accumulator.
+ */
 export function salesToRows(
   identityId: string, cardId: string | null, sales: CardApiSale[], source = "thecardapi",
-): MarketSaleRow[] {
+): RowBatch {
+  if (!mayPersist(source)) return { rows: [], refusedSource: source, unconfirmed: 0 };
+
   const rows: MarketSaleRow[] = [];
   const seen = new Set<string>();
+  let unconfirmed = 0;
   for (const s of sales) {
+    if (s.price_confirmed === false) { unconfirmed++; continue; }
     const r = saleToRow(identityId, cardId, s, source);
     if (r && !seen.has(r.external_id)) { seen.add(r.external_id); rows.push(r); } // in-batch dedup too
   }
-  return rows;
+  return { rows, refusedSource: null, unconfirmed };
 }
 
 // card_market_sales rows → the CardApiSale shape the estimate/summarize helpers read.

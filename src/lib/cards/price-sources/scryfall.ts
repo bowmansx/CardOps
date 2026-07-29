@@ -13,6 +13,24 @@ export const scryfall: PriceSourceAdapter = {
   enabled: () => true, // free, no token
   handles: (card) => MTG_RE.test(card.sport_category ?? "") || MTG_RE.test(card.set_name ?? ""),
 
+  // Free and unrestricted for this use. The one term that BINDS LATER is
+  // recorded in `GO-LIVE.md`: Scryfall data may not sit behind the credit
+  // meter. Since the meter charges for reasoning rather than for lookups, a
+  // free user still sees everything Scryfall provides — but that makes it a
+  // hard design constraint, not a nice-to-have. The moment "out of credits"
+  // hides a card's name, it is paywalled.
+  //
+  // These are guide values rather than sales, so nothing here reaches
+  // card_market_sales; persist is false because it is meaningless, not
+  // because it is forbidden.
+  rights: {
+    persist: false,
+    redisplay: true,
+    pool: false,
+    attribution: "Scryfall",
+    deleteOnTerminationDays: null,
+  },
+
   async fetch(card: CardForPricing): Promise<AdapterResult> {
     const name = (card.player ?? "").trim();
     if (!name) return { quotes: [], ok: true, matched: false, note: "no card name to look up" };

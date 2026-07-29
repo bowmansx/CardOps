@@ -19,6 +19,21 @@ export type CardApiSale = {
   grader?: string | null;
   grade?: string | number | null;
   listing_url?: string | null;
+  /**
+   * Vendor field: "true = confirmed final price. false = fast-settle estimate
+   * (auction BIN/BO, updated to true within minutes once confirmed)."
+   *
+   * We were ignoring it, so an unsettled estimate was medianed as though it
+   * were a realized sale. Worse for storage: the accumulator upserts with
+   * `ignoreDuplicates: true`, so an unconfirmed price written once would never
+   * be corrected — it would sit in the shared history at the wrong number
+   * forever. Unconfirmed sales are therefore not stored at all; a later run
+   * picks them up once the vendor has settled them.
+   *
+   * Absent on older/other payloads, so `undefined` is treated as confirmed —
+   * only an explicit `false` is a fast-settle estimate.
+   */
+  price_confirmed?: boolean | null;
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -132,6 +147,34 @@ export const thecardapi: PriceSourceAdapter = {
   label: "The Card API · sold",
   enabled: () => !!process.env.THECARDAPI_TOKEN,
   handles: () => true, // broad sold-sales aggregator: sports + TCG
+
+  // Terms of Service §4a (Thompson Data Products, LLC, last updated July 2026),
+  // read 2026-07-29. Explicitly permitted on any PAID plan: "Building and
+  // operating commercial applications, SaaS products...", "Caching and storing
+  // API responses locally in your own database to serve your users", and
+  // "Displaying card prices, transaction history, and market data within your
+  // own product interface". Derived analytics are stated to be our IP.
+  //
+  // POOL IS FALSE, and not because of this licence. §4 forbids re-exposing the
+  // records "as a standalone dataset or competing data product" — storing them
+  // against a shared identity so every owner of that card sees them is the
+  // permitted caching case, not that. It is false because a cross-tenant pool
+  // is a different decision with a different legal question behind it (whether
+  // user-supplied marketplace exports fall outside "eBay Content"), and that
+  // question is unanswered. Defaulting it to true would answer it by accident.
+  //
+  // NOTE the free tier is NOT covered by any of the above: §4a ends "Free tier
+  // usage is limited to personal, non-commercial, and evaluation purposes
+  // only" and §5 allows it "no persistent local storage of API responses".
+  // These rights describe a paid plan; on the free tier the app is storing
+  // rows it is not entitled to store.
+  rights: {
+    persist: true,
+    redisplay: true,
+    pool: false,
+    attribution: "The Card API",
+    deleteOnTerminationDays: 30, // §5, on cancellation or termination
+  },
 
   async fetch(card: CardForPricing): Promise<AdapterResult> {
     const token = process.env.THECARDAPI_TOKEN;

@@ -102,6 +102,7 @@ export async function GET(req: Request) {
 
   let adopted = 0;
   let salesStored = 0;
+  let salesUnconfirmed = 0;
   const salesErrors: string[] = [];
   const history: { card_id: string; price: number; strategy: string }[] = [];
   const now = new Date().toISOString();
@@ -143,15 +144,25 @@ export async function GET(req: Request) {
           // this one fetch. A card too sparse to fingerprint has no identity and
           // isn't accumulated — there's nothing stable to attach history to.
           if (keepHistory && r.sales.length && rep.identity_id) {
-            const rows = salesToRows(rep.identity_id, rep.id, r.sales);
-            if (rows.length) {
+            const batch = salesToRows(rep.identity_id, rep.id, r.sales);
+            // A source whose licence forbids storage is a configuration fault,
+            // not a quiet no-op — an empty batch would otherwise read exactly
+            // like "the vendor had no sales for this card" (rule 10).
+            if (batch.refusedSource) {
+              salesErrors.push(`${rep.identity_id}: source "${batch.refusedSource}" may not be stored under its licence`);
+            }
+            // Provisional prices held back until the vendor settles them. Worth
+            // counting: a run that stores far fewer rows than it fetched should
+            // be explainable from the response, not a mystery.
+            salesUnconfirmed += batch.unconfirmed;
+            if (batch.rows.length) {
               const { error } = await svc!.from("card_market_sales")
-                .upsert(rows, { onConflict: "identity_id,source,external_id", ignoreDuplicates: true });
+                .upsert(batch.rows, { onConflict: "identity_id,source,external_id", ignoreDuplicates: true });
               // This write IS the shared history. Swallowing its error is how a
               // broken conflict target (42P10) hid behind a run that reported
               // success while accumulating nothing, forever (rule 1).
               if (error) salesErrors.push(`${rep.identity_id}: ${error.message}`);
-              else salesStored += rows.length;
+              else salesStored += batch.rows.length;
             }
           }
           if (rep.identity_id) {

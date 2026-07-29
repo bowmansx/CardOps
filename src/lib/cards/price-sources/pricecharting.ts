@@ -26,6 +26,21 @@ export const pricecharting: PriceSourceAdapter = {
   enabled: () => !!process.env.PRICECHARTING_TOKEN,
   handles: () => true, // broad — let the vendor's search decide if it matches
 
+  // INTERNAL USE ONLY until a redistribution licence exists. That term is about
+  // WHO uses the data, not what it costs — a friend's screen showing a
+  // PriceCharting-derived value is that friend using it, free or not, so
+  // "we don't charge for it" does not rescue this. `GO-LIVE.md` records the two
+  // clean paths: ask them for a redistribution quote, or serve this source only
+  // to the operator's own account. Until one of those happens, redisplay stays
+  // false and no PriceCharting quote may be shown to another user.
+  rights: {
+    persist: false,
+    redisplay: false,
+    pool: false,
+    attribution: "PriceCharting",
+    deleteOnTerminationDays: null,
+  },
+
   async fetch(card: CardForPricing): Promise<AdapterResult> {
     const token = process.env.PRICECHARTING_TOKEN;
     if (!token) return { quotes: [], ok: false, matched: false, note: "no PRICECHARTING_TOKEN set" };
