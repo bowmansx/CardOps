@@ -254,6 +254,52 @@ card** - which is a real narrowing, and yours to accept or reject.
    must never delete cards - `card_group_items` cascades on group delete today,
    which removes the *membership* only, and that is correct.
 
+### Q4 ANSWERED - the objective hierarchy is a QUERY, not a group  *(2026-07-29)*
+
+> "only one group it can be in which should be an objective description of the
+> card of which there only is one description.... so maybe some order like
+> 1 baseball 2 2025 3 brand 4 product line of the brand"
+> "those could be auto generated... but then groups are more of a kind of user
+> created thing like when they want to create their own sets"
+
+**This collapses most of Q4.** `sport_category`, `year`, `brand` and `set_name`
+are already columns on `cards`. A hierarchy over them needs no membership
+table, no assignment step, no maintenance, and it is always correct because it
+is derived - fix a card's year and it moves in the tree by itself.
+
+**And it dissolves the inheritance question**, which was the thing blocking all
+of this. "Is a card in Box 3 also in 2024?" is meaningless for a derived tree:
+each level is a filter, so a card in `Baseball > 2025 > Topps > Chrome` is
+trivially in all four. That question only existed because the model assumed
+stored membership.
+
+**It exists at depth 1 already.** `CardBrowser` has a `grouped` boolean that
+groups by `sport_category`, hardcoded. This is that, generalised.
+
+**DO NOT FIX THE ORDER.** Different questions want different orders - "everything
+Pokemon" against "everything from 2025" against "all my Prizm regardless of
+year". A fixed tree makes one question easy and the rest awkward. Beau's order
+is the default; the facets are reorderable and addable. Other columns already
+worth offering: `parallel`, `player`, `condition_type`, `grader`,
+`storage_location`, `acquisition_source`. Free, because it is all query-side.
+
+**So groups become purely user-created**, and the "one group per card"
+constraint is dropped - the thing that genuinely needed to be one-per-card was
+the objective description, and that is now derived.
+
+**Group versus tag is WEIGHT, not cardinality:**
+
+- A **group** is a thing. A name, a purpose, an order you curate, a page of its
+  own. "My PC", "For the June show", "Dave's consignment."
+- A **tag** is an adjective. Applied in bulk, no page, no order. "to grade",
+  "needs better photos."
+
+The test: **would you ever reorder the cards inside it?** Yes = group. No = tag.
+
+Already solved and worth not rebuilding: `cards.storage_location` exists, with
+`card_storage_locations` behind it as a pick-list. Physical location is a field,
+not a group.
+
 ### Q5 - Three concepts, not one: facets, tags, and OWNERSHIP  *(2026-07-28)*
 
 > "there will be tags and labels.... you might want to tag things such as if it's
