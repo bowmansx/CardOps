@@ -6,6 +6,12 @@ import { Loader2, Scale, TrendingUp } from "lucide-react";
 type Path = {
   grader: string; expected: number; low: number; high: number; confidence: number;
   gradedValue: number | null; fee: number; net: number | null; delta: number | null;
+  /** Share of the estimate's outcomes that lose money against selling raw. */
+  downsideP?: number | null;
+  /** How much of the estimate the value ladder could actually price. */
+  priced?: number;
+  line?: string | null;
+  outcomes?: { grade: number; p: number; value: number | null; net: number | null }[];
   basis: "actual" | "modeled" | null;
 };
 type EV = { ready: boolean; reason?: string; raw: number | null; paths?: Path[]; best?: Path | null; worthIt?: boolean };
@@ -79,7 +85,18 @@ export function GradeEV({ cardId }: { cardId: string }) {
               <div className="text-[11px] text-ink/60">
                 Net <span className="figures font-semibold text-ink">{money(best.net)}</span> after ~{money(best.fee)} fees —
                 that&apos;s <span className="figures font-bold text-pos">+{money(best.delta)}</span> over selling raw ({money(ev.raw)}).
-              </div>
+              
+              {best.downsideP != null && best.downsideP > 0 && (
+                <div className="mt-1 text-[11px] font-semibold text-danger">
+                  {Math.round(best.downsideP * 100)}% of the estimated grades lose money against selling raw.
+                </div>
+              )}
+              {best.priced != null && best.priced < 0.999 && (
+                <div className="mt-1 text-[11px] text-ink/45">
+                  Only {Math.round(best.priced * 100)}% of the estimate could be priced from comps &mdash; the rest of the grade range has no ladder value.
+                </div>
+              )}
+</div>
             </div>
           </div>
         ) : (
@@ -116,10 +133,11 @@ export function GradeEV({ cardId }: { cardId: string }) {
         })}
       </div>
       <p className="bg-paper/50 px-3 py-1.5 text-[10px] leading-snug text-ink/40">
-        Uses your AI grade estimate × the value ladder − default grading fees (~{money(FEE_NOTE)} + ship). Decision support, not a guarantee.
+        Uses your AI grade estimate across the value ladder, minus the grading fee
+        you have configured. Set your own fees in Settings.
+        Decision support, not a guarantee.
       </p>
     </section>
   );
 }
 
-const FEE_NOTE = 20;

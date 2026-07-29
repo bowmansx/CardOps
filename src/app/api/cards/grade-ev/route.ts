@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { currentRole, hasCardAccess } from "@/lib/cards/roles";
 import { buildLadder, rawValue, type Comp, type Multiplier } from "@/lib/cards/valuation";
 import { parseStoredEstimate } from "@/lib/cards/grade-estimate-schema";
-import { cardOpsPrefs } from "@/lib/cards/settings";
+import { cardOpsPrefs, DEFAULT_CARDOPS } from "@/lib/cards/settings";
+import { gradingVerdict, verdictLine } from "@/lib/cards/grading-ev";
 
 export const dynamic = "force-dynamic";
 
@@ -48,20 +49,42 @@ export async function GET(req: Request) {
 
   const paths = GRADERS.map((g) => {
     const e = est[g.toLowerCase() as GKey];
-    // Expected grade = midpoint of the estimate (half-steps for BGS).
     const step = g === "BGS" ? 0.5 : 1;
-    const expected = Math.round(((e.low + e.high) / 2) / step) * step;
-    // Value at that grade: nearest ladder cell for this grader.
+    const fee = (FEES[g] ?? DEFAULT_CARDOPS.grading_fees.PSA) + SHIP;
     const cells = ladder.filter((c) => c.grader.toUpperCase() === g && c.value != null);
-    let cell = cells.find((c) => Number(c.grade) === expected) ?? null;
-    if (!cell && cells.length) {
-      cell = cells.reduce((b, c) => (Math.abs(c.grade - expected) < Math.abs(b.grade - expected) ? c : b));
-    }
-    const gradedValue = cell?.value ?? null;
-    const fee = (FEES[g] ?? 25) + SHIP;
-    const net = gradedValue != null ? Math.round((gradedValue - fee) * 100) / 100 : null;
-    const delta = net != null ? Math.round((net - raw) * 100) / 100 : null;
-    return { grader: g, expected, low: e.low, high: e.high, confidence: e.confidence, gradedValue, fee, net, delta, basis: cell?.basis_source ?? null };
+
+    // ACROSS THE WHOLE ESTIMATE, not its midpoint. "PSA 8 to 10" used to
+    // collapse to "PSA 9" and report one number as though the grade were
+    // known - averaging away the entire reason grading is a gamble. Only an
+    // EXACT ladder cell counts now: the old nearest-cell fallback quietly
+    // priced a 10 off the 9 it could find, which is the same bias the pipeline
+    // has when it pools grades (see valuation.ts).
+    const verdict = gradingVerdict(
+      { low: e.low, high: e.high },
+      {
+        step, fee, rawValue: raw,
+        valueAtGrade: (grade) => cells.find((c) => Number(c.grade) === grade)?.value ?? null,
+      },
+    );
+
+    // The midpoint is still reported - it is a useful shorthand - but it is no
+    // longer what the decision is computed from.
+    const expected = Math.round(((e.low + e.high) / 2) / step) * step;
+    return {
+      grader: g, expected, low: e.low, high: e.high, confidence: e.confidence,
+      fee,
+      gradedValue: verdict.bestCase?.value ?? null,
+      net: verdict.expectedNet,
+      delta: verdict.expectedDelta,
+      // What the old screen could never say.
+      downsideP: verdict.downsideP,
+      priced: verdict.priced,
+      bestCase: verdict.bestCase,
+      worstCase: verdict.worstCase,
+      outcomes: verdict.outcomes,
+      line: verdictLine(verdict),
+      basis: cells.length ? cells[0].basis_source ?? null : null,
+    };
   });
 
   const viable = paths.filter((p) => p.delta != null) as (typeof paths[number] & { delta: number })[];
