@@ -163,6 +163,79 @@ to-be-graded pile? Those want different fields. `card_lots` (sell-side bundles)
 and `purchase_lots` (buy-side cost events) already exist and both overlap the
 idea - the danger is three concepts that each half-answer the same question.
 
+### Q4 - Nested groups, and a real tags system  *(2026-07-28)*
+
+> "we will have groups that can have many levels of subgroups.... beyond that,
+> we will have a tags system.. all of these options will be available during the
+> photo process as well"
+
+**Two findings that change this before it is designed.**
+
+**1. "Tags" already exist, and they are not what you mean.** `TAG_FACETS` in
+`lib/cards/types.ts` - RC, AUTO, PATCH, RPA, numbered, graded, PSA, BGS, SGC,
+CGC - are **derived in code from card fields**, not authored by anyone. They are
+filter facets. What you are describing is user-authored labels, which is a
+different thing wearing the same word. Whatever gets built needs a name that
+does not collide, or every conversation about "tags" from here is ambiguous.
+
+**2. This reverses a recorded decision.** Migration `20260720020000` says, in
+its own header: *"Tags themselves are DERIVED in code from card fields (no tag
+table needed)."* That was a deliberate call. Reversing it is fine - the reason
+was "we can compute these from what we already store", which simply does not
+apply to a label someone invents - but per the standing rule it gets named
+rather than quietly undone.
+
+**What exists:** `card_groups` is FLAT - id, name, color, sort. No `parent_id`.
+`card_group_items` is many-to-many (a card can be in several groups today).
+Nesting needs a migration.
+
+---
+
+#### The question that decides the schema
+
+**If a card can be in many groups, and groups nest, how is that different from
+tags?**
+
+That is not rhetorical. Hierarchical many-to-many membership *is* tags with
+structure. If both are built without answering it, the same job gets done two
+ways and neither is used consistently.
+
+The version that stays coherent, and my recommendation:
+
+- **A group is WHERE A CARD LIVES.** One parent, like a folder. "2024 buys >
+  March > Cardboard box 3." Answers *where did this come from* and *where is it
+  physically*. One card, one group.
+- **A tag is WHAT A CARD IS.** Many per card, flat, user-invented. "to grade",
+  "consignment - Dave", "eBay listed", "sentimental". Answers *what do I want to
+  do with it*.
+
+That split is worth having because the two get used at different moments: the
+group is set once for a whole session at intake; tags accumulate over a card's
+life.
+
+**But it means changing `card_group_items` from many-to-many to one group per
+card** - which is a real narrowing, and yours to accept or reject.
+
+#### The other decisions, in the order they bite
+
+1. **Does membership inherit?** A card in "2024 > March > Box 3" - is it in
+   "2024"? Almost certainly yes for browsing, and it changes every count, every
+   filter and every query in the app. This is the biggest one.
+2. **How deep, really?** Unlimited nesting is trivial in the schema and
+   punishing in the UI, especially one-handed mid-photo-session. Postgres
+   `ltree` is purpose-built for exactly this and gives ancestor queries for
+   free; an adjacency list plus a recursive CTE is the plainer alternative.
+3. **Cycles must be impossible.** A group cannot be its own ancestor. Cheap to
+   enforce in a trigger, expensive to discover later.
+4. **The phone is the hard part, not the schema.** A tree picker on a phone
+   while holding a card is bad. What probably works: the group is set ONCE at
+   session start, shown as a breadcrumb, with recent and pinned groups surfaced
+   first and search rather than tree navigation. Tags get a chip row with
+   type-ahead.
+5. **Deleting a parent.** Do children move up, or go with it? Deleting a group
+   must never delete cards - `card_group_items` cascades on group delete today,
+   which removes the *membership* only, and that is correct.
+
 ---
 
 ## What to build, ranked
