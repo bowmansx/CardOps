@@ -132,22 +132,23 @@
   <p class="meta">Tue 28 July 2026 · main @ 006273b · 424 tests · 30 test files · 29 card API routes</p>
 </header>
 
-<h2><span class="n">Read this first</span>Two migrations, and nothing is broken</h2>
+<h2><span class="n">Read this first</span>Every migration is applied. Nothing is outstanding.</h2>
 <ul class="items">
   <li class="item pos">
-    <span class="chip c-live">Done</span><span class="t">20260745, 20260746 and 20260747 are applied</span>
-    <div class="d">You pasted all three on Monday 27 July — yesterday, not today. Earlier wording in this document said "this morning" for work done the previous day, which is what made a settled question look open. An earlier version of this page claimed 20260745 was outstanding and described a live bug from it — that was wrong. I read a stale note instead of what actually happened. There is no bug; the column exists.</div>
+    <span class="chip c-live">Done</span><span class="t">CardOps is fully migrated through 20260749</span>
+    <div class="d">Verified by query on 28 July: <code>scan_on_open</code> present, <code>graded</code> template present, 6 built-in templates, <code>card_photos.position</code> present, <code>card_market_sales.pre_auto_split</code> present. The last two were applied on the 27th, which proves yesterday's pastes went to the right database all along.</div>
+  </li>
+  <li class="item pos">
+    <span class="chip c-live">Fixed</span><span class="t">The wrong-database episode, and the guard that ends it</span>
+    <div class="d">An evening of diagnostics ran against the old shared <strong>Master-Ops</strong> project (<code>wjcalfuwqantwhizkdks</code>) instead of <strong>CardOps</strong> (<code>zgkydwvmdnnrxcacegth</code>), because the Supabase URL autocompletes to whichever was typed first. Seven migrations looked like they had vanished. They had not. One stray column got added to Master-Ops and has been dropped.
+    <br><br><strong>Every migration now opens with a guard</strong> that raises before changing anything if <code>card_identities</code> is absent — that table exists only in CardOps, so its absence is a reliable "wrong place". The error names both project refs and links the right editor.</div>
   </li>
   <li class="item warn">
-    <span class="chip c-you">You</span><span class="t">Two migrations still to paste, neither urgent</span>
-    <div class="d"><code>20260748_scan_on_open.sql</code> lets you turn the Start scan gate OFF — without it you simply always get the button, which is the intended default. <code>20260749_graded_template.sql</code> adds the Graded slab template; without it, it just doesn't appear in the list. Nothing else is affected either way.</div>
-  </li>
-  <li class="item warn">
-    <span class="chip c-half">Code</span><span class="t">One unchecked read worth fixing</span>
-    <div class="d"><code>estimate-run.ts:47</code> destructures <code>{ data: histRows }</code> and discards the error, then falls back to <code>[]</code>. Not failing today, but it means any future read error on market history reads as "this card has no history" and prices it anyway. Prevention rule 1.</div>
+    <span class="chip c-half">Code</span><span class="t">One unchecked read still worth fixing</span>
+    <div class="d"><code>estimate-run.ts:47</code> destructures <code>{ data: histRows }</code> and discards the error, then falls back to <code>[]</code>. Not failing today, but any future read error on market history would read as "this card has no history" and price it anyway. Prevention rule 1.</div>
   </li>
   <li class="item"><span class="chip c-idea">Later</span><span class="t">No card cron runs anywhere, and that is fine for now</span>
-    <div class="d"><code>CRON_SECRET</code> is unset here (the six jobs 401 by design) and Master-Ops stopped scheduling them on 25 July. I first wrote this up as urgent; it isn't, because you're replacing thecardapi's free tier with real API subscriptions and the lookup schedule is a design conversation we haven't had. <strong>One question to carry into that conversation:</strong> whether any tier below Enterprise can backfill. If none can, the gap between now and "proper APIs" is history no subscription buys back &mdash; an input into <em>when</em> you subscribe, not into flipping a cron today. Unverified; check against vendor docs when comparing.</div></li>
+    <div class="d"><code>CRON_SECRET</code> is unset (the six jobs 401 by design) and Master-Ops stopped scheduling them on 25 July. Not urgent: you're replacing thecardapi's free tier with real API subscriptions and the lookup schedule is a design conversation we haven't had. <strong>One question to carry into it:</strong> whether any tier below Enterprise can backfill. If none can, the gap between now and "proper APIs" is history no subscription buys back.</div></li>
 </ul>
 
 <h2><span class="n">Section 1</span>Live and working</h2>
