@@ -143,34 +143,72 @@ function bandFor(feeable: number, tiers: FeeTier[]): { pct: number; floor: numbe
  * `none` instead, so the forward estimate abstains rather than lying.
  */
 export const FEE_SCHEDULES: Record<string, FeeSchedule> = {
+  // VERIFIED 2026-07-29 against ebay.com/help/selling/fees-credits-invoices/
+  // selling-fees?id=4822. Quoted for Sports Trading Cards, Non-Sport Trading
+  // Cards and Collectible Card Games:
+  //   "13.25% on total amount of the sale up to $7,500 calculated per item
+  //    2.35% on the portion of the sale over $7,500"
+  //   "For orders $10.00 or less the per order fee is $0.30, for orders over
+  //    $10.00 the per order fee is $0.40."
+  //   "The total amount of the sale includes the item price, any handling
+  //    charges, any shipping costs collected from the buyer, sales tax, and any
+  //    other applicable fees."
+  //
+  // CAVEAT THAT MATTERS: eBay STORE SUBSCRIBERS pay different fees on a separate
+  // page, not read. If Beau has a Store, this schedule is wrong for him — which
+  // is precisely why his own measured rate outranks it the moment five settled
+  // sales exist.
   ebay: {
-    platform: "eBay", pct: 0.1325, perOrder: 0.4, pctAppliesToShipping: true,
-    source: "app preset — eBay trading cards ≈ 13.25% + $0.40 — NEEDS CONFIRMING", verifiedAt: null,
+    platform: "eBay",
+    tiers: [{ upTo: 7500, pct: 0.1325 }, { upTo: null, pct: 0.0235 }],
+    perOrderTiers: [{ upTo: 10, amount: 0.3 }, { upTo: null, amount: 0.4 }],
+    pctAppliesToShipping: true,
+    pctAppliesToSalesTax: true,
+    source: "eBay Selling fees help page, Trading Cards categories — verified 2026-07-29 (non-Store rates)",
+    verifiedAt: "2026-07-29",
   },
   whatnot: {
-    platform: "Whatnot", pct: 0.109, perOrder: 0.3, pctAppliesToShipping: true,
+    platform: "Whatnot",
+    tiers: [{ upTo: null, pct: 0.109 }],
+    perOrderTiers: [{ upTo: null, amount: 0.3 }],
+    pctAppliesToShipping: true, pctAppliesToSalesTax: false,
     source: "app preset — Whatnot ≈ 8% + ~2.9% + $0.30 processing — NEEDS CONFIRMING", verifiedAt: null,
   },
   tcgplayer: {
-    platform: "TCGplayer", pct: 0.1275, perOrder: 0.3, pctAppliesToShipping: true,
+    platform: "TCGplayer",
+    tiers: [{ upTo: null, pct: 0.1275 }],
+    perOrderTiers: [{ upTo: null, amount: 0.3 }],
+    pctAppliesToShipping: true, pctAppliesToSalesTax: false,
     source: "app preset — TCGplayer ≈ 10.25% + 2.5% + $0.30 — NEEDS CONFIRMING", verifiedAt: null,
   },
   mercari: {
-    platform: "Mercari", pct: 0.129, perOrder: 0.5, pctAppliesToShipping: true,
+    platform: "Mercari",
+    tiers: [{ upTo: null, pct: 0.129 }],
+    perOrderTiers: [{ upTo: null, amount: 0.5 }],
+    pctAppliesToShipping: true, pctAppliesToSalesTax: false,
     source: "app preset — Mercari ≈ 10% + processing — NEEDS CONFIRMING", verifiedAt: null,
   },
   comc: {
     // Cash-out only; COMC's storage and processing fees are charged separately
     // and are not a function of the sale price, so they cannot live in a rate.
-    platform: "COMC", pct: 0.05, perOrder: 0, pctAppliesToShipping: false,
+    platform: "COMC",
+    tiers: [{ upTo: null, pct: 0.05 }],
+    perOrderTiers: [{ upTo: null, amount: 0 }],
+    pctAppliesToShipping: false, pctAppliesToSalesTax: false,
     source: "app preset — COMC ≈ 5% cash-out, storage fees separate — NEEDS CONFIRMING", verifiedAt: null,
   },
   square: {
-    platform: "Square", pct: 0.029, perOrder: 0.3, pctAppliesToShipping: true,
+    platform: "Square",
+    tiers: [{ upTo: null, pct: 0.029 }],
+    perOrderTiers: [{ upTo: null, amount: 0.3 }],
+    pctAppliesToShipping: true, pctAppliesToSalesTax: false,
     source: "app preset — Square ≈ 2.9% + $0.30 — NEEDS CONFIRMING", verifiedAt: null,
   },
   shop: {
-    platform: "Own shop", pct: 0.029, perOrder: 0.3, pctAppliesToShipping: true,
+    platform: "Own shop",
+    tiers: [{ upTo: null, pct: 0.029 }],
+    perOrderTiers: [{ upTo: null, amount: 0.3 }],
+    pctAppliesToShipping: true, pctAppliesToSalesTax: false,
     source: "app preset — own shop, card processing ≈ 2.9% + $0.30 — NEEDS CONFIRMING", verifiedAt: null,
   },
 };
@@ -180,10 +218,26 @@ export function scheduleNote(platform: string): string | null {
   return FEE_SCHEDULES[platform.trim().toLowerCase()]?.source.replace(/^app preset — /, "").replace(/ — NEEDS CONFIRMING$/, "") ?? null;
 }
 
-/** Percent and fixed fee as the sell form's editable defaults expect them. */
+/**
+ * Percent and fixed fee as the sell form's editable defaults expect them.
+ *
+ * FLATTENS TO THE FIRST BAND, deliberately. The sell form pre-fills a single
+ * editable fee figure for a sale that has already happened, and the first band
+ * is the rate that applies to essentially every card — eBay's second band starts
+ * at $7,500. On a sale that does cross a threshold the figure is editable and
+ * the real invoice is what gets recorded anyway.
+ *
+ * The FORWARD estimate never uses this: it walks the real tiers, because that is
+ * where a $7,500-plus card would otherwise be overcharged by hundreds.
+ */
 export function schedulePreset(platform: string): { pct: number; fixed: number } | null {
   const s = FEE_SCHEDULES[platform.trim().toLowerCase()];
-  return s ? { pct: round2(s.pct * 100), fixed: s.perOrder } : null;
+  if (!s) return null;
+  return {
+    pct: round2((s.tiers[0]?.pct ?? 0) * 100),
+    // The band a typical single-card order lands in, not the cheapest one.
+    fixed: s.perOrderTiers[s.perOrderTiers.length - 1]?.amount ?? 0,
+  };
 }
 
 /** One settled sale, as `card_sales` records it. */
@@ -268,17 +322,33 @@ export function resolveFeeRate(sales: SettledSale[], platform: string, minSales 
   return { kind: "none", why: `no fee schedule for "${platform}" and no settled sales to derive one from` };
 }
 
-function ratesOf(src: FeeRateSource): { pct: number; perOrder: number; pctOnShipping: boolean; unverified: boolean } | null {
+/**
+ * A rate source flattened into what the arithmetic needs.
+ *
+ * An OBSERVED rate becomes a single flat tier with no per-order fee: it was
+ * divided out of real settled totals, so it already contains whatever fixed fee
+ * and whatever tier applied. Adding either on top would double-count.
+ */
+function ratesOf(src: FeeRateSource): {
+  tiers: FeeTier[];
+  perOrderTiers: PerOrderTier[];
+  pctOnShipping: boolean;
+  pctOnSalesTax: boolean;
+  unverified: boolean;
+} | null {
   if (src.kind === "none") return null;
   if (src.kind === "observed") {
-    // An observed rate already contains whatever fixed fee was charged — it was
-    // divided out of real totals. Adding a per-order fee on top would double-count.
-    return { pct: src.pct, perOrder: 0, pctOnShipping: true, unverified: false };
+    return {
+      tiers: [{ upTo: null, pct: src.pct }],
+      perOrderTiers: [{ upTo: null, amount: 0 }],
+      pctOnShipping: true, pctOnSalesTax: true, unverified: false,
+    };
   }
   return {
-    pct: src.schedule.pct,
-    perOrder: src.schedule.perOrder,
+    tiers: src.schedule.tiers,
+    perOrderTiers: src.schedule.perOrderTiers,
     pctOnShipping: src.schedule.pctAppliesToShipping,
+    pctOnSalesTax: src.schedule.pctAppliesToSalesTax,
     unverified: src.schedule.verifiedAt == null,
   };
 }
@@ -290,6 +360,15 @@ export type ProceedsInput = {
   shipIncome?: number;
   /** What shipping actually costs you — postage, mailer, tracking. */
   shipCost?: number;
+  /**
+   * Sales tax the platform collected from the buyer.
+   *
+   * eBay charges its percentage on this too — it is named in their definition of
+   * the total amount of the sale. You never see the money, and you pay a fee on
+   * it. Left at zero when unknown, which understates the fee rather than
+   * inventing a tax rate we have no basis for.
+   */
+  salesTax?: number;
   /** Total cost basis: acquisition plus cost lines. From `cardBasis`. */
   basis?: number;
   /**
@@ -337,12 +416,19 @@ export function estimateProceeds(input: ProceedsInput, rate: FeeRateSource): Pro
 
   const shipIncome = num(input.shipIncome);
   const shipCost = num(input.shipCost);
+  const salesTax = num(input.salesTax);
   const lines = Math.max(1, Math.floor(input.orderLines ?? 1));
 
-  const feeable = r.pctOnShipping ? price + shipIncome : price;
-  const feePct = round2(feeable * r.pct);
-  const feeFixed = round2(r.perOrder / lines);
+  const feeable = price
+    + (r.pctOnShipping ? shipIncome : 0)
+    + (r.pctOnSalesTax ? salesTax : 0);
+  const feePct = round2(tieredPct(feeable, r.tiers));
+  // The per-order band is chosen by the ORDER's total, then split across its
+  // lines — the fee is charged once per order, not once per card (rule 12).
+  const feeFixed = round2(perOrderFee((price + shipIncome + salesTax) * lines, r.perOrderTiers) / lines);
   const fees = round2(feePct + feeFixed);
+  // Sales tax is NOT added to net: the platform collects it and remits it. You
+  // pay a fee on money that never reaches you.
   const net = round2(price + shipIncome - fees - shipCost);
   const basis = input.basis == null ? null : num(input.basis);
   const profit = basis == null ? null : round2(net - basis);
@@ -385,33 +471,64 @@ export type BreakEven = {
  * at the call site.
  */
 export function breakEvenPrice(
-  input: { basis: number; shipIncome?: number; shipCost?: number; orderLines?: number },
+  input: { basis: number; shipIncome?: number; shipCost?: number; salesTax?: number; orderLines?: number },
   rate: FeeRateSource,
 ): BreakEven | null {
   const r = ratesOf(rate);
   if (!r) return null;
   const basis = num(input.basis);
-  // A fee at or above 100% has no break-even at any price — the platform takes
-  // the increase faster than you can earn it. Returning a huge number would look
-  // like an answer.
-  if (!(r.pct < 1)) return null;
-
   const shipIncome = num(input.shipIncome);
   const shipCost = num(input.shipCost);
+  const salesTax = num(input.salesTax);
   const lines = Math.max(1, Math.floor(input.orderLines ?? 1));
-  const fixed = r.perOrder / lines;
 
-  const shipCredit = r.pctOnShipping ? shipIncome * (1 - r.pct) : shipIncome;
-  const price = (basis + fixed + shipCost - shipCredit) / (1 - r.pct);
+  // What sits alongside the price inside the feeable amount.
+  const extra = (r.pctOnShipping ? shipIncome : 0) + (r.pctOnSalesTax ? salesTax : 0);
 
-  return {
-    // A negative break-even means shipping income alone covers the basis. Zero
-    // is the floor: you cannot sell for less than nothing.
-    price: round2(Math.max(0, price)),
-    basis: round2(basis),
-    rate,
-    unverifiedRate: r.unverified,
-  };
+  // PIECEWISE SOLVE. With tiers, the marginal rate depends on the answer, so
+  // there is no single formula. For each (fee band × per-order band) pair, solve
+  // the linear equation that holds INSIDE that pair, then check the answer
+  // actually lands there. The first consistent solution is the real one.
+  //
+  // Within a fee band of marginal rate p, floor F, and fee-already-accrued B:
+  //   net = price + shipIncome - [B + p(price + extra - F) + fixed] - shipCost
+  //   price = (basis - shipIncome + B + p(extra - F) + fixed + shipCost) / (1 - p)
+  let floor = 0;
+  let feeBelow = 0;
+  for (const t of r.tiers) {
+    const ceil = t.upTo ?? Infinity;
+    const p = t.pct;
+    // A band at or above 100% cannot be climbed out of — the platform takes the
+    // increase faster than you can earn it, so there is no break-even in it.
+    if (p < 1) {
+      for (const po of r.perOrderTiers) {
+        const fixed = po.amount / lines;
+        const price = (basis - shipIncome + feeBelow + p * (extra - floor) + fixed + shipCost) / (1 - p);
+        const solved = Math.max(0, price);
+        const feeable = solved + extra;
+        // Both bands have to be the ones we assumed, or the arithmetic used the
+        // wrong rate. A zero-floored solution is accepted as the boundary case.
+        const inFeeBand = (feeable >= floor - 0.005 || floor === 0) && feeable <= ceil + 0.005;
+        const orderTotal = (solved + shipIncome + salesTax) * lines;
+        const inOrderBand = orderTotal <= (po.upTo ?? Infinity) + 0.005;
+        if (inFeeBand && inOrderBand) {
+          return {
+            // A negative break-even means shipping income alone covers the basis.
+            // Zero is the floor: you cannot sell for less than nothing.
+            price: round2(solved),
+            basis: round2(basis),
+            rate,
+            unverifiedRate: r.unverified,
+          };
+        }
+      }
+    }
+    feeBelow += (ceil - floor) * p;
+    floor = ceil;
+  }
+  // No band produced a self-consistent answer — most likely a 100%+ top rate.
+  // Returning a large number would look like an answer.
+  return null;
 }
 
 export type OfferVerdict = {
@@ -451,13 +568,24 @@ export function rateLabel(rate: FeeRateSource): string {
   if (rate.kind === "observed") {
     return `${(rate.pct * 100).toFixed(1)}% — your last ${rate.n} ${rate.platform} sales`;
   }
-  if (rate.kind === "schedule") {
-    return `${(rate.schedule.pct * 100).toFixed(2)}% + ${rate.schedule.perOrder.toFixed(2)}/order — ${
-      rate.schedule.verifiedAt ? `published rate, confirmed ${rate.schedule.verifiedAt}` : "published rate, UNCONFIRMED"
-    }`;
-  }
-  return rate.why;
+  if (rate.kind === "none") return rate.why;
+  const s = rate.schedule;
+  // Describe the tiers rather than flattening them: "13.25%" on a $10,000 slab
+  // would be a quietly wrong label on a correctly-computed number.
+  const bands = s.tiers
+    .map((t, i) =>
+      t.upTo == null
+        ? (i === 0 ? `${(t.pct * 100).toFixed(2)}%` : `then ${(t.pct * 100).toFixed(2)}%`)
+        : `${(t.pct * 100).toFixed(2)}% to ${money0(t.upTo)}`)
+    .join(", ");
+  const fixed = s.perOrderTiers.length === 1
+    ? `$${s.perOrderTiers[0].amount.toFixed(2)}/order`
+    : s.perOrderTiers.map((t) => (t.upTo == null ? `$${t.amount.toFixed(2)} above` : `$${t.amount.toFixed(2)} to ${money0(t.upTo)}`)).join(", ") + "/order";
+  const when = s.verifiedAt ? `published rate, confirmed ${s.verifiedAt}` : "published rate, UNCONFIRMED";
+  return `${bands} + ${fixed} — ${when}`;
 }
+
+const money0 = (n: number) => "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 
 function num(v: unknown): number {
   const x = Number(v ?? 0);

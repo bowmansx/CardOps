@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   observedFeeRate, resolveFeeRate, estimateProceeds, breakEvenPrice, offerVerdict,
-  rateLabel, FEE_SCHEDULES, type SettledSale, type FeeRateSource,
+  rateLabel, FEE_SCHEDULES, tieredPct, perOrderFee,
+  type SettledSale, type FeeRateSource, type FeeSchedule,
 } from "@/lib/cards/net-proceeds";
 
 const settled = (o: Partial<SettledSale> = {}): SettledSale => ({
@@ -11,8 +12,20 @@ const settled = (o: Partial<SettledSale> = {}): SettledSale => ({
 /** A clean 10% + $0 rate, so the arithmetic in a test is checkable by hand. */
 const flat10: FeeRateSource = {
   kind: "schedule",
-  schedule: { platform: "Test", pct: 0.1, perOrder: 0, pctAppliesToShipping: true, source: "test", verifiedAt: "2026-07-29" },
+  schedule: {
+    platform: "Test", tiers: [{ upTo: null, pct: 0.1 }], perOrderTiers: [{ upTo: null, amount: 0 }],
+    pctAppliesToShipping: true, pctAppliesToSalesTax: false, source: "test", verifiedAt: "2026-07-29",
+  },
 };
+
+/** A schedule builder, so a test states only what it is exercising. */
+const sched = (o: Partial<FeeSchedule>): FeeRateSource => ({
+  kind: "schedule",
+  schedule: {
+    platform: "T", tiers: [{ upTo: null, pct: 0.1 }], perOrderTiers: [{ upTo: null, amount: 0 }],
+    pctAppliesToShipping: true, pctAppliesToSalesTax: false, source: "t", verifiedAt: "2026-07-29", ...o,
+  },
+});
 
 describe("observedFeeRate — your own rate beats any published table", () => {
   it("derives the median effective rate from settled sales", () => {
@@ -128,19 +141,13 @@ describe("estimateProceeds", () => {
 
   // PREVENTION RULE 12: a fixed fee applies once per ORDER, not per line.
   it("splits a per-order fixed fee across the order's lines", () => {
-    const withFixed: FeeRateSource = {
-      kind: "schedule",
-      schedule: { platform: "T", pct: 0, perOrder: 1, pctAppliesToShipping: true, source: "t", verifiedAt: "2026-07-29" },
-    };
+    const withFixed = sched({ tiers: [{ upTo: null, pct: 0 }], perOrderTiers: [{ upTo: null, amount: 1 }] });
     expect(estimateProceeds({ price: 100, orderLines: 1 }, withFixed)!.feeFixed).toBe(1);
     expect(estimateProceeds({ price: 100, orderLines: 4 }, withFixed)!.feeFixed).toBe(0.25);
   });
 
   it("excludes shipping from the fee base when the platform does", () => {
-    const noShipFee: FeeRateSource = {
-      kind: "schedule",
-      schedule: { platform: "T", pct: 0.1, perOrder: 0, pctAppliesToShipping: false, source: "t", verifiedAt: "2026-07-29" },
-    };
+    const noShipFee = sched({ pctAppliesToShipping: false });
     const p = estimateProceeds({ price: 100, shipIncome: 50 }, noShipFee)!;
     expect(p.feeable).toBe(100);
     expect(p.fees).toBe(10);
@@ -163,7 +170,10 @@ describe("estimateProceeds", () => {
   });
 
   it("flags an estimate built on an unconfirmed published rate", () => {
-    expect(estimateProceeds({ price: 100 }, resolveFeeRate([], "ebay"))!.unverifiedRate).toBe(true);
+    // Whatnot is still an unconfirmed preset; eBay was verified against their own
+    // fees page on 2026-07-29, so it must NOT be flagged.
+    expect(estimateProceeds({ price: 100 }, resolveFeeRate([], "whatnot"))!.unverifiedRate).toBe(true);
+    expect(estimateProceeds({ price: 100 }, resolveFeeRate([], "ebay"))!.unverifiedRate).toBe(false);
     expect(estimateProceeds({ price: 100 }, flat10)!.unverifiedRate).toBe(false);
   });
 });
@@ -212,10 +222,7 @@ describe("breakEvenPrice — the inversion, which is the whole point", () => {
   // At a 100% fee the platform takes the increase faster than you can earn it —
   // there is no break-even at any price, and a huge number would look like one.
   it("returns null when no price can break even", () => {
-    const impossible: FeeRateSource = {
-      kind: "schedule",
-      schedule: { platform: "T", pct: 1, perOrder: 0, pctAppliesToShipping: true, source: "t", verifiedAt: "2026-07-29" },
-    };
+    const impossible = sched({ tiers: [{ upTo: null, pct: 1 }] });
     expect(breakEvenPrice({ basis: 100 }, impossible)).toBeNull();
   });
 
@@ -278,10 +285,139 @@ describe("rateLabel — the number never travels without its source", () => {
 describe("the seeded schedules are honest about not being verified", () => {
   // They are what I believe is current, and belief is not verification. Anything
   // built on one is flagged until someone who actually sells there confirms it.
-  it("ships unverified, with a source that says so", () => {
+  it("marks every UNCONFIRMED preset as such, and only those", () => {
     for (const s of Object.values(FEE_SCHEDULES)) {
-      expect(s.verifiedAt).toBeNull();
-      expect(s.source).toContain("NEEDS CONFIRMING");
+      if (s.verifiedAt == null) expect(s.source).toContain("NEEDS CONFIRMING");
+      else expect(s.source).not.toContain("NEEDS CONFIRMING");
     }
+  });
+
+  // Read off eBay's own fees page on 2026-07-29, which is why this one is not
+  // flagged. It is also the only schedule whose numbers are load-bearing today.
+  it("carries eBay's verified tiers exactly as published", () => {
+    const e = FEE_SCHEDULES.ebay;
+    expect(e.verifiedAt).toBe("2026-07-29");
+    expect(e.tiers).toEqual([{ upTo: 7500, pct: 0.1325 }, { upTo: null, pct: 0.0235 }]);
+    expect(e.perOrderTiers).toEqual([{ upTo: 10, amount: 0.3 }, { upTo: null, amount: 0.4 }]);
+    expect(e.pctAppliesToShipping).toBe(true);
+    expect(e.pctAppliesToSalesTax).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TIERS. Verified against eBay's own fees page 2026-07-29. Every case below was
+// silently wrong under the flat-rate model this replaced.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("tieredPct", () => {
+  const cards = [{ upTo: 7500, pct: 0.1325 }, { upTo: null, pct: 0.0235 }];
+
+  it("charges the first band only, below the threshold", () => {
+    expect(tieredPct(100, cards)).toBeCloseTo(13.25, 6);
+  });
+
+  it("charges each band on its own portion above the threshold", () => {
+    // 13.25% x 7500 = 993.75, plus 2.35% x 2500 = 58.75.
+    expect(tieredPct(10_000, cards)).toBeCloseTo(1052.5, 6);
+  });
+
+  // THE $272 ERROR. A flat 13.25% on a $10,000 slab computes $1,325.
+  it("is materially cheaper than a flat rate on a high-value card", () => {
+    expect(10_000 * 0.1325 - tieredPct(10_000, cards)).toBeCloseTo(272.5, 6);
+  });
+
+  it("is exact at the threshold", () => {
+    expect(tieredPct(7500, cards)).toBeCloseTo(993.75, 6);
+  });
+
+  it("is zero at zero", () => {
+    expect(tieredPct(0, cards)).toBe(0);
+  });
+});
+
+describe("perOrderFee", () => {
+  // "For orders $10.00 or less the per order fee is $0.30, for orders over
+  // $10.00 the per order fee is $0.40."
+  const bands = [{ upTo: 10, amount: 0.3 }, { upTo: null, amount: 0.4 }];
+
+  it("uses the cheap band at or below the boundary", () => {
+    expect(perOrderFee(5, bands)).toBe(0.3);
+    expect(perOrderFee(10, bands)).toBe(0.3);
+  });
+
+  it("uses the dearer band above it", () => {
+    expect(perOrderFee(10.01, bands)).toBe(0.4);
+    expect(perOrderFee(500, bands)).toBe(0.4);
+  });
+});
+
+describe("the fee base includes sales tax, which nobody models", () => {
+  // eBay: the total amount of the sale "includes the item price, any handling
+  // charges, any shipping costs collected from the buyer, SALES TAX, and any
+  // other applicable fees." You pay a percentage on money you never receive.
+  it("charges the percentage on tax the platform collected", () => {
+    const p = estimateProceeds({ price: 100, salesTax: 8 }, sched({ pctAppliesToSalesTax: true }))!;
+    expect(p.feeable).toBe(108);
+    expect(p.fees).toBe(10.8);
+  });
+
+  // The tax is remitted by the platform, so it must NOT be added to net — only
+  // to the fee base. Getting this backwards would inflate every payout.
+  it("does not add the tax to what you keep", () => {
+    const p = estimateProceeds({ price: 100, salesTax: 8 }, sched({ pctAppliesToSalesTax: true }))!;
+    expect(p.net).toBe(89.2); // 100 - 10.80
+  });
+
+  it("ignores tax for a platform that does not charge on it", () => {
+    expect(estimateProceeds({ price: 100, salesTax: 8 }, sched({ pctAppliesToSalesTax: false }))!.feeable).toBe(100);
+  });
+});
+
+describe("break-even solves the right band", () => {
+  const ebay = resolveFeeRate([], "ebay");
+
+  it("round-trips inside the first band", () => {
+    const be = breakEvenPrice({ basis: 187, shipCost: 4 }, ebay)!;
+    expect(estimateProceeds({ price: be.price, shipCost: 4, basis: 187 }, ebay)!.profit).toBeCloseTo(0, 1);
+  });
+
+  // The case a flat-rate inversion gets badly wrong: the marginal rate above
+  // $7,500 is 2.35%, not 13.25%, so the required price is far closer to basis.
+  it("round-trips ACROSS the threshold, using the marginal rate", () => {
+    const be = breakEvenPrice({ basis: 9000 }, ebay)!;
+    expect(be.price).toBeGreaterThan(7500);
+    expect(estimateProceeds({ price: be.price, basis: 9000 }, ebay)!.profit).toBeCloseTo(0, 1);
+  });
+
+  it("round-trips with the cheap per-order band on a sub-$10 card", () => {
+    const be = breakEvenPrice({ basis: 5 }, ebay)!;
+    const p = estimateProceeds({ price: be.price, basis: 5 }, ebay)!;
+    expect(p.feeFixed).toBe(0.3); // the <=$10 band
+    expect(p.profit).toBeCloseTo(0, 1);
+  });
+
+  it("round-trips with sales tax in the base", () => {
+    const be = breakEvenPrice({ basis: 200, salesTax: 15, shipIncome: 5, shipCost: 4 }, ebay)!;
+    const p = estimateProceeds({ price: be.price, salesTax: 15, shipIncome: 5, shipCost: 4, basis: 200 }, ebay)!;
+    expect(p.profit).toBeCloseTo(0, 1);
+  });
+
+  // A steep first band is climbable when a cheaper band sits above it; only an
+  // unclimbable TOP band has no solution.
+  it("still solves when the answer lies above a steep first band", () => {
+    const steep = sched({ tiers: [{ upTo: 10, pct: 0.9 }, { upTo: null, pct: 0.05 }] });
+    const be = breakEvenPrice({ basis: 1000 }, steep)!;
+    expect(estimateProceeds({ price: be.price, basis: 1000 }, steep)!.profit).toBeCloseTo(0, 1);
+  });
+});
+
+describe("rateLabel describes the tiers rather than flattening them", () => {
+  it("names both eBay bands and both per-order bands", () => {
+    const l = rateLabel(resolveFeeRate([], "ebay"));
+    expect(l).toContain("13.25%");
+    expect(l).toContain("2.35%");
+    expect(l).toContain("$7,500");
+    expect(l).toContain("confirmed 2026-07-29");
+    expect(l).not.toContain("UNCONFIRMED");
   });
 });
