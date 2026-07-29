@@ -1,3 +1,38 @@
+# READ THIS BEFORE THE REST
+
+**This document answers ONE question — "can we automate the collection of
+third-party sold comps?" — and the answer is no. It is not a verdict on the
+project, and read cold it sounds like one.**
+
+Beau, on first reading it: *"that makes it look like our project is completely
+dead."* That is a framing failure in how the research was commissioned: it was
+asked to be brutally honest about data sources and it was, without the
+counterweight that belongs beside it.
+
+The counterweight, from the market research the day before:
+
+1. **The wedge was never pricing data.** It is per-card inventory closing into a
+   real double-entry ledger across multiple legal entities, with every number
+   traceable to a document. Basis, purchase lots, cost lines, the sell RPC that
+   draws basis and posts P/L — all built, none of it dependent on anyone's
+   price feed.
+2. **Every competitor has this identical problem.** Card Ladder has 100M sales
+   because ingesting them IS their business, over years. Slabfy, Whuppit,
+   CollX, Market Movers have no magic sold-comps API either — they pay
+   Card-Ladder money, scrape with the exposure that carries, or paste. This is
+   the shape of the category, not a wall others walked through.
+3. **eBay now gives its own price guide away free**, scanning to the exact
+   parallel. That COMMODITISES the pricing layer, which is an argument for not
+   competing there — not evidence of being unable to compete.
+
+**What the finding actually changes:** the paste importer is permanent
+infrastructure rather than a stopgap, and deserves real investment — starting
+with a Terapeak-shaped parser. Terapeak is free inside Seller Hub and carries
+three years of eBay sold data INCLUDING accepted Best Offers, which is better
+than most paid APIs would give. Manual, not fatal.
+
+---
+
 # Deep dive — sources, extrapolation, context, calibration
 
 *2026-07-28. Five-agent research pass. Kept whole so any claim in [[FINDINGS]]

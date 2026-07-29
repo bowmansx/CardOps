@@ -2,6 +2,13 @@
 
 Loop-written. [[DECISIONS]] outranks anything here.
 
+**If the research file reads like bad news, read its banner first.** It answers
+one question — can third-party sold comps be automated — and the answer is no.
+That is not a verdict on the project: the wedge was never pricing data, every
+competitor faces the same wall, and eBay giving its price guide away free
+commoditises that layer rather than closing it to us. What it changes is that
+the paste importer is permanent infrastructure and should be funded like one.
+
 **Status 2026-07-28:** research complete. Parts 1-5 are my reasoning; Part 6
 below is what the research added or changed, verified against the repo where it
 made a claim about our code. Full output kept whole at
