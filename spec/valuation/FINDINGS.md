@@ -1,0 +1,198 @@
+# FINDINGS — valuation
+
+Loop-written. [[DECISIONS]] outranks anything here.
+
+**Status 2026-07-28:** initial theorising complete; a research pass on sources,
+extrapolation methods, context signals and calibration is running and will be
+folded in as `research/2026-07-28-*.md`. Everything below is **my reasoning**,
+not research output, and is marked as such.
+
+---
+
+## Part 1 — The five systems, kept apart
+
+Beau's brief reads as one thing and is really five. They fail differently, and
+three are much cheaper than the other two.
+
+| | System | Difficulty | Why |
+|---|---|---|---|
+| 1 | **Sourcing** real sales | Hard, but not technical | Contracts and terms of service, not code. Some doors are simply shut. |
+| 2 | **Triggering** — is the evidence thin? | Easy | Every input is already in the database. |
+| 3 | **Extrapolating** | Medium | A ladder of known techniques. The hard part is honesty, not maths. |
+| 4 | **Explaining** — show the work | Medium | Mostly UI over `PipelineV1`, which already exists. |
+| 5 | **Calibrating** — learn from outcomes | **Hardest, and it has a trap** | See Gap 5. |
+
+---
+
+## Part 2 — The ladder, and why it is a ladder
+
+*(my reasoning)*
+
+The instinct behind the brief is "use real data where we have it and extrapolate
+where we don't." That is right, but "extrapolate" is not one thing. It is a
+sequence of increasingly large assumptions, and **the design principle is that
+you climb only as far as you are forced to, and the app tells you which rung it
+reached.**
+
+Roughly, most evidence-like first:
+
+1. **This card's own recent sales** — nothing outranks it.
+2. **The same identity's shared sales** (other owners' history for the same
+   printed card). Already built.
+3. **Same card, adjacent grade** — a PSA 9 comp used to value a PSA 10 via a
+   grade multiplier. One assumption: that the multiplier holds here.
+4. **Same card, different grading company** — adds an assumption about
+   cross-company equivalence, which is contested and drifts.
+5. **Same card, older sales, index-adjusted forward.** Valid only if the index
+   is real. Otherwise it is laundering an old price with a decimal on it.
+6. **Sibling cards** — the same player and set at a different parallel or
+   serial number, scaled by a scarcity relationship.
+7. **Model-only** — attributes in, price out, fitted across the catalog. Most
+   inferred, most dangerous, and the one that looks most authoritative.
+8. **Bulk floor** — the card is worth roughly nothing and should consume no
+   compute at all.
+
+The important consequence: **rung 8 must be checked first, not last.** Most
+cards in a real collection are bulk. If the system spends an API call or an AI
+token before establishing that, the cost model collapses on the first 5,000-card
+collection buy.
+
+---
+
+## Part 3 — On the dial Beau described
+
+He asked for a control spanning "the full spectrum of what you can do and what
+they want you to do", possibly a horizontal scale, possibly with a second axis.
+
+*(my reasoning, and it is a disagreement)*
+
+**One slider is the wrong shape, because at least three independent things are
+being conflated.** Sliding "more extrapolation" on a card with forty real comps
+is offering someone a control whose only function is to make the answer worse.
+
+I would propose three separate controls, and one deliberate non-control:
+
+- **Posture** — Conservative · Market · Aggressive. Where in the observed
+  distribution the number sits. This is the one that genuinely maps to
+  *"arrive at a value they have confidence in."*
+- **Effort** — how much to spend. Free (own comps) · Standard (shared history,
+  index adjustment) · Deep (external lookups, AI reasoning). This is a **spend**
+  control and connects directly to the metered-pricing idea.
+- **Evidence floor** — how thin is too thin before the app abstains. A
+  threshold with a sane default, not a slider.
+- **NOT a control: how far up the ladder to climb.** That is *derived*. The app
+  climbs as little as it can and reports the rung it reached. Making it
+  selectable turns an honest constraint into a preference.
+
+If a second axis is genuinely wanted, the honest one is **horizon** — flip /
+season / long hold — because it changes which comps are even relevant. That
+already exists as a Card Intel setting.
+
+---
+
+## Part 4 — The gaps in the brief
+
+*(my reasoning — this is the section Beau asked me to find, and it matters most)*
+
+### Gap 1 — "What is it worth" and "what will it sell for, from me, this month" are different numbers
+
+The brief treats value as one figure. It is at least four: market value,
+auction-realised value, buy-it-now-with-offers value, and liquidate-this-week
+value. The app already knows landed cost, days-to-sell and (soon) fees, so it
+can answer the second question — which is the one an actual decision needs.
+Building a "value" that ignores this is building the number nobody uses.
+
+### Gap 2 — A value is a distribution, not a number
+
+Two cards can both be "worth $200": one sold forty times between $190 and $210,
+the other twice, at $80 and $320. Identical mean, opposite decisions. **Emitting
+a single number destroys exactly the information that matters most**, and it is
+destroyed at the moment of the decision. This is the strongest argument for a
+range as the primary output, with the point estimate as a derived convenience.
+
+### Gap 3 — The estimate becomes evidence, whether or not it was meant to
+
+Once the app prints a value it will end up in an insurance claim, a partnership
+dispute, a consignment agreement, a probate filing or a tax return. "Decision
+support, never a guarantee" is the right posture, but it has to be **on the
+artifact**, not only in a code comment. It also argues for storing every
+estimate with its date, its inputs and its rung — a dated stored estimate is far
+more defensible than a number regenerated months later from changed data.
+
+### Gap 4 — The shared catalog cuts both ways
+
+`card_market_sales` hangs off the shared identity: every owner of a card
+inherits everyone's accumulated history. That is a real moat. It also means
+**one user's bad paste, or a wash sale, or a shill bid, poisons every other
+user's estimate for that identity** — permanently, because history accumulates.
+There is no provenance weighting, no outlier quarantine and no dispute path
+today. The risk scales with users, and the fix is much cheaper before there are
+any.
+
+### Gap 5 — The learning loop has selection bias baked in, and it flatters
+
+This is the biggest trap in the brief.
+
+You only observe the sale price of cards that **sold**. A card estimated too
+high does not sell, and therefore never produces a data point. So comparing
+estimates to realised sales measures the model *only on the cases where it was
+low enough to transact* — and will report that it is well calibrated while
+being systematically optimistic.
+
+The correction is that **a listed-and-unsold card is evidence too** — evidence
+of an over-estimate — and the loop has to count it. Without that, "the app
+learns from results" is a mechanism for becoming confidently wrong.
+
+### Gap 6 — Who the number is for changes what it should be
+
+A seller wants an optimistic number ("list here"). A buyer wants a conservative
+one ("pay no more than"). An accountant wants a defensible one ("this is FMV on
+this date"). One output cannot serve all three honestly. This may be what the
+"spectrum" control should actually select.
+
+### Gap 7 — How much can be learned at Beau's scale
+
+A solo operator might realise a few hundred sales a year, spread over hundreds
+of distinct identities. That is enough to learn **one global bias correction**,
+and possibly a handful of per-segment multipliers. It is nowhere near enough to
+fit a model per player or per set. Any design that implies otherwise is
+overfitting theatre, and it will look like it is working right up until it
+costs money.
+
+### Gap 8 — Regime change makes old comps lie
+
+The hobby repriced violently in 2020–21 and again after. A 2021 comp is not a
+comp. Index-adjusting stale sales forward is either the most valuable technique
+on the list or the most dangerous one, depending entirely on whether a real
+segment index is available — which is a sourcing question, not a maths one.
+
+---
+
+## Part 5 — Questions for Beau
+
+Real forks. Each changes the design.
+
+1. **Is the primary output a range or a number?** A range is more honest and
+   harder to act on. My recommendation is a range, with a point estimate
+   derived from your Posture setting — but it changes every screen that shows a
+   value today.
+2. **Should the app ever refuse to give a number?** Today `min_comps` already
+   makes it abstain. Should extrapolation always produce *something*, or should
+   "we genuinely don't know" stay a valid answer?
+3. **Who is the default number for** — you as a seller, or a neutral FMV? This
+   decides whether the default posture is optimistic or conservative.
+4. **Does one user's realised sale improve everyone's estimate?** The catalog is
+   already shared. Pooling outcomes is powerful and it is also the poisoning
+   risk in Gap 4. Shared, or per-user only?
+5. **What is the honest name for the model output?** "Value" implies a fact.
+   "Estimate", "indication", "model value" all set different expectations —
+   and this is the word that appears on an insurance claim one day.
+6. **How much are you willing to spend per card?** The ladder's upper rungs cost
+   real money. A bulk card must cost zero. Where is the line, and is it your
+   choice per card or a global setting?
+7. **Do you want listed-and-unsold tracked?** It is the fix for Gap 5 and it
+   requires the app to know what you listed and at what price — which means the
+   eBay sell-side data it already has.
+8. **Is grading-company equivalence something you have a view on?** Rung 4 needs
+   a cross-company multiplier, and there is no neutral source for it. Your own
+   opinion, encoded and revisable, may be more honest than a borrowed one.
