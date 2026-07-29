@@ -64,12 +64,23 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
     // `platform` and `source` are not cosmetic: together they decide whether a
     // price is all-in or a hammer figure with a buyer's premium still to come,
     // and the chart cannot put sales on a common footing without them.
+    //
+    // ORDERED NEWEST-FIRST, then reversed for the chart. It used to order
+    // ascending with a bare .limit(500), which takes the OLDEST 500 rows — so
+    // the instant an identity passed 500 accumulated sales the chart would drop
+    // every recent one and sit frozen while the market moved. Accumulating
+    // history is the entire point of the current work, so that threshold was
+    // about to start being crossed. `id` is the unique tiebreaker (rule 2);
+    // "most recent 500" is a labelled display bound, which is the only case a
+    // bare limit is legal for.
     .from("card_market_sales").select("sold_at, price, grader, grade, platform, source").eq("pre_auto_split", false)
     .eq(c.identity_id ? "identity_id" : "card_id", c.identity_id ?? id)
-    .order("sold_at", { ascending: true }).limit(500);
+    .order("sold_at", { ascending: false }).order("id", { ascending: false }).limit(500);
   const { data: srcQuotes } = await supabase
     .from("card_source_quotes")
-    .select("source, kind, grader, grade, price, currency, label, url, fetched_at")
+    // `payload` carries the sales a sold median rests on — the evidence behind
+    // the provenance chip. It was being written and never read.
+    .select("source, kind, grader, grade, price, currency, label, url, fetched_at, payload")
     .eq("card_id", id).order("source").order("grade", { ascending: true, nullsFirst: true });
 
   // Cached AI estimates (newest per mode, one bounded query each) + credit balance
@@ -239,8 +250,9 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
                   <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink/40">Sales over time · what we&apos;ve banked</div>
                   {/* Rehydrated through storedToSales so the chart gets each
                       sale's price BASIS — which source reported it and whether
-                      that figure already includes the buyer's premium. */}
-                  <SalesHistoryChart sales={storedToSales((mktSales ?? []) as StoredSale[])} />
+                      that figure already includes the buyer's premium.
+                      Reversed because the query takes the most recent 500. */}
+                  <SalesHistoryChart sales={storedToSales([...((mktSales ?? []) as StoredSale[])].reverse())} />
                 </div>
               )}
               <div className="mt-2 flex items-center justify-between border-t border-hairline pt-2">

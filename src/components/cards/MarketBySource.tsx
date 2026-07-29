@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Layers, Loader2, RefreshCw, ExternalLink, Clock } from "lucide-react";
 import { consensusForCard } from "@/lib/cards/price-sources/blend";
 import type { SourceQuote } from "@/lib/cards/price-sources/types";
+import { asSoldPayload } from "@/lib/cards/distill";
+import { PriceProvenance, NoCompAtGrade } from "./PriceProvenance";
 
 // "Market — by source" (Beau, 2026-07-20): each vendor's current values shown
 // SEPARATELY, plus one blended consensus on top. Guidance only — it does not
@@ -14,8 +16,10 @@ import type { SourceQuote } from "@/lib/cards/price-sources/types";
 type QuoteRow = {
   source: string; kind: string; grader: string | null; grade: number | null;
   price: number; currency: string; label: string | null; url: string | null; fetched_at: string;
+  /** Present on sold quotes: the sales the median rests on. See PriceProvenance. */
+  payload?: unknown;
 };
-type Availability = { id: string; label: string; enabled: boolean; handles: boolean };
+type Availability = { id: string; label: string; enabled: boolean; handles: boolean; sold?: boolean };
 type CondCard = { condition_type: string; grader: string | null; grade: number | null };
 
 const money = (n: number | null | undefined) =>
@@ -103,8 +107,27 @@ export function MarketBySource({
 
   // Availability nudges for sources with no quotes yet.
   const withQuotes = new Set(quotes.map((q) => q.source));
+
+  /** What we looked for — the condition the absence is about. */
+  const ownCondLabel = card.condition_type === "graded"
+    ? `${card.grader ?? "Graded"} ${card.grade ?? ""}`.trim()
+    : "Ungraded";
+
+  // Sold sources that RAN and found no comp at this condition.
+  //
+  // The `quotes.length > 0` guard is doing real work: with nothing at all on
+  // file, no refresh has happened yet and "no PSA 10 sales" would be a claim we
+  // haven't earned. Only once some source has answered can this source's silence
+  // be read as an answer rather than as absence of a run.
+  const silentSoldSources = quotes.length > 0
+    ? available.filter((a) => a.sold && a.enabled && a.handles && !withQuotes.has(a.id))
+    : [];
+  const silentIds = new Set(silentSoldSources.map((a) => a.id));
+
   const nudges = available
-    .filter((a) => !withQuotes.has(a.id))
+    // Covered by the explicit no-comp line below; a second "tap Refresh" note
+    // for the same source would contradict it.
+    .filter((a) => !withQuotes.has(a.id) && !silentIds.has(a.id))
     .map((a) => {
       if (!a.enabled) {
         return a.id === "pricecharting"
@@ -196,8 +219,31 @@ export function MarketBySource({
               );
             })}
           </div>
+
+          {/* WHERE THAT NUMBER CAME FROM. Only sold quotes carry evidence — a
+              guide value is one figure a vendor asserts, with nothing behind it
+              to show, and pretending otherwise would be the dishonest half of
+              this feature. */}
+          {qs.map((q, i) => {
+            const p = asSoldPayload(q.payload);
+            return p ? (
+              <PriceProvenance key={`prov-${i}`} payload={p} fetchedAt={fmtWhen(q.fetched_at)} className="mt-1.5" />
+            ) : null;
+          })}
         </div>
       ))}
+
+      {/* Sources that RAN and found nothing at this card's condition. The
+          distill deliberately returns no quote rather than borrowing a nearby
+          grade, and until now that decision was invisible — the source just
+          vanished from the panel and looked unconfigured. */}
+      {silentSoldSources.length > 0 && (
+        <div className="space-y-1 border-t border-hairline px-3 py-2">
+          {silentSoldSources.map((s) => (
+            <NoCompAtGrade key={s.id} condition={ownCondLabel} source={s.label} />
+          ))}
+        </div>
+      )}
 
       {/* Nudges for sources not yet returning */}
       {nudges.length > 0 && (

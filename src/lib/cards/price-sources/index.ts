@@ -55,12 +55,25 @@ export function basisForSource(sourceId: string, platform: string | null): Price
   return ADAPTERS.find((a) => a.id === sourceId)?.salesBasis?.(platform) ?? "unknown";
 }
 
-export type SourceAvailability = { id: string; label: string; enabled: boolean; handles: boolean };
+export type SourceAvailability = {
+  id: string; label: string; enabled: boolean; handles: boolean;
+  /**
+   * Supplies realized SALES rather than only a guide value.
+   *
+   * The UI needs this to tell two silences apart: a sold source with no quote
+   * found no comps at this card's condition, which is a fact worth stating. A
+   * guide source with no quote simply didn't match.
+   */
+  sold: boolean;
+};
 
 /** A UI descriptor of every source and whether it's live for this card — so the
  *  panel can nudge "add a PriceCharting token" or "Scryfall covers MTG only". */
 export function sourceAvailability(card: CardForPricing): SourceAvailability[] {
-  return ADAPTERS.map((a) => ({ id: a.id, label: a.label, enabled: a.enabled(), handles: a.handles(card) }));
+  return ADAPTERS.map((a) => ({
+    id: a.id, label: a.label, enabled: a.enabled(), handles: a.handles(card),
+    sold: typeof a.fetchSales === "function",
+  }));
 }
 
 export * from "./types";

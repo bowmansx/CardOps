@@ -168,15 +168,7 @@ export function distill(sales: ObservedSale[], card: CardForPricing, source: str
       label: `${gradeLabel} · median of ${usable.length}`,
       url: recent[0]?.url ?? null,
       product_ref: null,
-      payload: {
-        count: usable.length,
-        platforms: [...new Set(usable.map((s) => s.platform).filter(Boolean))],
-        sample,
-        // Surfaced, never silent: a comp set thinned by unconvertible prices
-        // must not look like a complete one (rules 4 and 10).
-        ...(excluded.length ? { excluded: excluded.length, exclusionNote: exclusionNote(excluded) } : {}),
-        ...(unconfirmed ? { unconfirmed } : {}),
-      },
+      payload,
     },
     excluded: excluded.length,
     unconfirmed,

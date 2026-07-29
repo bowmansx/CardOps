@@ -69,7 +69,9 @@ export async function POST(request: Request) {
 
   const { data: quotes } = await supabase
     .from("card_source_quotes")
-    .select("source, kind, grader, grade, price, currency, label, url, fetched_at")
+    // `payload` is the evidence behind a sold median; the panel renders it as
+    // the provenance chip, so a refresh that omitted it would blank the chip.
+    .select("source, kind, grader, grade, price, currency, label, url, fetched_at, payload")
     .eq("card_id", c.id)
     .order("source", { ascending: true })
     .order("grade", { ascending: true, nullsFirst: true });
