@@ -97,6 +97,19 @@ export type SalesQuery = {
   allGrades?: boolean;
 };
 
+/**
+ * Which lane a sale arrived through. Mirrors the `card_sale_provenance` enum in
+ * migration 20260750.
+ *
+ * Not cosmetic: eBay's licence forbids blending API-pulled order data into a
+ * comp shown to another user, and its own carve-out is "information that you
+ * lawfully obtain independent of eBay". A cross-tenant pool may draw on some of
+ * these lanes and not others, and the database enforces it with a CHECK because
+ * a boundary that lives in a query gets rewritten by someone who doesn't know
+ * it was load-bearing.
+ */
+export type SaleProvenance = "vendor" | "own_sale" | "user_upload" | "manual_paste";
+
 /** Newest first, undated last — undated sales can't be ordered against dated ones. */
 export function byNewest(a: ObservedSale, b: ObservedSale): number {
   if (!a.soldAt && !b.soldAt) return 0;
