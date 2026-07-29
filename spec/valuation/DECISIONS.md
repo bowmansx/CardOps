@@ -51,3 +51,39 @@ lookups.
   collection buy cannot cost 5,000 API calls.
 - An extrapolated figure is a **model output**, and what produced it travels
   with it wherever it is shown.
+
+---
+
+### Buying sold-comp data is a billing decision  *(2026-07-29)*
+
+Beau: *"find out what options there are regardless of what is necessary to get
+access."* Answered in [[FINDINGS]] Part 7. What follows is settled unless you
+say otherwise:
+
+1. **Buy the comps, don't build them.** The wedge is provenance and the money
+   engine, not the data. eBay shipped a free camera-scan price guide backed by
+   two years of their own transactions in March 2026 — accuracy is not a
+   winnable axis against the company that owns the transactions. **Checkable is.**
+2. **Start at $9, not $298.** The lookback tier limits BACKFILL, not accumulated
+   depth. `card_market_sales` is append-only with dedup, so a 14-day window run
+   daily becomes a year of history in a year. The $99 Unlimited Lookback add-on
+   buys the past *now* instead of waiting for it — a later decision, made once
+   the coverage test says the data is worth backfilling.
+3. **No source is the app's type.** Every sales source normalizes into
+   `ObservedSale` and declares its own `rights` and basis convention. Adding a
+   vendor, a paste parser or a CSV importer is one file.
+4. **A licence term is code, not a comment.** `rights.persist` gates the write
+   path and default-denies an unrecognised source.
+5. **Supply-driven at scale.** Ingest a feed and roll it up per identity; do not
+   pay per card per user. Cost then stops growing with adoption, and the credit
+   meter stays honest because a warm identity fetched nothing.
+
+**Not decided, and needs you:**
+
+- **The $9 coverage test.** 50 cards you know the value of, count the matched
+  quotes. Everything else waits on that number.
+- Whether to resolve the `CRON_SECRET` interlock. It now has a price: no
+  accumulation means no history banked, and banking early is the whole reason
+  the cheap tier works. Manual triggering is the middle path.
+- One paid hour of counsel on whether a user-uploaded Seller Hub export falls
+  outside eBay's "eBay Content". All pooling is downstream of it.

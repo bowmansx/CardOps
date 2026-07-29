@@ -2,17 +2,31 @@
 
 Loop-written. [[DECISIONS]] outranks anything here.
 
-**If the research file reads like bad news, read its banner first.** It answers
-one question — can third-party sold comps be automated — and the answer is no.
-That is not a verdict on the project: the wedge was never pricing data, every
-competitor faces the same wall, and eBay giving its price guide away free
-commoditises that layer rather than closing it to us. What it changes is that
-the paste importer is permanent infrastructure and should be funded like one.
+> [!warning] CORRECTED 2026-07-29 — the headline below was WRONG
+> This file used to open by saying third-party sold comps cannot be automated
+> and pasting is therefore permanent. **That was false, and it was falsified by
+> a file already in this repo.**
+>
+> `src/lib/cards/price-sources/thecardapi.ts` has shipped since 2026-07-21: a
+> realized-sales API covering sports and TCG, returning platform, grader, grade,
+> sold date and listing URL per row. It was running on the FREE tier with a
+> **3-day lookback**, so it produced almost nothing — and "produces nothing" got
+> written up as "does not exist."
+>
+> The first pass asked what was reachable **for free** and reported the answer as
+> the whole map. It never asked what access costs. Full depth is a **$199 Pro
+> plan plus a $99 Unlimited Lookback add-on**, and §4a of their terms explicitly
+> permits storing responses "to serve your users" and displaying "card prices,
+> transaction history, and market data within your own product interface".
+>
+> **Automated sold comps with visible provenance are a billing decision, not a
+> wall.** See `research/2026-07-29-vendor-access.md`, verified against live
+> pages. CLAUDE.md's own standing rule is to diff every spec against the repo
+> before implementing it; that rule was broken while writing a research document.
 
-**Status 2026-07-28:** research complete. Parts 1-5 are my reasoning; Part 6
-below is what the research added or changed, verified against the repo where it
-made a claim about our code. Full output kept whole at
-`research/2026-07-28-sources-and-extrapolation.md`.
+**Status 2026-07-29:** Parts 1-5 are my reasoning; Part 6 is what the first
+research pass added; **Part 7 is the vendor-access pass that corrected it**.
+Full outputs kept whole in `research/`.
 
 ---
 
@@ -314,3 +328,96 @@ credits (their terms forbid paywalling it), what you ask GemRate for, and
 whether pooled-outcome design needs privacy machinery at all. **The architecture
 is already multi-tenant; the licence posture assumes it is not.** One of those
 has to give, and it is far cheaper to answer before the second user than after.
+
+---
+
+## Part 7 — Vendor access, and the correction  *(2026-07-29)*
+
+Beau: *"find out what options there are regardless of what is necessary to get
+access."* Full output at `research/2026-07-29-vendor-access.md`, read against
+live pages. The short version:
+
+**Automated sold comps with visible provenance cost $9 to test and $298/month to
+run at full depth, on a vendor already wired into this repo.** §4a of their terms
+explicitly permits storing responses "to serve your users" and displaying "card
+prices, transaction history, and market data within your own product interface",
+and states that derived analytics are our IP. That is the whole feature,
+permitted in writing.
+
+### The four things the docs fixed in our code the same day
+
+1. **Hammer vs all-in.** Their own field reference: eBay is the all-in buyer
+   price, **Goldin is hammer with ~22% still to come** (~20% pre-2022). We were
+   medianing the two as though they were the same number, so a card comped mostly
+   off Goldin read ~22% cheap. Now converted; venues with no cited premium
+   (Lelands, SCP, Hakes, REA) are **excluded and counted**, not assumed.
+2. **`price_confirmed`.** A `false` is a fast-settle estimate. We stored them —
+   and because the accumulator upserts with `ignoreDuplicates`, a provisional
+   price written once would **never** be corrected. Held back now.
+3. **`grader` is ~12% populated.** The distill inferred "raw" from a missing
+   grader, so most graded sales counted as raw comps and **inflated every
+   ungraded valuation.** Now asks their server-side `graded` filter.
+4. **`player`/`card_set`/`year` are ~0.3-0.4% populated.** Catalogue matching is
+   unusable; the full-text `q` search hits the listing TITLE, which is 100%
+   populated. `saleQuery()` already did the right thing by accident.
+
+### The architecture question Beau raised, and its answer
+
+> "we don't specifically want to build around any one api too much, do we? i
+> would think we want a platform that is ready to connect to any apis
+> collectively"
+
+Correct, and we were coupled. `CardApiSale` — one vendor's wire format — had
+become the internal sale type across `market-sales`, `estimate` and the cron.
+Now: `vendor wire format -> [adapter] -> ObservedSale -> everything else`, with
+`fetchSales?` on the adapter contract. **A Terapeak paste parser or a Seller Hub
+CSV import satisfies that signature identically** — which matters, because the
+manual lane is the one with three years of accepted-Best-Offer data.
+
+Each source declares its own `rights` and its own basis convention, because both
+differ per vendor. What a premium *is* is a fact about the auction house and
+lives once.
+
+### The endgame shape
+
+Per-card lookups are the wrong primitive at scale — cost grows with users × cards
+and every new card is cold. Supply-driven inverts it: **ingest the feed, roll it
+up per identity, serve every user from one warm catalogue.** `card_market_sales`
+already hangs off `identity_id`, so that part was right.
+
+Storage forces two tiers. eBay does ~400-500K card transactions a day; Pro
+permits 25M stored records — **roughly 50-60 days of the firehose.** Individual
+sales cannot be kept forever. Hot tier keeps recent sales with tap-through
+evidence; cold tier keeps per-identity/grade/period rollups, and **carries
+provenance through compaction** or the whole point is lost.
+
+This also makes the credit meter honest: a warm identity costs nothing because
+nothing was fetched; a cold one is a real vendor call. The economics improve with
+scale rather than degrading, and it is the same network effect as a consented
+pool without needing a lawyer.
+
+### Refuted, so it doesn't recirculate
+
+- **Card Hedge** — real API, but published terms grant no storage or re-display,
+  and its ToS "Effective Date" renders as today's date on every load, so you can
+  never prove what you agreed to.
+- **CardSight** — display only. §3.b forbids storing "for the purposes of
+  creating or populating a database". Live cross-check, never a corpus.
+- **Card Ladder** — the "provenance-clean because Collectors owns Goldin" thesis
+  died on **10 April 2024**, when Collectors sold Goldin to eBay.
+- **eBay Marketplace Insights** — structurally closed, not unlucky. The Buy APIs
+  are a buyer-acquisition channel gated on affiliate revenue share, and a private
+  inventory tool has no funnel to offer.
+
+### Open, and yours
+
+- **The $9 coverage test.** 50 cards you know the value of; count the matched
+  quotes. Nothing else should be decided first.
+- Do **webhook deliveries** draw on the daily row cap? If not, $9 + $9 buys the
+  real-time firehose and the economics change materially.
+- Do **rollups** count against the storage cap, given §4a says derived analytics
+  are ours?
+- What is the price basis for **Lelands, SCP, Hakes, REA**? We are throwing away
+  their sales for want of one line.
+- One paid hour of counsel on whether a **user-uploaded Seller Hub export** falls
+  outside "eBay Content". Everything about pooling is downstream of that.
