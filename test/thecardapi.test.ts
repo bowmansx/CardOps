@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { distillSales, saleQuery, type CardApiSale } from "@/lib/cards/price-sources/thecardapi";
+import { saleQuery, toObserved, cardApiSaleKey, type CardApiSale } from "@/lib/cards/price-sources/thecardapi";
+import { thecardapi } from "@/lib/cards/price-sources/thecardapi";
 import type { CardForPricing } from "@/lib/cards/price-sources/types";
 
 const graded = (grader: string, grade: number): CardForPricing => ({
@@ -8,7 +9,7 @@ const graded = (grader: string, grade: number): CardForPricing => ({
 });
 const raw: CardForPricing = { ...graded("", 0), grader: null, grade: null, condition_type: "raw" };
 
-const sale = (o: Partial<CardApiSale>): CardApiSale => ({ price: 50, currency: "USD", platform: "eBay", sold_at: "2026-05-14", ...o });
+const sale = (o: Partial<CardApiSale> = {}): CardApiSale => ({ price: 50, currency: "USD", platform: "eBay", sold_at: "2026-05-14", ...o });
 
 describe("saleQuery", () => {
   it("joins identifying fields into a search string", () => {
@@ -19,63 +20,76 @@ describe("saleQuery", () => {
   });
 });
 
-describe("distillSales — graded", () => {
-  it("medians only the matching grader+grade sales", () => {
-    const sales = [
-      sale({ grader: "PSA", grade: "10", price: 100 }),
-      sale({ grader: "PSA", grade: "10", price: 120 }),
-      sale({ grader: "PSA", grade: "9", price: 40 }),   // wrong grade
-      sale({ grader: "SGC", grade: "10", price: 200 }), // wrong grader
-      sale({ grader: null, price: 10 }),                 // raw
-    ];
-    const [q] = distillSales(sales, graded("PSA", 10));
-    expect(q.price).toBe(110); // median(100,120)
-    expect(q.grader).toBe("PSA");
-    expect(q.grade).toBe(10);
-    expect(q.kind).toBe("sold");
-    expect(q.label).toContain("median of 2");
+describe("cardApiSaleKey", () => {
+  it("uses the vendor's sale id when present", () => {
+    expect(cardApiSaleKey(sale({ id: "137222685761" }))).toBe("137222685761");
   });
-
-  it("returns NOTHING on no exact grade match — never contaminates with other grades/graders", () => {
-    const sales = [sale({ grader: "PSA", grade: "9", price: 60 }), sale({ grader: "BGS", grade: "9.5", price: 80 })];
-    expect(distillSales(sales, graded("PSA", 10))).toHaveLength(0);
-  });
-
-  it("returns nothing when there are no graded sales at all", () => {
-    expect(distillSales([sale({ grader: null, price: 10 })], graded("PSA", 10))).toHaveLength(0);
-  });
-
-  it("exposes a sample of the exact sales behind the median for auditing", () => {
-    const sales = [sale({ grader: "PSA", grade: "10", price: 100, title: "A" }), sale({ grader: "PSA", grade: "10", price: 120, title: "B" })];
-    const [q] = distillSales(sales, graded("PSA", 10));
-    const payload = q.payload as { count: number; sample: { grade: string | number | null }[] };
-    expect(payload.count).toBe(2);
-    expect(payload.sample).toHaveLength(2);
-    expect(payload.sample.every((s) => Number(s.grade) === 10)).toBe(true);
+  it("falls back to a stable hash when there's no id", () => {
+    expect(cardApiSaleKey(sale({ price: 2.5, sold_at: "2026-05-01", title: "Roiling Dragonstorm" })))
+      .toBe("2026-05-01:2.5:Roiling Dragonstorm");
   });
 });
 
-describe("distillSales — raw", () => {
-  it("medians only ungraded sales", () => {
-    const sales = [
-      sale({ grader: null, price: 10 }),
-      sale({ grader: null, price: 20 }),
-      sale({ grader: "PSA", grade: "10", price: 500 }), // graded — excluded
-    ];
-    const [q] = distillSales(sales, raw);
-    expect(q.price).toBe(15);
-    expect(q.grader).toBeNull();
-    expect(q.grade).toBeNull();
+describe("toObserved — this vendor's wire row into CardOps' shape", () => {
+  it("maps the fields we depend on", () => {
+    const o = toObserved(sale({ id: "x", price: "47.50", grader: "PSA", grade: "10", listing_url: "https://e/1", title: "T" }));
+    expect(o).toMatchObject({
+      externalId: "x", price: 47.5, currency: "USD", soldAt: "2026-05-14",
+      platform: "eBay", title: "T", url: "https://e/1", grader: "PSA", grade: 10, confirmed: true,
+    });
+  });
+
+  it("drops a row with no usable price", () => {
+    expect(toObserved(sale({ price: 0 }))).toBeNull();
+    expect(toObserved(sale({ price: "abc" }))).toBeNull();
+  });
+
+  // The whole reason the basis lives on the adapter: this vendor documents eBay
+  // as all-in and Goldin as hammer, and another vendor may not agree.
+  it("stamps the basis this vendor documents for each platform", () => {
+    expect(toObserved(sale({ platform: "eBay" }))?.priceBasis).toBe("all_in");
+    expect(toObserved(sale({ platform: "TCGplayer" }))?.priceBasis).toBe("all_in");
+    expect(toObserved(sale({ platform: "Goldin" }))?.priceBasis).toBe("hammer");
+  });
+
+  // Auction houses whose basis the vendor never states, plus anything added
+  // upstream tomorrow — excluded rather than assumed.
+  it("marks an undocumented or novel platform unknown", () => {
+    for (const p of ["Lelands", "SCP Auctions", "Hakes", "REA", "SomeNewHouse"]) {
+      expect(toObserved(sale({ platform: p }))?.priceBasis).toBe("unknown");
+    }
+    expect(toObserved(sale({ platform: null }))?.priceBasis).toBe("unknown");
+  });
+
+  it("is case- and whitespace-insensitive about platform names", () => {
+    expect(toObserved(sale({ platform: "  GOLDIN " }))?.priceBasis).toBe("hammer");
+  });
+
+  // Only an explicit false is provisional; older payloads omit the field.
+  it("treats a missing price_confirmed as confirmed", () => {
+    expect(toObserved(sale())?.confirmed).toBe(true);
+    expect(toObserved(sale({ price_confirmed: false }))?.confirmed).toBe(false);
+  });
+
+  // This vendor populates `grader` on ~12% of rows, so a row cannot answer
+  // graded-vs-raw. Only the query we made can, and that is stamped by the fetch.
+  it("leaves isGraded null unless the caller states it", () => {
+    expect(toObserved(sale({ grader: "PSA" }))?.isGraded).toBeNull();
+    expect(toObserved(sale(), true)?.isGraded).toBe(true);
+    expect(toObserved(sale(), false)?.isGraded).toBe(false);
   });
 });
 
-describe("distillSales — hygiene", () => {
-  it("ignores zero/negative/non-numeric prices", () => {
-    const sales = [sale({ grader: null, price: 0 }), sale({ grader: null, price: -5 }), sale({ grader: null, price: "abc" as unknown as number }), sale({ grader: null, price: 30 })];
-    const [q] = distillSales(sales, raw);
-    expect(q.price).toBe(30);
+describe("the adapter declares its licence", () => {
+  // §4a permits storing "to serve your users" and displaying transaction
+  // history in your own product interface; §5 requires deletion within 30 days
+  // of cancellation, which is only executable because rows carry their source.
+  it("permits storage and re-display, and not pooling", () => {
+    expect(thecardapi.rights).toMatchObject({ persist: true, redisplay: true, pool: false, deleteOnTerminationDays: 30 });
   });
-  it("empty input → no quote", () => {
-    expect(distillSales([], raw)).toHaveLength(0);
+
+  it("supplies sales, so the accumulator picks it up without naming it", () => {
+    expect(typeof thecardapi.fetchSales).toBe("function");
+    expect(typeof thecardapi.salesBasis).toBe("function");
   });
 });
