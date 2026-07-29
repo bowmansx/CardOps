@@ -2,10 +2,10 @@
 
 Loop-written. [[DECISIONS]] outranks anything here.
 
-**Status 2026-07-28:** initial theorising complete; a research pass on sources,
-extrapolation methods, context signals and calibration is running and will be
-folded in as `research/2026-07-28-*.md`. Everything below is **my reasoning**,
-not research output, and is marked as such.
+**Status 2026-07-28:** research complete. Parts 1-5 are my reasoning; Part 6
+below is what the research added or changed, verified against the repo where it
+made a claim about our code. Full output kept whole at
+`research/2026-07-28-sources-and-extrapolation.md`.
 
 ---
 
@@ -196,3 +196,114 @@ Real forks. Each changes the design.
 8. **Is grading-company equivalence something you have a view on?** Rung 4 needs
    a cross-company multiplier, and there is no neutral source for it. Your own
    opinion, encoded and revisable, may be more honest than a borrowed one.
+
+
+---
+
+## Part 6 — What the research added
+
+*(Five-agent pass, 2026-07-28. Claims about our own code were verified before
+being recorded here.)*
+
+### The headline, and it reshapes everything
+
+**There is no reachable, permitted API that sells third-party sold comps.** Not
+at any price a solo operator can pay.
+
+- **eBay Marketplace Insights** — the sold-comp API — is "Limited Release... only
+  to select developers approved by business units." Community threads through
+  mid-2026 show consistent denials. No paid tier, no self-serve. **And its
+  lookback is 90 days**, so it could never have backfilled history anyway.
+- **The eBay Finding API and `findCompletedItems` were decommissioned
+  2025-02-05.** Any tutorial or library proposing them describes a world that
+  ended eighteen months ago.
+- **Card Ladder** holds 100M+ sales — enterprise-only, terms forbid reproducing
+  any portion.
+- **TCGplayer** stopped accepting API applicants in late 2024 and is now an eBay
+  subsidiary.
+
+**So the paste importer is probably permanent infrastructure, not a stopgap**,
+and should be funded like it.
+
+### What IS reachable
+
+| Source | What it gives | Catch |
+|---|---|---|
+| **Terapeak** (in Seller Hub) | eBay sold data going back **3 years**, including **the accepted Best Offer price** — the figure a normal sold search hides. **Free** to every seller. | No API, ever. UI only. A Terapeak-shaped paste parser is probably the single highest-value data feature available. |
+| **eBay Fulfillment API** | **Your own** settled sales, 2-year lookback, real prices including accepted offers, with fees | Blocked by the eBay cutover today |
+| **eBay Browse API** | Active listings — lowest live BIN, supply depth | An ask is not a sale. Labelling it a comp would be a posture violation. |
+| **Fanatics Collect / Heritage archives** | Realized prices, high-end and vintage | No API; human read then paste |
+| **balldontlie ALL-STAR** | Injuries + stats across NBA/NFL/MLB/NHL/NCAA | **$9.99/mo**, one bill, properly licensed |
+| **PSA public API** | Cert lookup | ~100 calls/day; cache per identity forever |
+| **Card Hedge** | Claims 40M+ transactions including historical sales, ~$0.01/call | **The only automatable third-party sold-comp candidate found.** Provenance unverified — see Q7. |
+
+### Scraping is off the table on terms, not on difficulty
+
+eBay's User Agreement bans automated access "for any purpose", and **as of
+2026-02-20 they expanded it to name LLM-driven bots specifically.** That
+includes driving the Terapeak UI headlessly. *hiQ v. LinkedIn* established that
+scraping public pages is not a CFAA violation — and then hiQ **lost on breach of
+contract for $500,000.** Technically a day of work; not available to us.
+
+### A licensing conflict that is live right now
+
+**PriceCharting's licence is internal-use-only, and the connector is already
+wired** (`price-sources/pricecharting.ts`). CardOps' architecture is
+multi-tenant. Those two facts cannot both stand. This is not a valuation
+question — see Q1.
+
+### Corrections to our own documents and code
+
+1. **`reference/pricing-factors.md` §1 is wrong.** It says automated comp feeds
+   via "eBay orders API, PriceCharting API — replaces pasting". The orders API
+   returns *your own* sales only; PriceCharting returns current guide values
+   with **no sales history at any tier**. Neither replaces pasting. That line
+   stands up an expectation that pasting goes away.
+2. **`interpretPipeline` has a latent trap at `valuation.ts:187`** — *verified*.
+   `own_grade` and `cross_grade` filter comps to within `± grade_delta`, then
+   `pool.map(c => ({ price, date }))` **throws the grade away**. A PSA 9 at $100
+   and a PSA 10 at $600 both enter one pool and both cards come out near $350.
+   *The default is 0 and no seeded strategy sets it, so nothing is wrong today
+   — the research called it a live defect and that was overstated.* But the only
+   reason to widen the delta is to escape a `min_comps` abstention, so **the
+   feature's sole use case is the one where it is wrong.** This is rung 3
+   implemented without the adjustment step that makes rung 3 legitimate.
+3. **The two output paths disagree about shape.** `card_estimates` (the paid AI
+   path) already has `low`, `high`, `confidence`, `rationale`, `sources`.
+   `card_valuations` (the free deterministic path) has only `value` plus a
+   `confidence` nothing computes honestly, **and no reference to which strategy
+   produced it.** The more expensive path is the more honest one, which is
+   backwards.
+
+### Two gaps sharper than mine
+
+**Gap 1 was half right.** There are two models, not one, and they have opposite
+pooling rules. The **market** model ("what does this card sell for") *should* be
+pooled — those are public completed sales. The **execution** model ("does *this*
+seller realize above or below market, and how fast") **must be per-user**,
+because it encodes photo quality, feedback score, shipping speed, patience and
+return policy. A pooled execution model trained mostly on one prolific seller
+encodes that seller's behaviour as "the market", then renders it as truth.
+
+**Gap 4 is worse than I wrote.** `card_market_sales.card_id` is nullable with
+`on delete set null`, and there is **no `added_by` column**. That nullable FK
+was the right call — deleting a card must not destroy history other owners
+depend on — but the side effect is that deleting a card **severs the only link
+back to who contributed those rows.** A poisoned row can become permanently
+un-attributable, so it can be neither disputed nor bulk-reverted.
+
+### A decision with an expiry date
+
+**`card_market_sales` is empty and about to refill.** Adding a sale-format
+column (auction / BIN / accepted-offer) and a pop-snapshot table costs almost
+nothing now. Adding either after the re-gather costs a second re-gather. If a
+pop source is ever coming, the table wants to exist before the data does.
+
+### The question that outranks all the valuation ones
+
+**Is CardOps your internal tool, or a product?** It decides whether the
+PriceCharting connector may keep running, whether Scryfall data may sit behind
+credits (their terms forbid paywalling it), what you ask GemRate for, and
+whether pooled-outcome design needs privacy machinery at all. **The architecture
+is already multi-tenant; the licence posture assumes it is not.** One of those
+has to give, and it is far cheaper to answer before the second user than after.
