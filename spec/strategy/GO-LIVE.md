@@ -36,15 +36,47 @@ The end goal, in his words:
 same licence as "you, reselling access to it". Every source needs re-reading
 against the commercial reading before the first invoice.
 
+### Beau's model, tested against those terms  *(2026-07-29)*
+
+> "we aren't necessarily charging for lookups but instead are charging people
+> for base credits for when they use lots of data... the most being when they
+> need you to do in depth analysis which isn't exactly the lookups"
+
+**That distinction is real, and it rescues one source but not the other.**
+
+- **Scryfall: it holds.** Their term is about paywalling *their data*. If
+  catalogue lookups are free and only the reasoning on top is metered, a free
+  user still sees everything Scryfall provides. **This becomes a hard design
+  constraint, not a nice-to-have: catalogue lookups must never consume credits,
+  including after an allowance is exhausted.** The moment "out of credits"
+  hides a card's name, it is behind a paywall.
+- **PriceCharting: it does not.** "Internal use only" is about WHO uses the
+  data, not what it costs. A friend's screen showing a PriceCharting-derived
+  value is that friend using it, free or not - the same term blocks giving it
+  away. Two clean paths: **ask them** for a redistribution quote (often an
+  email, not a legal project), or restrict that connector to the operator's own
+  account and serve other users from sources that permit it.
+
+Engineering judgement about how such terms usually read, not legal advice.
+Read the actual agreements before going live.
+
 ---
 
 ## Things that need machinery only once there are strangers
 
-- **Pooled outcomes.** Using one user's realized sales to tune another's
-  estimates. Among friends this needs a conversation; among customers it needs
-  consent, ratios rather than dollars, a minimum number of distinct
-  contributors, and no per-identity statistics. **Do not retroactively pool
-  data gathered under a different understanding.**
+- **DECIDED 2026-07-29 - completed SALES are public and pooled.** Beau: *"if
+  someone has a sale of a card, i want that information to be public and used
+  all over."* That settles the market side, which is the uncontroversial half:
+  a completed sale is a public fact, and `card_market_sales` already hangs off
+  the shared identity so every owner inherits it. Good, and it is the network
+  effect.
+- **Still per-user, and this is the half that is easy to conflate: the
+  EXECUTION model.** "Does *this* seller realize above or below market, and how
+  fast" is not a fact about the card - it encodes photo quality, feedback score,
+  shipping speed, patience and return policy. Pooling it would render one
+  prolific seller's behaviour as "the market" and hand a new seller with three
+  feedback the numbers of a top-rated store. Market data pooled, execution data
+  never.
 - **Shared catalogue poisoning.** `card_market_sales` hangs off the shared
   identity, so one bad paste or wash sale reaches everyone. There is no
   provenance weighting, no outlier quarantine and no dispute path — and
