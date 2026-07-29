@@ -114,7 +114,60 @@ export type PipelineV1 = {
   aggregate?: PipelineAggregate;
   adjust?: { multiplier?: number; round_99?: boolean };
 };
-export type PipelineContext = { grader?: string | null; grade?: number | null };
+export type PipelineContext = {
+  grader?: string | null;
+  grade?: number | null;
+  /**
+   * Needed the moment `grade_delta` is non-zero. Without them, a comp at a
+   * different grade cannot be adjusted and is therefore not evidence about
+   * this card - see `adjustToGrade`.
+   */
+  multipliers?: Multiplier[] | null;
+  era?: "modern" | "vintage" | null;
+};
+
+/**
+ * What a sale at one grade says about the same card at another.
+ *
+ * THE BUG THIS FIXES. `own_grade` and `cross_grade` filtered comps to within
+ * +/- `grade_delta` and then pooled the raw prices with the grade thrown away.
+ * A PSA 9 at $100 and a PSA 10 at $600 landed in one bucket and BOTH cards came
+ * out near $350 - the 9 overvalued ~3.5x, the 10 undervalued ~1.7x.
+ *
+ * Worse, the bias was aimed. The only reason to widen `grade_delta` is to
+ * escape a `min_comps` abstention, so the feature's sole use case was the one
+ * where it produced a confidently wrong number instead of an honest "not
+ * enough evidence". Trading an abstention for a wrong answer is the worse of
+ * the two outcomes under this app's own posture.
+ *
+ * Returns null when the adjustment cannot be made. A comp that cannot be
+ * adjusted is not weak evidence about this card - it is evidence about a
+ * different card, and it is dropped rather than diluted in.
+ */
+export function adjustToGrade(
+  price: number,
+  from: { grader: string | null | undefined; grade: number | null | undefined },
+  to: { grader: string | null | undefined; grade: number | null | undefined },
+  multipliers: Multiplier[] | null | undefined,
+  era: "modern" | "vintage",
+): number | null {
+  const fg = Number(from.grade), tg = Number(to.grade);
+  if (!Number.isFinite(fg) || !Number.isFinite(tg)) return null;
+  // Same grader AND same grade: nothing to adjust, the comp is direct evidence.
+  if (fg === tg && (from.grader ?? "").toUpperCase() === (to.grader ?? "").toUpperCase()) return price;
+  if (!multipliers || !multipliers.length) return null;
+  const find = (g: string | null | undefined, grade: number) =>
+    multipliers.find(
+      (m) =>
+        (m.grader ?? "").toUpperCase() === (g ?? "").toUpperCase() &&
+        Number(m.grade) === grade &&
+        (m.era_bucket === era || m.era_bucket === "all"),
+    )?.multiplier;
+  const mf = find(from.grader, fg);
+  const mt = find(to.grader, tg);
+  if (!(typeof mf === "number") || !(typeof mt === "number") || !(mf > 0)) return null;
+  return round2(price * (mt / mf));
+}
 export type StrategyParams = {
   v?: number;
   pipeline?: PipelineV1;
@@ -185,7 +238,26 @@ export function interpretPipeline(
     pool = [...pool].sort((a, b) => (b.sale_price as number) - (a.sale_price as number)).slice(0, p.top_n);
   }
 
-  let entries = pool.map((c) => ({ price: c.sale_price as number, date: c.sale_date }));
+  // ADJUST, THEN POOL. This line used to be `pool.map(c => ({ price, date }))`,
+  // which discarded the grade the filter had just gone to the trouble of
+  // matching - see adjustToGrade for what that cost. A comp that cannot be
+  // adjusted onto this card's grade is dropped, because it is evidence about a
+  // different card.
+  const era = ctx?.era ?? "modern";
+  let entries = (scope === "raw" || delta === 0
+    ? pool.map((c) => ({ price: c.sale_price as number, date: c.sale_date }))
+    : pool
+        .map((c) => {
+          const adj = adjustToGrade(
+            c.sale_price as number,
+            { grader: c.grader, grade: c.grade },
+            { grader: ctx?.grader, grade: ctx?.grade },
+            ctx?.multipliers,
+            era,
+          );
+          return adj == null ? null : { price: adj, date: c.sale_date };
+        })
+        .filter((e): e is { price: number; date: string | null } => e != null));
   const g = p.guards ?? {};
   if (g.abs_min != null) entries = entries.filter((e) => e.price >= g.abs_min!);
   if (g.abs_max != null) entries = entries.filter((e) => e.price <= g.abs_max!);
@@ -255,11 +327,13 @@ export function valueAt(
   comps: Comp[],
   params: StrategyParams | null | undefined,
   atMs: number,
+  multipliers?: Multiplier[] | null,
 ): number | null {
   if (card.price_locked && card.manual_price != null) return card.manual_price;
   const past = comps.filter((c) => c.sale_date != null && new Date(c.sale_date).getTime() <= atMs);
   if (params?.v === 1 && params.pipeline) {
-    return interpretPipeline(past, params.pipeline, { grader: card.grader, grade: card.grade }, atMs);
+    return interpretPipeline(past, params.pipeline,
+      { grader: card.grader, grade: card.grade, era: eraOf(card.year), multipliers }, atMs);
   }
   const raw = past.filter((c) => isRaw(c) && c.sale_price != null).map((c) => c.sale_price as number);
   return applyStrategy(card.pricing_strategy, raw, null);
@@ -270,10 +344,12 @@ export function computeMarketValue(
   card: CardLite,
   comps: Comp[],
   params?: StrategyParams | null,
+  multipliers?: Multiplier[] | null,
 ): number | null {
   if (card.price_locked && card.manual_price != null) return card.manual_price;
   if (params?.v === 1 && params.pipeline) {
-    const v = interpretPipeline(comps, params.pipeline, { grader: card.grader, grade: card.grade });
+    const v = interpretPipeline(comps, params.pipeline,
+      { grader: card.grader, grade: card.grade, era: eraOf(card.year), multipliers });
     // Terminal fallback is engine-level and never toggleable (a failed
     // pipeline must not null a card's value).
     return v ?? card.manual_price ?? card.market_value ?? null;
