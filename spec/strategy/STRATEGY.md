@@ -83,11 +83,17 @@ Unverified -- check against vendor docs when comparing them.
 
 ## Beau's queue
 
-Specific asks, newest first, kept in his order rather than re-ranked. Each one
-records what already exists, because in both cases so far it was more than
-expected.
+Specific asks, newest first, kept in his order rather than re-ranked.
 
-### Q1 - The intake session card list  *(2026-07-28)*
+**Every item so far turned out to be partly built already**, so each is phrased
+as *finish / wire / build the destination* rather than *create*. Checking first
+has changed the scope of all three, and it is worth keeping that habit: this
+codebase has more in it than either of us remembers.
+
+### Q1 - FINISH the intake session card list  *(2026-07-28)*
+
+**Not a new build - a wiring job.** The tables have existed since day one and
+nothing has ever referenced them.
 
 > "below 'photograph the card' on intake, a running list of the cards being
 > added during this photo session. it will be interactive... a delete button,
@@ -121,7 +127,9 @@ learn; the second gives room for grouping, bulk edits and a real "commit all"
 gate. My read is same component, more actions - but say if you pictured a
 separate screen.
 
-### Q2 - "Add to Group" in the photograph step  *(2026-07-28)*
+### Q2 - WIRE "Add to Group" into the photograph step  *(2026-07-28)*
+
+**Not a new build - the API is done.** Only the dropdown is missing.
 
 > "a dropdown menu for 'Add to Group'. The dropdown menu will show all the
 > current groups and then also have an add group button."
@@ -136,7 +144,10 @@ each card individually. **Session-level is the better default** - the reason to
 group at intake is usually that the whole stack came from one box, one break or
 one purchase - with a per-card override in the list from Q1.
 
-### Q3 - A "Card Groups" section  *(2026-07-28)*
+### Q3 - BUILD THE DESTINATION for Card Groups  *(2026-07-28)*
+
+**Not a new build - groups already work underneath.** What is missing is a page
+where a group is the thing you are looking at.
 
 > "we also need to start a 'Card Groups' section anyways which will be what the
 > add to group in the above paragraph works with."
