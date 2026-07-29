@@ -58,6 +58,10 @@ export function WhatYouKeep({
   const [priceText, setPriceText] = useState(marketValue != null ? String(marketValue) : "");
   const [shipIncome, setShipIncome] = useState("");
   const [shipCost, setShipCost] = useState("");
+  // eBay charges its percentage on sales tax it collected and remits — money you
+  // never see. Blank rather than a guessed tax rate: leaving it out understates
+  // the fee, which is better than inventing a figure (rule 9).
+  const [salesTax, setSalesTax] = useState("");
 
   const rate = useMemo(() => resolveFeeRate(settledSales, platform), [settledSales, platform]);
 
@@ -66,6 +70,7 @@ export function WhatYouKeep({
     price,
     shipIncome: Number(shipIncome) || 0,
     shipCost: Number(shipCost) || 0,
+    salesTax: Number(salesTax) || 0,
     basis,
   };
 
@@ -117,6 +122,15 @@ export function WhatYouKeep({
           <span className={lbl}>Postage cost</span>
           <input value={shipCost} onChange={(e) => setShipCost(e.target.value)} inputMode="decimal" placeholder="0.00" className={fld} />
         </label>
+        {FEE_SCHEDULES[platform]?.pctAppliesToSalesTax && (
+          <label className="block">
+            <span className={lbl}>Sales tax collected</span>
+            <input value={salesTax} onChange={(e) => setSalesTax(e.target.value)} inputMode="decimal" placeholder="0.00" className={fld} />
+            <span className="mt-0.5 block text-[9px] leading-snug text-ink/35">
+              {FEE_SCHEDULES[platform].platform} charges its fee on tax it collects and remits — money you never see.
+            </span>
+          </label>
+        )}
       </div>
 
       {/* The two headline numbers. */}

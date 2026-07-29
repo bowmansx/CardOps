@@ -274,7 +274,9 @@ describe("rateLabel — the number never travels without its source", () => {
   });
 
   it("marks an unconfirmed published rate as unconfirmed", () => {
-    expect(rateLabel(resolveFeeRate([], "ebay"))).toContain("UNCONFIRMED");
+    // Whatnot is still a preset nobody has checked. eBay was verified against
+    // their own fees page, so using it here would assert the opposite of truth.
+    expect(rateLabel(resolveFeeRate([], "whatnot"))).toContain("UNCONFIRMED");
   });
 
   it("explains itself when there is no rate at all", () => {
