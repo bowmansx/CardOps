@@ -55,6 +55,60 @@ export type DistilledQuote = {
   unconfirmed: number;
 };
 
+/** One sale as shown behind a price — the evidence a provenance chip opens. */
+export type SampleSale = {
+  title: string | null;
+  /** What the source reported. */
+  price: number;
+  /** What went into the median. Differs from `price` on a converted hammer sale. */
+  allIn: number;
+  converted: boolean;
+  grader: string | null;
+  grade: number | null;
+  platform: string | null;
+  sold_at: string | null;
+  url: string | null;
+};
+
+/**
+ * The stored shape behind a sold quote — WHAT THE NUMBER RESTS ON.
+ *
+ * Typed rather than left as `unknown` because the card page reads it to render
+ * provenance, and a price whose evidence can't be parsed is a price nobody can
+ * check. Beau: "if we can't get good sales data and determine accurate prices
+ * of scanned in cards and show where that data came from then i don't know what
+ * good we are."
+ */
+export type SoldQuotePayload = {
+  /** Sales in the median. */
+  count: number;
+  platforms: string[];
+  /** Oldest and newest sale in the median — the WINDOW the price describes. */
+  from: string | null;
+  to: string | null;
+  sample: SampleSale[];
+  excluded?: number;
+  exclusionNote?: string | null;
+  unconfirmed?: number;
+};
+
+/** Read a stored quote's payload, or null when it isn't a sold quote. */
+export function asSoldPayload(payload: unknown): SoldQuotePayload | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Partial<SoldQuotePayload>;
+  if (typeof p.count !== "number" || !Array.isArray(p.sample)) return null;
+  return {
+    count: p.count,
+    platforms: Array.isArray(p.platforms) ? p.platforms : [],
+    from: p.from ?? null,
+    to: p.to ?? null,
+    sample: p.sample,
+    excluded: p.excluded,
+    exclusionNote: p.exclusionNote ?? null,
+    unconfirmed: p.unconfirmed,
+  };
+}
+
 /**
  * Distill sales from ONE source into that source's quote for this card.
  *
@@ -82,10 +136,26 @@ export function distill(sales: ObservedSale[], card: CardForPricing, source: str
   // reported, `allIn` is what went into the median — a converted hammer price
   // reads as a conversion rather than as a figure that silently disagrees with
   // the listing it links to.
-  const sample = recent.slice(0, 6).map((s) => ({
+  const sample: SampleSale[] = recent.slice(0, 6).map((s) => ({
     title: s.title, price: s.price, allIn: s.allIn, converted: s.converted,
     grader: s.grader, grade: s.grade, platform: s.platform, sold_at: s.soldAt, url: s.url,
   }));
+
+  // The WINDOW the median describes. "Median of 7" says nothing about whether
+  // those seven happened last week or across two years, and the difference
+  // decides whether the number means anything.
+  const dates = usable.map((s) => s.soldAt).filter((d): d is string => !!d).sort();
+  const payload: SoldQuotePayload = {
+    count: usable.length,
+    platforms: [...new Set(usable.map((s) => s.platform).filter((p): p is string => !!p))],
+    from: dates[0] ?? null,
+    to: dates[dates.length - 1] ?? null,
+    sample,
+    // Surfaced, never silent: a comp set thinned by unconvertible prices
+    // must not look like a complete one (rules 4 and 10).
+    ...(excluded.length ? { excluded: excluded.length, exclusionNote: exclusionNote(excluded) } : {}),
+    ...(unconfirmed ? { unconfirmed } : {}),
+  };
 
   return {
     quote: {
