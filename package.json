@@ -16,7 +16,8 @@
     "check:test": "vitest run",
     "check:forbidden": "node scripts/check-forbidden.mjs",
     "check:lint": "eslint src app --max-warnings 0",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "app-map": "node scripts/app-map.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.101.0",
