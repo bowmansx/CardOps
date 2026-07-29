@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { sellCard, type SellResult } from "@/app/cards/[id]/sell/actions";
+import { FEE_SCHEDULES, schedulePreset, scheduleNote } from "@/lib/cards/net-proceeds";
 
 const inp = "w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-flag";
 const lbl = "mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ink/50";
@@ -13,18 +14,22 @@ function Hint({ children }: { children: React.ReactNode }) {
   return <p className="mt-1 text-[10px] leading-snug text-ink/35">{children}</p>;
 }
 
-// Fee presets (approximate, 2026 — always editable; platforms change fees).
-const FEES: Record<string, { pct: number; fixed: number; note: string }> = {
-  ebay: { pct: 13.25, fixed: 0.4, note: "eBay trading cards ≈ 13.25% + $0.40" },
-  whatnot: { pct: 10.9, fixed: 0.3, note: "Whatnot ≈ 8% + ~2.9% + $0.30 processing" },
-  tcgplayer: { pct: 12.75, fixed: 0.3, note: "TCGplayer ≈ 10.25% + 2.5% + $0.30" },
-  mercari: { pct: 12.9, fixed: 0.5, note: "Mercari ≈ 10% + processing" },
-  comc: { pct: 5, fixed: 0, note: "COMC ≈ 5% cash-out (storage fees separate)" },
-  square: { pct: 2.9, fixed: 0.3, note: "Square ≈ 2.9% + $0.30" },
-  shop: { pct: 2.9, fixed: 0.3, note: "Own shop ≈ card processing 2.9% + $0.30" },
-  other: { pct: 0, fixed: 0, note: "No preset — enter fees yourself" },
+// Fee presets now live in `net-proceeds.ts` and are shared.
+//
+// They used to be a table in this file, which is exactly why nothing else could
+// use them: there was no break-even, no "what you keep" before a sale, and no
+// way for the card page to answer whether an offer clears. Moving them out made
+// the forward money engine possible, and it means a rate change is one edit.
+//
+// "other" has no schedule on purpose. Its preset was 0% + $0 meaning "enter fees
+// yourself", and a 0% SCHEDULE is the claim that the platform takes nothing —
+// the forward estimate abstains instead (prevention rule 9).
+const NO_PRESET = { pct: 0, fixed: 0, note: "No preset — enter fees yourself" };
+const feesFor = (platform: string) => {
+  const p = schedulePreset(platform);
+  return p ? { ...p, note: scheduleNote(platform) ?? NO_PRESET.note } : NO_PRESET;
 };
-const PLATFORMS = Object.keys(FEES);
+const PLATFORMS = [...Object.keys(FEE_SCHEDULES), "other"];
 // Platforms where a listing (title + description) exists worth keeping.
 const LISTING_PLATFORMS = new Set(["ebay", "whatnot", "tcgplayer", "mercari"]);
 
@@ -71,7 +76,7 @@ export function SellForm({
   // edits fees themselves (feesTouched). Deriving (instead of the old
   // setState-in-effect) means it can never lag a render behind the price and
   // clears itself when it no longer applies.
-  const feePreset = FEES[f.platform] ?? FEES.other;
+  const feePreset = feesFor(f.platform);
   const feeBase = num(f.sale_price);
   const autoFeeApplies = feeBase > 0 && feePreset.pct + feePreset.fixed > 0;
   const fees = feesTouched ? f.fees : autoFeeApplies ? (feeBase * (feePreset.pct / 100) + feePreset.fixed).toFixed(2) : "";
@@ -124,7 +129,7 @@ export function SellForm({
     );
   }
 
-  const preset = FEES[f.platform] ?? FEES.other;
+  const preset = feesFor(f.platform);
 
   return (
     <div className="mt-4 space-y-3 rounded-2xl border border-hairline bg-white p-4">

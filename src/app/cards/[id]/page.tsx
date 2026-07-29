@@ -21,7 +21,9 @@ import { CardStatusControl } from "@/components/cards/CardStatusControl";
 import { CardBooksControl } from "@/components/cards/CardBooksControl";
 import { BasisBreakdown } from "@/components/cards/BasisBreakdown";
 import { AddPhotos } from "@/components/cards/AddPhotos";
-import { lotAverages, cardAcquisitionBasis } from "@/lib/cards/basis";
+import { lotAverages, cardAcquisitionBasis, cardBasis } from "@/lib/cards/basis";
+import { WhatYouKeep } from "@/components/cards/WhatYouKeep";
+import type { SettledSale } from "@/lib/cards/net-proceeds";
 import { MarketBySource } from "@/components/cards/MarketBySource";
 import { currentRole } from "@/lib/cards/roles";
 import { suggestedListPrice } from "@/lib/cards/valuation";
@@ -50,6 +52,19 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
     c as unknown as { purchase_lot_id: string | null; individual_basis: number | null },
     lotAverages(lotRow ? [lotRow as { id: string; remaining_cost: number | null; remaining_count: number | null }] : []),
   );
+  // This user's own settled sales, for deriving their REAL platform fee rate —
+  // it already contains their store subscription, category and promoted-listing
+  // spend, which no published table does. RLS scopes it to them.
+  //
+  // Most-recent-200 is a labelled statistical sample feeding a MEDIAN, not a sum
+  // or a membership set, so a bare limit is legitimate here (rule 2); `id` is the
+  // unique tiebreaker. Fees drift over time, so the recent window is the point
+  // rather than a compromise.
+  const { data: settledSales } = await supabase
+    .from("card_sales")
+    .select("platform, sale_price, fees, shipping_income, sold_at")
+    .order("sold_at", { ascending: false }).order("id", { ascending: false }).limit(200);
+
   // Each card user has their own businesses (RLS-scoped) — not owner-gated.
   const entities =
     (await supabase.from("card_businesses").select("id, short_code, name").eq("active", true).order("short_code")).data ?? [];
@@ -279,6 +294,20 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
             sport_category: c.sport_category ?? null, grader: c.grader ?? null,
             grade: c.grade ?? null, condition_type: c.condition_type,
           } as CardForPricing)}
+        />
+
+        {/* WHAT YOU KEEP. Market value is a commodity — eBay gives it away with
+            a camera scan. This is the half nobody else can compute, because it
+            needs the cost basis and none of them holds one. */}
+        <WhatYouKeep
+          className="mt-4"
+          basis={cardBasis(
+            c as unknown as { purchase_lot_id: string | null; individual_basis: number | null; basis_items_total?: number | null },
+            lotAverages(lotRow ? [lotRow as { id: string; remaining_cost: number | null; remaining_count: number | null }] : []),
+          )}
+          basisEntered={(c as unknown as { basis_entered?: boolean | null }).basis_entered !== false}
+          marketValue={(c.manual_price ?? c.market_value ?? null) as number | null}
+          settledSales={(settledSales ?? []) as SettledSale[]}
         />
 
         {/* CardOps Estimated Price — A (standard+context) and B (all-sales+context). */}
