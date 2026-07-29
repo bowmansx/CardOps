@@ -138,11 +138,29 @@ separate screen.
 per user, and `/api/cards/groups` already implements create, rename, delete,
 add and remove. `CardBrowser` and the cards page already use it.
 
-What is missing is only the dropdown in the intake flow, plus deciding whether
-the group applies to the whole SESSION (set once, every card inherits) or to
-each card individually. **Session-level is the better default** - the reason to
-group at intake is usually that the whole stack came from one box, one break or
-one purchase - with a per-card override in the list from Q1.
+**ANSWERED 2026-07-28 - sticky, not session-scoped:**
+
+> "when you set something, that setting will stay for that card and the
+> following cards until you change it. let's also put an X to remove the data in
+> a selection box to the right of each box."
+
+Better than either option I offered. A session-wide setting cannot be changed
+partway without either applying retroactively or silently not applying;
+**sticky** means the value carries forward from the card where it was set,
+every card keeps whatever was current when IT was captured, and changing it
+mid-stack affects only what comes after. That is how a person actually works
+through a box - the first thirty are from one purchase, then a different pile
+starts.
+
+And the X generalises: **every field in the photograph step gets a clear
+control to its right**, not just the group. Sticky values need a way to say "not
+this one" that is distinct from "I have not chosen yet" - without it, the only
+way to clear an inherited value is to type over it, and there is no way at all
+to say *none*.
+
+So there are three states per field, and they need to be visually distinct:
+inherited from the previous card, set explicitly on this card, and deliberately
+cleared.
 
 ### Q3 - BUILD THE DESTINATION for Card Groups  *(2026-07-28)*
 
