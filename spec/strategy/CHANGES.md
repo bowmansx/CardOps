@@ -7,6 +7,41 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-07-28 (queue) - the strategy doc is now the to-do list too
+
+Beau: "state of play (known as strategy in obsidian) is going to serve as our to
+do list as well."
+
+Added a "Beau's queue" section above the ranked list. Two kinds of thing now
+live in this document and they are deliberately kept apart: what to build ranked
+by value, and his specific asks in the order he made them. The queue is never
+re-ranked.
+
+Three items in: the intake session card list, an Add to Group dropdown in the
+photograph step, and a Card Groups section.
+
+WHAT CHECKING FOUND, and it changes the scope of all three:
+
+- `card_intake_sessions` and `card_intake_items` have existed since the
+  20260713 init - session with mode and item_count, items with photos,
+  vision_raw, extracted, confidences, cert_lookup, and a
+  pending/needs_review/committed/discarded status. ZERO references in src/. The
+  model was designed on day one and never wired up. Q1 is connecting a table,
+  not inventing one.
+- card_groups and card_group_items exist, are RLS'd, and /api/cards/groups
+  already does create, rename, delete, add and remove - with CardBrowser and
+  the cards page consuming it. Q3 is not "start a section"; it is building a
+  destination page for something already working underneath.
+- SessionMenu.tsx already implements Q1's exact UI shape one level down, for
+  photos within a card. Same pattern, and the two-tap-to-discard rule should
+  carry up.
+
+Flagged rather than decided: what a "group" actually is. card_lots (sell-side
+bundles) and purchase_lots (buy-side cost events) both overlap it. Three
+concepts each half-answering the same question is the failure mode to avoid.
+
+---
+
 ## 2026-07-27 (retraction) - there was no live bug
 
 I claimed 20260745 was unpasted and that production was querying a column that

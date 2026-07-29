@@ -128,7 +128,7 @@
 <div class="wrap">
 <header>
   <h1>CardOps — State of Play</h1>
-  <p class="sub">Everything started, where it stands, what's waiting on you, and what the market says to build next.</p>
+  <p class="sub">The to-do list and the strategy in one place. What you've asked for, what's waiting on you, and what the market says to build next.</p>
   <p class="meta">Tue 28 July 2026 · main @ 006273b · 424 tests · 30 test files · 29 card API routes</p>
 </header>
 
@@ -243,6 +243,26 @@
   <li class="item"><span class="chip c-no">Avoid</span><span class="t">Grade estimates shown to a buyer</span><div class="d">Internal EV is the entire point. The moment "likely PSA 9" appears on a showcase or in listing copy it's a representation to a buyer about a third party's future act, using PSA's marks. Every card that returns lower is a dispute.</div></li>
   <li class="item"><span class="chip c-no">Avoid</span><span class="t">A tax package that computes tax</span><div class="d">No rate applied, no form line numbers as headers, no short/long label — raw day counts, and classification shown as <em>"as classified by you on &lt;date&gt;: &lt;reason&gt;"</em>. A once-a-year artifact used under deadline by someone whose CPA disagrees generates urgent March tickets forever.</div></li>
   <li class="item"><span class="chip c-no">Avoid</span><span class="t">An AI-grading accuracy race</span><div class="d">Photo quality matters more than the model. The defensible thing is the capture <em>standard</em> — edge detection, deskew, sharpness gating, templates, retained originals with crop geometry. Market the standard and the evidence trail; never claim a percentage you can't source.</div></li>
+</ul>
+
+<h2><span class="n">Your queue</span>What you've asked for</h2>
+<p class="lede">In the order you asked, not re-ranked. Each records what already exists &mdash; in both cases so far, more than either of us expected.</p>
+<ul class="items">
+
+  <li class="item flag"><span class="chip c-idea">Q1</span><span class="t">The intake session card list</span>
+    <div class="d">A running list under <em>Photograph the card</em> of what's being added this session &mdash; delete per card, tap a card to see what's been compiled so far, or just keep shooting it. Then the same list again at the confirm step, with grouping and other actions available.
+    <br><br><strong>What exists:</strong> <code>card_intake_sessions</code> and <code>card_intake_items</code> are real tables from the first day &mdash; session with mode and item count, items with photos, <code>vision_raw</code>, <code>extracted</code>, <code>confidences</code>, <code>cert_lookup</code>, and a pending / needs-review / committed / discarded status. <strong>Nothing in <code>src/</code> references either one.</strong> The model was designed and never wired up.
+    <br><br><code>SessionMenu.tsx</code> already does this exact shape of UI for photos within one card. The card-level list is the same pattern a level up &mdash; and the two-tap-to-discard rule should carry over, since deleting a card with photos throws work away.
+    <br><br><strong>One question:</strong> the list appears twice &mdash; during the session and at confirm. Same component with more actions enabled, or a separate review screen? Same component is less to build and less to learn; a separate screen gives room for grouping, bulk edits and a real commit gate. I'd guess the former, but say if you pictured otherwise.</div></li>
+
+  <li class="item flag"><span class="chip c-idea">Q2</span><span class="t">&ldquo;Add to Group&rdquo; in the photograph step</span>
+    <div class="d">A dropdown listing current groups, plus an add-group button.
+    <br><br><strong>Mostly wiring.</strong> <code>card_groups</code> and <code>card_group_items</code> exist, are RLS'd per user, and <code>/api/cards/groups</code> already implements create, rename, delete, add and remove. <code>CardBrowser</code> and the cards page already use it.
+    <br><br>What's missing is the dropdown in intake, plus one decision: does the group apply to the whole <em>session</em> (set once, every card inherits) or per card? <strong>Session-level is the better default</strong> &mdash; the reason to group at intake is usually that the whole stack came from one box, one break or one purchase &mdash; with a per-card override in the Q1 list.</div></li>
+
+  <li class="item flag"><span class="chip c-idea">Q3</span><span class="t">A Card Groups section</span>
+    <div class="d"><strong>Already built underneath.</strong> Table, items table, RLS, full CRUD API, and group filtering inside <code>CardBrowser</code>. What doesn't exist is a <em>destination</em> &mdash; a page where groups are the primary object: rename, recolour, reorder, see what's inside, act on all of it.
+    <br><br><strong>Worth deciding what a group IS first</strong>, because the word is carrying a lot. A box you bought? A break? A consignor's cards? A to-be-graded pile? Those want different fields. <code>card_lots</code> (sell-side bundles) and <code>purchase_lots</code> (buy-side cost events) both already overlap the idea &mdash; the risk is three concepts that each half-answer the same question.</div></li>
 </ul>
 
 <h2><span class="n">Section 6</span>What to build, ranked</h2>
