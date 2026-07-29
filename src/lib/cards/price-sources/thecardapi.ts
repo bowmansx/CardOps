@@ -4,6 +4,7 @@
 // set. Covers every card (sports + TCG), so it's the broad market feed.
 //   docs: https://thecardapi.com/docs  ·  GET /api/v1/market/sales
 import type { PriceSourceAdapter, SourceQuote, CardForPricing, AdapterResult } from "./types";
+import { partitionByBasis, exclusionNote } from "../price-basis";
 
 const BASE = "https://thecardapi.com/api/v1/market";
 
@@ -58,17 +59,33 @@ export function saleQuery(card: CardForPricing): string {
  *   raw    → sales with no grader; median of those
  * The blend then medians this across sources. Returns [] when nothing matches.
  * Pure — unit-tested; the fetch wrapper does the I/O.
+ *
+ * Every price is converted to ALL-IN before it is medianed. See `price-basis`:
+ * eBay quotes what the buyer paid, Goldin quotes the hammer with a ~22% premium
+ * still to come, and the median used to blend the two as though they were the
+ * same number. Sales whose basis is undocumented are dropped rather than
+ * guessed, and the drop is reported.
  */
 export function distillSales(sales: CardApiSale[], card: CardForPricing): SourceQuote[] {
   const graded = card.condition_type === "graded";
   const priced = sales
     .map((s) => ({ ...s, p: Number(s.price) }))
-    .filter((s) => Number.isFinite(s.p) && s.p > 0);
+    // A fast-settle estimate is not a realized sale (see `price_confirmed`).
+    .filter((s) => Number.isFinite(s.p) && s.p > 0 && s.price_confirmed !== false);
 
   // STRICT condition match — never blend across graders or grades. A graded card
   // is priced only off sales at the SAME grader and (when we know it) the SAME
   // grade; a raw card only off ungraded sales. No exact match → NO quote (an
   // honest "no comp at this grade" beats a wrong-grade price).
+  //
+  // CAVEAT for raw cards, and it is a real one. The vendor populates `grader`
+  // on only ~12% of records, so "no grader" is mostly "not extracted" rather
+  // than "ungraded" — treating absence as proof of raw sweeps graded sales into
+  // a raw card's comps and pushes the value up. The live fetch now asks the API
+  // for `graded=false`, which filters server-side on signals we don't have; that
+  // covers the fetch path. Sales replayed out of `card_market_sales` predate
+  // that flag and are NOT distinguishable, which is why the migration adds a
+  // stored graded column.
   const matched = priced.filter((s) => {
     const hasGrader = !!(s.grader && String(s.grader).trim());
     if (!graded) return !hasGrader; // raw card → ungraded sales only
@@ -79,13 +96,21 @@ export function distillSales(sales: CardApiSale[], card: CardForPricing): Source
   });
   if (matched.length === 0) return [];
 
-  const recent = [...matched].sort((a, b) => String(b.sold_at ?? b.sale_date ?? "").localeCompare(String(a.sold_at ?? a.sale_date ?? "")));
-  const value = round2(median(matched.map((s) => s.p)));
+  // Put every surviving sale on the same footing before taking a median.
+  const { usable, excluded } = partitionByBasis(matched);
+  if (usable.length === 0) return [];
+
+  const recent = [...usable].sort((a, b) => String(b.sold_at ?? b.sale_date ?? "").localeCompare(String(a.sold_at ?? a.sale_date ?? "")));
+  const value = round2(median(usable.map((s) => s.allIn)));
   const gradeLabel = graded ? `${card.grader ?? "Graded"}${card.grade != null ? " " + card.grade : ""}` : "Ungraded";
   // Keep a sample of the exact sales behind the median so it can be inspected /
-  // audited on the card page ("show me why this price").
+  // audited on the card page ("show me why this price"). Both numbers are kept:
+  // `price` is what the vendor reported, `allIn` is what went into the median,
+  // so a converted hammer price is visible as a conversion rather than as a
+  // figure that silently disagrees with the source listing.
   const sample = recent.slice(0, 6).map((s) => ({
-    title: s.title ?? null, price: s.p, grader: s.grader ?? null, grade: s.grade ?? null,
+    title: s.title ?? null, price: s.p, allIn: s.allIn, converted: s.converted,
+    grader: s.grader ?? null, grade: s.grade ?? null,
     platform: s.platform ?? null, sold_at: s.sold_at ?? s.sale_date ?? null, url: s.listing_url ?? null,
   }));
   return [{
@@ -95,10 +120,17 @@ export function distillSales(sales: CardApiSale[], card: CardForPricing): Source
     grade: graded ? card.grade ?? null : null,
     price: value,
     currency: (recent[0]?.currency as string) ?? "USD",
-    label: `${gradeLabel} · median of ${matched.length}`,
+    label: `${gradeLabel} · median of ${usable.length}`,
     url: recent[0]?.listing_url ?? null,
     product_ref: null,
-    payload: { count: matched.length, platforms: [...new Set(matched.map((s) => s.platform).filter(Boolean))], sample },
+    payload: {
+      count: usable.length,
+      platforms: [...new Set(usable.map((s) => s.platform).filter(Boolean))],
+      sample,
+      // Surfaced, never silent: a comp set thinned by unconvertible prices must
+      // not look like a complete one (rules 4 and 10).
+      ...(excluded.length ? { excluded: excluded.length, exclusionNote: exclusionNote(excluded) } : {}),
+    },
   }];
 }
 
@@ -116,6 +148,11 @@ export async function fetchCardApiSales(
   const params = new URLSearchParams({ q, limit: String(Math.min(Math.max(opts.limit ?? 40, 1), 200)) });
   if (!opts.allGrades && card.condition_type === "graded" && card.grader) params.set("grader", card.grader);
   if (!opts.allGrades && card.condition_type === "graded" && card.grade != null) params.set("grade", String(card.grade));
+  // Ask the vendor to decide graded-vs-raw. Their `graded` filter "works on
+  // every platform" and doesn't depend on the sparse `grader` field we get back
+  // (~12% populated) — inferring raw from a missing grader counts graded sales
+  // as raw comps and inflates ungraded values.
+  if (!opts.allGrades) params.set("graded", card.condition_type === "graded" ? "true" : "false");
   return runQuery(token, params);
 }
 
@@ -185,6 +222,9 @@ export const thecardapi: PriceSourceAdapter = {
     const params = new URLSearchParams({ q, limit: "20" });
     if (card.condition_type === "graded" && card.grader) params.set("grader", card.grader);
     if (card.condition_type === "graded" && card.grade != null) params.set("grade", String(card.grade));
+    // Server-side graded/raw split — see fetchCardApiSales for why the returned
+    // `grader` field can't be trusted to make this call.
+    params.set("graded", card.condition_type === "graded" ? "true" : "false");
 
     let r: Response;
     try {

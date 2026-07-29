@@ -3,6 +3,7 @@
 // series for the card graph. Pure — no I/O.
 import type { CardApiSale } from "./price-sources/thecardapi";
 import { mayPersist } from "./price-sources";
+import { toAllIn } from "./price-basis";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -98,20 +99,46 @@ export function storedToSales(rows: StoredSale[]): CardApiSale[] {
 }
 
 // Collapse sales into one point per day (median of that day) for a clean line graph.
+//
+// Normalized to ALL-IN first, for the same reason the quote is: a day whose
+// sales happened to come from Goldin plotted ~22% below a neighbouring eBay day,
+// which reads as a price movement that never happened. Sales whose basis is
+// undocumented are excluded, and the count of excluded rows is returned so a
+// thinned graph can say so rather than implying it plotted everything.
 export type HistoryPoint = { date: string; price: number; n: number };
-export function dailyMedianSeries(rows: { sold_at: string | null; price: number | string }[]): HistoryPoint[] {
+export type HistorySeries = {
+  points: HistoryPoint[];
+  /** Dated sales dropped because their price basis is undocumented. */
+  excluded: number;
+};
+
+/**
+ * `platform` is REQUIRED, not optional, and that is deliberate. Making it
+ * optional let a caller map `{ sold_at, price }` and get a silently empty
+ * series, because a missing platform resolves to an unknown basis and every row
+ * drops. Requiring it turns that into a compile error at the call site — which
+ * is exactly how it was caught here.
+ */
+export function dailyMedianSeries(
+  rows: { sold_at: string | null; price: number | string; platform: string | null }[],
+): HistorySeries {
   const byDay = new Map<string, number[]>();
+  let excluded = 0;
   for (const r of rows) {
     const d = r.sold_at ? String(r.sold_at).slice(0, 10) : null;
-    const p = Number(r.price);
-    if (!d || !Number.isFinite(p) || p <= 0) continue;
-    (byDay.get(d) ?? byDay.set(d, []).get(d)!).push(p);
+    if (!d) continue;
+    const n = toAllIn(Number(r.price), r.platform, r.sold_at);
+    // A junk price was never plotted and isn't an exclusion worth reporting;
+    // a real sale we can't put on a common footing is.
+    if (!n.ok) { if (n.reason !== "bad_price") excluded++; continue; }
+    (byDay.get(d) ?? byDay.set(d, []).get(d)!).push(n.price);
   }
-  return [...byDay.entries()]
+  const points = [...byDay.entries()]
     .map(([date, ps]) => {
       const s = [...ps].sort((a, b) => a - b);
       const m = s.length >> 1;
       return { date, price: round2(s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2), n: s.length };
     })
     .sort((a, b) => a.date.localeCompare(b.date));
+  return { points, excluded };
 }

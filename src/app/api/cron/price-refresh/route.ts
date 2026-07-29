@@ -237,6 +237,9 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true, processed: list.length, vendor_fetches: work.length, deduped_by_identity: dedupedFetches,
     adopted, history_written: history.length, sales_stored: salesStored, capped_at: CAP,
+    // Fetched but deliberately not stored, so a short run is explainable rather
+    // than looking like data loss.
+    ...(salesUnconfirmed ? { sales_unconfirmed: salesUnconfirmed } : {}),
     ...(salesErrors.length
       ? { sales_failed: salesErrors.length, sales_errors: salesErrors.slice(0, 5) }
       : {}),

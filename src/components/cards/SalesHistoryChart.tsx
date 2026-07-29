@@ -2,21 +2,45 @@
 // daily-median line — the price-over-time history we accumulate in card_market_sales
 // from the Card API's rolling window. Server-rendered SVG, no chart lib. Draws
 // nothing until there are ≥2 dated sales.
+//
+// EVERY PRICE HERE IS ALL-IN (2026-07-29). The dots used to plot the vendor's
+// raw price, which mixes bases: eBay quotes what the buyer paid, Goldin quotes
+// the hammer with a ~22% premium still to come. A week whose sales happened to
+// come from Goldin dipped ~22% and read as a market move that never happened.
+// Both the dots and the line now go through `toAllIn`, together — normalizing
+// one and not the other would leave the line floating off its own points.
 import { dailyMedianSeries } from "@/lib/cards/market-sales";
+import { toAllIn } from "@/lib/cards/price-basis";
 
-type Sale = { sold_at: string | null; price: number | string; grader?: string | null; grade?: number | null };
+type Sale = {
+  sold_at: string | null;
+  price: number | string;
+  /** Required — the basis conversion is meaningless without it. */
+  platform: string | null;
+  grader?: string | null;
+  grade?: number | null;
+};
 
 const fmtDate = (t: number) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const money = (n: number) => "$" + n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 export function SalesHistoryChart({ sales, className = "" }: { sales: Sale[]; className?: string }) {
   const pts = sales
-    .map((s) => ({ p: Number(s.price), t: s.sold_at ? new Date(String(s.sold_at).slice(0, 10) + "T00:00:00Z").getTime() : NaN, graded: !!s.grader }))
+    .map((s) => {
+      const n = toAllIn(Number(s.price), s.platform, s.sold_at);
+      return {
+        p: n.ok ? n.price : NaN,
+        t: s.sold_at ? new Date(String(s.sold_at).slice(0, 10) + "T00:00:00Z").getTime() : NaN,
+        graded: !!s.grader,
+      };
+    })
     .filter((s) => Number.isFinite(s.p) && s.p > 0 && Number.isFinite(s.t))
     .sort((a, b) => a.t - b.t);
   if (pts.length < 2) return null;
 
-  const line = dailyMedianSeries(sales.map((s) => ({ sold_at: s.sold_at, price: s.price })));
+  const { points: line, excluded } = dailyMedianSeries(
+    sales.map((s) => ({ sold_at: s.sold_at, price: s.price, platform: s.platform })),
+  );
   const W = 320, H = 120, ML = 6, MR = 6, MT = 8, MB = 6;
   const ts = pts.map((p) => p.t), ps = pts.map((p) => p.p);
   const t0 = Math.min(...ts), t1 = Math.max(...ts), lo = Math.min(...ps), hi = Math.max(...ps);
@@ -42,6 +66,13 @@ export function SalesHistoryChart({ sales, className = "" }: { sales: Sale[]; cl
         <span>{pts.length} sales · {money(lo)}–{money(hi)}</span>
         <span>{fmtDate(t1)}</span>
       </div>
+      {/* A graph drawn from part of the data must say so — otherwise it reads as
+          the whole picture (rules 4 and 10). */}
+      {excluded > 0 && (
+        <p className="mt-0.5 text-[9px] leading-snug text-ink/35">
+          {excluded} sale{excluded === 1 ? "" : "s"} not plotted — no published buyer&rsquo;s premium for that platform.
+        </p>
+      )}
     </div>
   );
 }

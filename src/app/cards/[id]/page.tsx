@@ -60,7 +60,10 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
     // Shared identity history when we can fingerprint the card, so the chart
     // shows every sale anyone has collected for it — not just the ones observed
     // since this copy was added.
-    .from("card_market_sales").select("sold_at, price, grader, grade").eq("pre_auto_split", false)
+    // `platform` is not cosmetic: it decides whether a price is all-in or a
+    // hammer figure with a buyer's premium still to come, and the chart cannot
+    // put sales on a common footing without it.
+    .from("card_market_sales").select("sold_at, price, grader, grade, platform").eq("pre_auto_split", false)
     .eq(c.identity_id ? "identity_id" : "card_id", c.identity_id ?? id)
     .order("sold_at", { ascending: true }).limit(500);
   const { data: srcQuotes } = await supabase
@@ -233,7 +236,7 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
               {(mktSales?.length ?? 0) >= 2 && (
                 <div className="mt-3 border-t border-hairline pt-2">
                   <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink/40">Sales over time · what we&apos;ve banked</div>
-                  <SalesHistoryChart sales={(mktSales ?? []) as { sold_at: string | null; price: number; grader: string | null; grade: number | null }[]} />
+                  <SalesHistoryChart sales={(mktSales ?? []) as { sold_at: string | null; price: number; grader: string | null; grade: number | null; platform: string | null }[]} />
                 </div>
               )}
               <div className="mt-2 flex items-center justify-between border-t border-hairline pt-2">
