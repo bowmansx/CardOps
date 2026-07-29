@@ -12,6 +12,20 @@ export function runnableAdapters(card: CardForPricing): PriceSourceAdapter[] {
   return ADAPTERS.filter((a) => a.enabled() && a.handles(card));
 }
 
+/**
+ * Sources that supply realized SALES for this card, as opposed to guide values.
+ *
+ * The accumulator and the distill both iterate this rather than naming a
+ * vendor, so a second sales source — another API, a paste parser, a CSV
+ * uploader — starts contributing the moment its adapter lands in ADAPTERS.
+ */
+export type SalesAdapter = PriceSourceAdapter & {
+  fetchSales: NonNullable<PriceSourceAdapter["fetchSales"]>;
+};
+export function salesAdapters(card: CardForPricing): SalesAdapter[] {
+  return runnableAdapters(card).filter((a): a is SalesAdapter => typeof a.fetchSales === "function");
+}
+
 /** A source's declared licence rights, or null if the id isn't a known source. */
 export function sourceRights(id: string): SourceRights | null {
   return ADAPTERS.find((a) => a.id === id)?.rights ?? null;

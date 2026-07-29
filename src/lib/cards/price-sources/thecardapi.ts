@@ -3,8 +3,10 @@
 // Free tier: 5,000 records/day, 3-day lookback. Activates when THECARDAPI_TOKEN is
 // set. Covers every card (sports + TCG), so it's the broad market feed.
 //   docs: https://thecardapi.com/docs  ·  GET /api/v1/market/sales
-import type { PriceSourceAdapter, SourceQuote, CardForPricing, AdapterResult } from "./types";
-import { partitionByBasis, exclusionNote } from "../price-basis";
+import type { PriceSourceAdapter, CardForPricing, AdapterResult } from "./types";
+import type { PriceBasis } from "../price-basis";
+import type { ObservedSale, SalesQuery, SalesResult } from "../observed-sale";
+import { distill } from "../distill";
 
 const BASE = "https://thecardapi.com/api/v1/market";
 
@@ -53,120 +55,126 @@ export function saleQuery(card: CardForPricing): string {
     .slice(0, 200);
 }
 
-/**
- * Distill raw sales into ONE market quote matching the card's condition:
- *   graded → sales at the same grader (and grade, when known); median of those
- *   raw    → sales with no grader; median of those
- * The blend then medians this across sources. Returns [] when nothing matches.
- * Pure — unit-tested; the fetch wrapper does the I/O.
- *
- * Every price is converted to ALL-IN before it is medianed. See `price-basis`:
- * eBay quotes what the buyer paid, Goldin quotes the hammer with a ~22% premium
- * still to come, and the median used to blend the two as though they were the
- * same number. Sales whose basis is undocumented are dropped rather than
- * guessed, and the drop is reported.
- */
-export function distillSales(sales: CardApiSale[], card: CardForPricing): SourceQuote[] {
-  const graded = card.condition_type === "graded";
-  const priced = sales
-    .map((s) => ({ ...s, p: Number(s.price) }))
-    // A fast-settle estimate is not a realized sale (see `price_confirmed`).
-    .filter((s) => Number.isFinite(s.p) && s.p > 0 && s.price_confirmed !== false);
+// WHAT THIS VENDOR'S PRICES INCLUDE, per platform.
+//
+// Their field reference: "For eBay: all-in buyer price. For Goldin: hammer
+// price only - buyer also pays ~22% buyer's premium on top."
+//
+// This map is THE CARD API'S CONVENTION and belongs to this adapter, not to the
+// app. Another vendor reporting the same auction house may normalize before it
+// reaches us; a shared table would make one of them wrong. What the premium
+// actually IS lives once, in `price-basis`, because that is a fact about the
+// venue rather than about whoever reports it.
+//
+// Only platforms the vendor documents are listed. Lelands, SCP, Hakes and REA
+// are auction houses whose basis they never state, so they resolve to "unknown"
+// and their sales are excluded from medians rather than assumed all-in. A
+// platform added upstream tomorrow starts excluded for the same reason.
+const PLATFORM_BASIS: Record<string, PriceBasis> = {
+  ebay: "all_in",
+  tcgplayer: "all_in",
+  goldin: "hammer",
+};
 
-  // STRICT condition match — never blend across graders or grades. A graded card
-  // is priced only off sales at the SAME grader and (when we know it) the SAME
-  // grade; a raw card only off ungraded sales. No exact match → NO quote (an
-  // honest "no comp at this grade" beats a wrong-grade price).
-  //
-  // CAVEAT for raw cards, and it is a real one. The vendor populates `grader`
-  // on only ~12% of records, so "no grader" is mostly "not extracted" rather
-  // than "ungraded" — treating absence as proof of raw sweeps graded sales into
-  // a raw card's comps and pushes the value up. The live fetch now asks the API
-  // for `graded=false`, which filters server-side on signals we don't have; that
-  // covers the fetch path. Sales replayed out of `card_market_sales` predate
-  // that flag and are NOT distinguishable, which is why the migration adds a
-  // stored graded column.
-  const matched = priced.filter((s) => {
-    const hasGrader = !!(s.grader && String(s.grader).trim());
-    if (!graded) return !hasGrader; // raw card → ungraded sales only
-    if (!hasGrader) return false; // graded card → graded sales only
-    if (card.grader && String(s.grader).toUpperCase() !== card.grader.toUpperCase()) return false;
-    if (card.grade != null && Number(s.grade) !== card.grade) return false;
-    return true;
-  });
-  if (matched.length === 0) return [];
-
-  // Put every surviving sale on the same footing before taking a median.
-  const { usable, excluded } = partitionByBasis(matched);
-  if (usable.length === 0) return [];
-
-  const recent = [...usable].sort((a, b) => String(b.sold_at ?? b.sale_date ?? "").localeCompare(String(a.sold_at ?? a.sale_date ?? "")));
-  const value = round2(median(usable.map((s) => s.allIn)));
-  const gradeLabel = graded ? `${card.grader ?? "Graded"}${card.grade != null ? " " + card.grade : ""}` : "Ungraded";
-  // Keep a sample of the exact sales behind the median so it can be inspected /
-  // audited on the card page ("show me why this price"). Both numbers are kept:
-  // `price` is what the vendor reported, `allIn` is what went into the median,
-  // so a converted hammer price is visible as a conversion rather than as a
-  // figure that silently disagrees with the source listing.
-  const sample = recent.slice(0, 6).map((s) => ({
-    title: s.title ?? null, price: s.p, allIn: s.allIn, converted: s.converted,
-    grader: s.grader ?? null, grade: s.grade ?? null,
-    platform: s.platform ?? null, sold_at: s.sold_at ?? s.sale_date ?? null, url: s.listing_url ?? null,
-  }));
-  return [{
-    source: "thecardapi",
-    kind: "sold",
-    grader: graded ? card.grader ?? null : null,
-    grade: graded ? card.grade ?? null : null,
-    price: value,
-    currency: (recent[0]?.currency as string) ?? "USD",
-    label: `${gradeLabel} · median of ${usable.length}`,
-    url: recent[0]?.listing_url ?? null,
-    product_ref: null,
-    payload: {
-      count: usable.length,
-      platforms: [...new Set(usable.map((s) => s.platform).filter(Boolean))],
-      sample,
-      // Surfaced, never silent: a comp set thinned by unconvertible prices must
-      // not look like a complete one (rules 4 and 10).
-      ...(excluded.length ? { excluded: excluded.length, exclusionNote: exclusionNote(excluded) } : {}),
-    },
-  }];
+function basisOf(platform: string | null | undefined): PriceBasis {
+  if (!platform) return "unknown";
+  return PLATFORM_BASIS[platform.trim().toLowerCase()] ?? "unknown";
 }
 
-// Raw-sales fetch for the ESTIMATE engine (the adapter only returns a distilled
-// quote; estimates reason over the underlying sales). allGrades=true pulls every
-// grade (Estimate B wants the whole picture).
+const saleDate = (s: CardApiSale): string | null => {
+  const raw = String(s.sold_at ?? s.sale_date ?? "");
+  return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : null;
+};
+
+/**
+ * A stable dedup key within this source: the vendor's sale id when present,
+ * else a hash of the identifying fields so the same sale isn't stored twice
+ * across daily runs.
+ */
+export function cardApiSaleKey(s: CardApiSale): string {
+  if (s.id) return String(s.id);
+  return `${saleDate(s) ?? "x"}:${Number(s.price)}:${String(s.title ?? "").slice(0, 48)}`;
+}
+
+/**
+ * This vendor's wire row -> CardOps' own `ObservedSale`.
+ *
+ * The whole point of the boundary: everything downstream - the accumulator, the
+ * distill, the estimate engine - speaks our shape, so a second sales source is
+ * one more mapping function rather than a fork of every consumer.
+ *
+ * Returns null for a row with no usable price. `isGraded` is deliberately left
+ * NULL: this vendor populates `grader` on only ~12% of records, so the row
+ * itself cannot answer graded-vs-raw. The fetch asks the server-side `graded`
+ * filter instead, and `fetchSales` stamps the answer it asked for.
+ */
+export function toObserved(s: CardApiSale, isGraded: boolean | null = null): ObservedSale | null {
+  const price = Number(s.price);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const grade = s.grade != null && Number.isFinite(Number(s.grade)) ? Number(s.grade) : null;
+  return {
+    externalId: cardApiSaleKey(s),
+    price: Math.round(price * 100) / 100,
+    currency: (s.currency as string) ?? "USD",
+    priceBasis: basisOf(s.platform),
+    soldAt: saleDate(s),
+    platform: s.platform ?? null,
+    title: s.title ?? null,
+    url: s.listing_url ?? null,
+    grader: (s.grader as string | null) ?? null,
+    grade,
+    isGraded,
+    // Absent on older payloads, so only an explicit false is provisional.
+    confirmed: s.price_confirmed !== false,
+  };
+}
+
+/**
+ * Realized sales for one card, in CardOps' shape.
+ *
+ * The estimate engine reasons over the underlying sales rather than a distilled
+ * quote, which is why this is exposed alongside the adapter's `fetch`.
+ * allGrades=true pulls every grade (Estimate B wants the whole picture).
+ */
 export async function fetchCardApiSales(
   card: CardForPricing,
-  opts: { limit?: number; allGrades?: boolean } = {},
-): Promise<{ sales: CardApiSale[]; ok: boolean; note?: string }> {
+  opts: SalesQuery = {},
+): Promise<SalesResult> {
   const token = process.env.THECARDAPI_TOKEN;
   if (!token) return { sales: [], ok: false, note: "no THECARDAPI_TOKEN set" };
   const q = saleQuery(card);
   if (!q) return { sales: [], ok: true, note: "no fields to search on" };
-  const params = new URLSearchParams({ q, limit: String(Math.min(Math.max(opts.limit ?? 40, 1), 200)) });
+  const limit = Math.min(Math.max(opts.limit ?? 40, 1), 200);
+  const params = new URLSearchParams({ q, limit: String(limit) });
   if (!opts.allGrades && card.condition_type === "graded" && card.grader) params.set("grader", card.grader);
   if (!opts.allGrades && card.condition_type === "graded" && card.grade != null) params.set("grade", String(card.grade));
   // Ask the vendor to decide graded-vs-raw. Their `graded` filter "works on
   // every platform" and doesn't depend on the sparse `grader` field we get back
   // (~12% populated) — inferring raw from a missing grader counts graded sales
   // as raw comps and inflates ungraded values.
-  if (!opts.allGrades) params.set("graded", card.condition_type === "graded" ? "true" : "false");
-  return runQuery(token, params);
+  //
+  // We then STAMP the answer we asked for onto every row, because the rows
+  // themselves can't carry it. That is only honest when we constrained the
+  // query: under allGrades the result is a mix and isGraded stays null.
+  const asked = opts.allGrades ? null : card.condition_type === "graded";
+  if (asked !== null) params.set("graded", asked ? "true" : "false");
+  return runQuery(token, params, limit, asked);
 }
 
 // Fetch sales by a free-text query (comparables — e.g. the same parallel for other
 // players, or the player's broader market).
-export async function fetchCardApiByQuery(q: string, limit = 12): Promise<CardApiSale[]> {
+export async function fetchCardApiByQuery(q: string, limit = 12): Promise<ObservedSale[]> {
   const token = process.env.THECARDAPI_TOKEN;
   const query = q.trim().slice(0, 200);
   if (!token || !query) return [];
-  const { sales } = await runQuery(token, new URLSearchParams({ q: query, limit: String(Math.min(Math.max(limit, 1), 50)) }));
+  const capped = Math.min(Math.max(limit, 1), 50);
+  const { sales } = await runQuery(token, new URLSearchParams({ q: query, limit: String(capped) }), capped, null);
   return sales;
 }
 
-async function runQuery(token: string, params: URLSearchParams): Promise<{ sales: CardApiSale[]; ok: boolean; note?: string }> {
+async function runQuery(
+  token: string, params: URLSearchParams, limit: number, isGraded: boolean | null,
+): Promise<SalesResult> {
   let r: Response;
   try {
     r = await fetch(`${BASE}/sales?${params.toString()}`, { headers: { "x-market-api-key": token, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(10_000) });
@@ -175,8 +183,19 @@ async function runQuery(token: string, params: URLSearchParams): Promise<{ sales
   }
   if (r.status === 429 || r.status >= 500) return { sales: [], ok: false, note: `HTTP ${r.status}` };
   if (!r.ok) return { sales: [], ok: true, note: `HTTP ${r.status}` };
-  const d = (await r.json().catch(() => null)) as { data?: CardApiSale[] } | null;
-  return { sales: d?.data ?? [], ok: true };
+  const d = (await r.json().catch(() => null)) as
+    | { data?: CardApiSale[]; pagination?: { has_more?: boolean; total?: number } }
+    | null;
+  const raw = d?.data ?? [];
+  const sales = raw.map((s) => toObserved(s, isGraded)).filter((s): s is ObservedSale => s !== null);
+  return {
+    sales,
+    ok: true,
+    // The vendor tells us when it held more back. Passing that on is the
+    // difference between "these are the sales" and "these are the first N"
+    // (rule 10).
+    truncated: d?.pagination?.has_more === true || raw.length >= limit,
+  };
 }
 
 export const thecardapi: PriceSourceAdapter = {

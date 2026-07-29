@@ -2,6 +2,7 @@
 // CURRENT value for a card at some grade — NOT a realized sale (that's a comp).
 // Each adapter normalizes its vendor's response into SourceQuote[]; the card
 // page shows every source separately and a blended consensus on top.
+import type { SalesQuery, SalesResult } from "../observed-sale";
 
 export type SourceQuote = {
   source: string;              // adapter id, e.g. 'pricecharting'
@@ -96,6 +97,20 @@ export type PriceSourceAdapter = {
   fetch: (card: CardForPricing) => Promise<AdapterResult>;
   /** What this vendor's terms permit. Required — there is no safe default. */
   rights: SourceRights;
+  /**
+   * OPTIONAL: sources that supply realized SALES, not just current values.
+   *
+   * Separate from `fetch` because they are different kinds of answer. A guide
+   * value is one number a vendor asserts today; a sale is a transaction that
+   * happened, with a date, a venue and a price whose basis has to be stated.
+   * PriceCharting and Scryfall have the first and not the second.
+   *
+   * Any source implementing this is picked up automatically by the accumulator
+   * and the distill — including ones that aren't APIs at all. A Terapeak paste
+   * parser or a Seller Hub CSV upload satisfies this signature just as well as
+   * an HTTP client does.
+   */
+  fetchSales?: (card: CardForPricing, opts?: SalesQuery) => Promise<SalesResult>;
 };
 
 /** Sources whose licence permits writing their rows to card_market_sales. */
