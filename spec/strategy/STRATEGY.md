@@ -236,6 +236,62 @@ card** - which is a real narrowing, and yours to accept or reject.
    must never delete cards - `card_group_items` cascades on group delete today,
    which removes the *membership* only, and that is correct.
 
+### Q5 - Three concepts, not one: facets, tags, and OWNERSHIP  *(2026-07-28)*
+
+> "there will be tags and labels.... you might want to tag things such as if it's
+> a patch, if it's an auto card, etc.... but then also if you are inputting
+> someone else's cards you want to associate certain cards with another owner.
+> i'm not exactly sure what's going to be the best system there"
+
+The instinct that these do not all fit one system is correct. There are three
+things here and only two of them are labels.
+
+| | What it is | Who writes it | Consequence of getting it wrong |
+|---|---|---|---|
+| **Facets** (`TAG_FACETS`) | patch, auto, RC, numbered, graded, PSA... | Nobody - **derived from card fields** | A wrong filter. Cosmetic. |
+| **Tags** | "to grade", "eBay listed", "sentimental" | You, freely | A messy list. Cosmetic. |
+| **Ownership** | this card belongs to someone else | **Nobody - it is a fact** | **Money.** |
+
+**Patch and auto should NOT become user tags.** They already exist as derived
+facets computed from `is_relic` and `is_auto`, which the vision scan fills in
+automatically. Making them hand-typed labels means the same fact stored twice,
+disagreeing, with the hand-typed one wrong more often. If a facet is missing,
+the fix is the derivation, not a label.
+
+#### Ownership is not a tag, and this is the important part
+
+If a consignor's card is in your possession and it is marked with a *tag*, then
+deleting the tag silently absorbs someone else's property into your inventory
+value. A tag is editable, unenforced, and carries no consequences by design -
+which is exactly wrong for a fact with this much attached to it:
+
+- It must **not** count in your inventory value or your net worth.
+- It must **not** have a cost basis - you did not buy it.
+- Its sale is **not** your revenue. It is a payout obligation.
+- **The 1099-K problem**, which the valuation research surfaced: the marketplace
+  reports the consignor's full sale price as **your** gross. Reconciling to that
+  form needs the sale booked as revenue and the payout booked as an expense, so
+  the top line ties out. That is a double-entry problem, and it is precisely why
+  competitors can ship "consignment tracking" and still not solve it.
+
+**What exists:** `at_auction_house_on_consignment` is an asset state - that is
+*your* card sitting at an auction house. **Outbound.** There is no concept
+anywhere for *inbound* consignment - someone else's card in your hands.
+`entity_id` covers which of *your* businesses owns a card, which is a different
+axis again.
+
+**So ownership belongs in the books layer, not the label layer.** A field on the
+card, a party record for the consignor, terms (split, fees, due date), and it
+flows through basis, valuation, sale and the ledger. The earlier research called
+inbound consignment "months of work, and a CardOps-as-product decision rather
+than a CardOps-for-Beau one" - that judgement stands.
+
+**A cheap first step that is not the whole thing:** a nullable `owned_by`
+pointing at a party, defaulting to you, that simply **excludes the card from
+every total** when set. That is a day, it is honest, and it stops the worst
+outcome - counting someone else's cards as your money - long before full
+consignment accounting exists.
+
 ---
 
 ## What to build, ranked
