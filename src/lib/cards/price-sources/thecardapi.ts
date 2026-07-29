@@ -232,38 +232,27 @@ export const thecardapi: PriceSourceAdapter = {
     deleteOnTerminationDays: 30, // §5, on cancellation or termination
   },
 
+  /** Sales for this card, normalized. Picked up automatically by the
+   *  accumulator and the cross-source distill via `salesAdapters()`. */
+  fetchSales: (card: CardForPricing, opts: SalesQuery = {}) => fetchCardApiSales(card, opts),
+
+  /** So rows already stored can be classified by the source that fetched them. */
+  salesBasis: basisOf,
+
   async fetch(card: CardForPricing): Promise<AdapterResult> {
-    const token = process.env.THECARDAPI_TOKEN;
-    if (!token) return { quotes: [], ok: false, matched: false, note: "no THECARDAPI_TOKEN set" };
-    const q = saleQuery(card);
-    if (!q) return { quotes: [], ok: true, matched: false, note: "no fields to search on" };
+    // One path to the vendor, not two. This used to repeat the whole fetch
+    // inline, which is how the `graded` filter and the truncation signal had to
+    // be added in two places and could drift apart.
+    const r = await fetchCardApiSales(card, { limit: 20 });
+    if (!r.ok) return { quotes: [], ok: false, matched: false, note: r.note ?? "The Card API request failed" };
+    if (!r.sales.length) return { quotes: [], ok: true, matched: false, note: r.note ?? "no recent sales matched" };
 
-    const params = new URLSearchParams({ q, limit: "20" });
-    if (card.condition_type === "graded" && card.grader) params.set("grader", card.grader);
-    if (card.condition_type === "graded" && card.grade != null) params.set("grade", String(card.grade));
-    // Server-side graded/raw split — see fetchCardApiSales for why the returned
-    // `grader` field can't be trusted to make this call.
-    params.set("graded", card.condition_type === "graded" ? "true" : "false");
-
-    let r: Response;
-    try {
-      r = await fetch(`${BASE}/sales?${params.toString()}`, {
-        headers: { "x-market-api-key": token, Accept: "application/json" },
-        cache: "no-store",
-        signal: AbortSignal.timeout(10_000),
-      });
-    } catch (e) {
-      return { quotes: [], ok: false, matched: false, note: e instanceof Error ? e.message : "network error" };
-    }
-    // 429/5xx = transient (don't wipe a prior good quote); other non-OK = clean "no data".
-    if (r.status === 429 || r.status >= 500) return { quotes: [], ok: false, matched: false, note: `The Card API HTTP ${r.status}` };
-    if (!r.ok) return { quotes: [], ok: true, matched: false, note: `The Card API HTTP ${r.status}` };
-
-    const d = (await r.json().catch(() => null)) as { data?: CardApiSale[] } | null;
-    const sales = d?.data ?? [];
-    if (!sales.length) return { quotes: [], ok: true, matched: false, note: "no recent sales matched" };
-
-    const quotes = distillSales(sales, card);
-    return { quotes, ok: true, matched: quotes.length > 0, note: quotes.length ? undefined : "sales found, but none matched the card's condition" };
+    const { quote } = distill(r.sales, card, "thecardapi");
+    return {
+      quotes: quote ? [quote] : [],
+      ok: true,
+      matched: !!quote,
+      note: quote ? undefined : "sales found, but none matched the card's condition",
+    };
   },
 };

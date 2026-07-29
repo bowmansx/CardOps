@@ -11,26 +11,18 @@
 // one and not the other would leave the line floating off its own points.
 import { dailyMedianSeries } from "@/lib/cards/market-sales";
 import { toAllIn } from "@/lib/cards/price-basis";
-
-type Sale = {
-  sold_at: string | null;
-  price: number | string;
-  /** Required — the basis conversion is meaningless without it. */
-  platform: string | null;
-  grader?: string | null;
-  grade?: number | null;
-};
+import type { ObservedSale } from "@/lib/cards/observed-sale";
 
 const fmtDate = (t: number) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const money = (n: number) => "$" + n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
-export function SalesHistoryChart({ sales, className = "" }: { sales: Sale[]; className?: string }) {
+export function SalesHistoryChart({ sales, className = "" }: { sales: ObservedSale[]; className?: string }) {
   const pts = sales
     .map((s) => {
-      const n = toAllIn(Number(s.price), s.platform, s.sold_at);
+      const n = toAllIn(s.price, s.priceBasis, s.platform, s.soldAt);
       return {
         p: n.ok ? n.price : NaN,
-        t: s.sold_at ? new Date(String(s.sold_at).slice(0, 10) + "T00:00:00Z").getTime() : NaN,
+        t: s.soldAt ? new Date(s.soldAt.slice(0, 10) + "T00:00:00Z").getTime() : NaN,
         graded: !!s.grader,
       };
     })
@@ -38,9 +30,7 @@ export function SalesHistoryChart({ sales, className = "" }: { sales: Sale[]; cl
     .sort((a, b) => a.t - b.t);
   if (pts.length < 2) return null;
 
-  const { points: line, excluded } = dailyMedianSeries(
-    sales.map((s) => ({ sold_at: s.sold_at, price: s.price, platform: s.platform })),
-  );
+  const { points: line, excluded } = dailyMedianSeries(sales);
   const W = 320, H = 120, ML = 6, MR = 6, MT = 8, MB = 6;
   const ts = pts.map((p) => p.t), ps = pts.map((p) => p.p);
   const t0 = Math.min(...ts), t1 = Math.max(...ts), lo = Math.min(...ps), hi = Math.max(...ps);

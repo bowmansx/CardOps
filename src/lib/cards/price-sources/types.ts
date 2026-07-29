@@ -3,6 +3,7 @@
 // Each adapter normalizes its vendor's response into SourceQuote[]; the card
 // page shows every source separately and a blended consensus on top.
 import type { SalesQuery, SalesResult } from "../observed-sale";
+import type { PriceBasis } from "../price-basis";
 
 export type SourceQuote = {
   source: string;              // adapter id, e.g. 'pricecharting'
@@ -111,6 +112,16 @@ export type PriceSourceAdapter = {
    * an HTTP client does.
    */
   fetchSales?: (card: CardForPricing, opts?: SalesQuery) => Promise<SalesResult>;
+  /**
+   * How THIS source reports a given venue's prices — hammer, all-in, or unknown.
+   *
+   * Exposed so a row already sitting in `card_market_sales` can be classified by
+   * the source that fetched it, rather than by a global table that would be
+   * wrong for whichever vendor disagrees. Sources with no sales omit it, and an
+   * unrecognised source resolves to "unknown" — excluded from medians rather
+   * than assumed.
+   */
+  salesBasis?: (platform: string | null) => PriceBasis;
 };
 
 /** Sources whose licence permits writing their rows to card_market_sales. */

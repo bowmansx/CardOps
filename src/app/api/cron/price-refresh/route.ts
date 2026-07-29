@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { runnableAdapters, consensusForCard, type CardForPricing, type SourceQuote } from "@/lib/cards/price-sources";
-import { fetchCardApiSales, distillSales, type CardApiSale } from "@/lib/cards/price-sources/thecardapi";
+import { runnableAdapters, salesAdapters, consensusForCard, type CardForPricing, type SourceQuote } from "@/lib/cards/price-sources";
+import { distillBySource } from "@/lib/cards/distill";
+import type { ObservedSale } from "@/lib/cards/observed-sale";
 import { salesToRows } from "@/lib/cards/market-sales";
 
 export const dynamic = "force-dynamic";
@@ -104,6 +105,9 @@ export async function GET(req: Request) {
   let salesStored = 0;
   let salesUnconfirmed = 0;
   const salesErrors: string[] = [];
+  // Identities where a source had more sales than we asked for. Reported rather
+  // than swallowed — a capped read that says nothing reads as complete coverage.
+  const salesTruncated: string[] = [];
   const history: { card_id: string; price: number; strategy: string }[] = [];
   const now = new Date().toISOString();
 
@@ -116,67 +120,80 @@ export async function GET(req: Request) {
   // and market_value must still be written individually. Deduping the fetch
   // without fanning out the apply would silently stop pricing every card but
   // the first of each identity.
-  type Fetched = { quotes: SourceQuote[]; sales: CardApiSale[]; cleanSources: string[] };
+  type Fetched = {
+    quotes: SourceQuote[];
+    /** Sales kept per SOURCE, so each one distills into its own quote. */
+    salesBySource: { source: string; sales: ObservedSale[] }[];
+    cleanSources: string[];
+  };
 
   async function fetchForGroup(rep: CardRow, keepHistory: boolean): Promise<Fetched> {
     const adapters = runnableAdapters(rep);
-    const useCardApi = adapters.some((a) => a.id === "thecardapi");
+    const withSales = new Set(salesAdapters(rep).map((a) => a.id));
     const quotes: SourceQuote[] = [];
     const cleanSources: string[] = [];
-    let sales: CardApiSale[] = [];
-    // Every source EXCEPT The Card API via the generic adapter loop (Scryfall etc.).
-    // Their quotes cover all conditions; bestForCondition picks per card later.
-    for (const a of adapters.filter((a) => a.id !== "thecardapi")) {
+    const salesBySource: Fetched["salesBySource"] = [];
+
+    // GUIDE-VALUE sources go through the plain adapter loop; their quotes cover
+    // all conditions and bestForCondition picks per card later.
+    for (const a of adapters.filter((a) => !withSales.has(a.id))) {
       try {
         const res = await a.fetch(rep);
         if (res.ok) { cleanSources.push(a.id); quotes.push(...res.quotes); }
       } catch { /* transient — leave prior quotes intact */ }
     }
-    // The Card API: ONE raw-sales call → accumulate the day's sales into the
-    // shared history AND feed each owner's condition-matched distill.
-    if (useCardApi) {
+
+    // SALES sources: ONE raw-sales call each → accumulate into the shared
+    // history AND feed each owner's condition-matched distill. This loop names
+    // no vendor: any adapter implementing fetchSales joins it, including a paste
+    // parser or a CSV importer.
+    for (const a of salesAdapters(rep)) {
       try {
-        const r = await fetchCardApiSales(rep, { allGrades: true, limit: SALES_LIMIT });
-        if (r.ok) {
-          cleanSources.push("thecardapi");
-          sales = r.sales;
-          // Accumulate against the shared IDENTITY so every owner benefits from
-          // this one fetch. A card too sparse to fingerprint has no identity and
-          // isn't accumulated — there's nothing stable to attach history to.
-          if (keepHistory && r.sales.length && rep.identity_id) {
-            const batch = salesToRows(rep.identity_id, rep.id, r.sales);
-            // A source whose licence forbids storage is a configuration fault,
-            // not a quiet no-op — an empty batch would otherwise read exactly
-            // like "the vendor had no sales for this card" (rule 10).
-            if (batch.refusedSource) {
-              salesErrors.push(`${rep.identity_id}: source "${batch.refusedSource}" may not be stored under its licence`);
-            }
-            // Provisional prices held back until the vendor settles them. Worth
-            // counting: a run that stores far fewer rows than it fetched should
-            // be explainable from the response, not a mystery.
-            salesUnconfirmed += batch.unconfirmed;
-            if (batch.rows.length) {
-              const { error } = await svc!.from("card_market_sales")
-                .upsert(batch.rows, { onConflict: "identity_id,source,external_id", ignoreDuplicates: true });
-              // This write IS the shared history. Swallowing its error is how a
-              // broken conflict target (42P10) hid behind a run that reported
-              // success while accumulating nothing, forever (rule 1).
-              if (error) salesErrors.push(`${rep.identity_id}: ${error.message}`);
-              else salesStored += batch.rows.length;
-            }
+        const r = await a.fetchSales(rep, { allGrades: true, limit: SALES_LIMIT });
+        if (!r.ok) continue;
+        cleanSources.push(a.id);
+        salesBySource.push({ source: a.id, sales: r.sales });
+        // A capped read must say it was capped, or it reads as the whole market.
+        if (r.truncated) salesTruncated.push(`${a.id}:${rep.identity_id ?? rep.id}`);
+
+        // Accumulate against the shared IDENTITY so every owner benefits from
+        // this one fetch. A card too sparse to fingerprint has no identity and
+        // isn't accumulated — there's nothing stable to attach history to.
+        if (keepHistory && r.sales.length && rep.identity_id) {
+          const batch = salesToRows(rep.identity_id, rep.id, r.sales, a.id);
+          // A source whose licence forbids storage is a configuration fault,
+          // not a quiet no-op — an empty batch would otherwise read exactly
+          // like "the vendor had no sales for this card" (rule 10).
+          if (batch.refusedSource) {
+            salesErrors.push(`${rep.identity_id}: source "${batch.refusedSource}" may not be stored under its licence`);
           }
-          if (rep.identity_id) {
-            await svc!.from("card_identities").update({ last_refreshed_at: now }).eq("id", rep.identity_id);
+          // Provisional prices held back until the source settles them. Worth
+          // counting: a run that stores far fewer rows than it fetched should
+          // be explainable from the response, not a mystery.
+          salesUnconfirmed += batch.unconfirmed;
+          if (batch.rows.length) {
+            const { error } = await svc!.from("card_market_sales")
+              .upsert(batch.rows, { onConflict: "identity_id,source,external_id", ignoreDuplicates: true });
+            // This write IS the shared history. Swallowing its error is how a
+            // broken conflict target (42P10) hid behind a run that reported
+            // success while accumulating nothing, forever (rule 1).
+            if (error) salesErrors.push(`${rep.identity_id}: ${error.message}`);
+            else salesStored += batch.rows.length;
           }
         }
-      } catch { /* transient */ }
+      } catch { /* transient — one source failing must not stop the others */ }
     }
-    return { quotes, sales, cleanSources };
+
+    if (salesBySource.length && rep.identity_id) {
+      await svc!.from("card_identities").update({ last_refreshed_at: now }).eq("id", rep.identity_id);
+    }
+    return { quotes, salesBySource, cleanSources };
   }
 
   async function applyToCard(card: CardRow, f: Fetched) {
-    // Same sales, this card's condition.
-    const fresh = [...f.quotes, ...distillSales(f.sales, card)];
+    // Same sales, this card's condition — one quote per source, kept separate
+    // so a disagreement between sources stays visible instead of averaged away.
+    const fresh = [...f.quotes, ...distillBySource(f.salesBySource, card)];
     // Replace only the sources that ran cleanly (a 0-quote clean run clears stale).
     if (f.cleanSources.length) {
       await svc!.from("card_source_quotes").delete().eq("card_id", card.id).in("source", f.cleanSources);
@@ -240,6 +257,9 @@ export async function GET(req: Request) {
     // Fetched but deliberately not stored, so a short run is explainable rather
     // than looking like data loss.
     ...(salesUnconfirmed ? { sales_unconfirmed: salesUnconfirmed } : {}),
+    ...(salesTruncated.length
+      ? { sales_truncated: salesTruncated.length, sales_truncated_sample: salesTruncated.slice(0, 5) }
+      : {}),
     ...(salesErrors.length
       ? { sales_failed: salesErrors.length, sales_errors: salesErrors.slice(0, 5) }
       : {}),

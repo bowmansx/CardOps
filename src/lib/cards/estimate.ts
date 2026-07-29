@@ -2,7 +2,7 @@
 // /api/cards/estimate route composes: what comparable searches to run, and how to
 // summarize a pile of sales into compact stats for the AI prompt + the UI. No I/O.
 import type { CardForPricing } from "./price-sources/types";
-import type { CardApiSale } from "./price-sources/thecardapi";
+import type { ObservedSale } from "./observed-sale";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -20,12 +20,28 @@ export type SalesStats = {
 };
 
 // Realized comps we already have on file (card_comps) → the same sale shape, so the
-// estimate isn't blind when the live 3-day Card API window is empty.
+// estimate isn't blind when the live Card API window is empty.
 export type CompRow = { sale_price: number | string | null; sale_date: string | null; grader: string | null; grade: number | string | null; source: string | null; listing_url?: string | null };
-export function compsAsSales(rows: CompRow[]): CardApiSale[] {
-  return rows.map((r) => ({
-    price: r.sale_price, sold_at: r.sale_date, sale_date: r.sale_date,
-    grader: r.grader, grade: r.grade, platform: r.source ?? "comp", title: null, listing_url: r.listing_url ?? null,
+export function compsAsSales(rows: CompRow[]): ObservedSale[] {
+  return rows.map((r, i) => ({
+    externalId: `comp:${r.sale_date ?? "x"}:${Number(r.sale_price)}:${i}`,
+    price: Number(r.sale_price),
+    currency: "USD",
+    // A comp is a person's own record of what a card sold for, taken at face
+    // value — there is no vendor convention to interpret, so "what was paid" is
+    // the only reading. Stated rather than defaulted: if comps ever start
+    // arriving from an auction feed, this is the line that has to change.
+    priceBasis: "all_in",
+    soldAt: r.sale_date,
+    platform: r.source ?? "comp",
+    title: null,
+    url: r.listing_url ?? null,
+    grader: r.grader,
+    grade: r.grade == null ? null : Number(r.grade),
+    // Nobody recorded graded-vs-raw separately, and the grader field is the only
+    // hint — which is exactly the inference the distill treats as a fallback.
+    isGraded: null,
+    confirmed: true,
   }));
 }
 
@@ -44,9 +60,9 @@ export function medianOf(nums: number[]): number | null {
   return round2(xs.length % 2 ? xs[m] : (xs[m - 1] + xs[m]) / 2);
 }
 
-export function summarizeSales(sales: CardApiSale[]): SalesStats {
+export function summarizeSales(sales: ObservedSale[]): SalesStats {
   const priced = sales
-    .map((s) => ({ ...s, p: Number(s.price), d: String(s.sold_at ?? s.sale_date ?? "") }))
+    .map((s) => ({ ...s, p: Number(s.price), d: String(s.soldAt ?? "") }))
     .filter((s) => Number.isFinite(s.p) && s.p > 0);
   if (!priced.length) return { count: 0, median: null, mean: null, min: null, max: null, newest_date: null, oldest_date: null, span_days: null, sample: [] };
 

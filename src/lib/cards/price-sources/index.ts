@@ -2,6 +2,7 @@ import { pricecharting } from "./pricecharting";
 import { scryfall } from "./scryfall";
 import { thecardapi } from "./thecardapi";
 import type { CardForPricing, PriceSourceAdapter, SourceRights } from "./types";
+import type { PriceBasis } from "../price-basis";
 
 // The registry, in display order. Add a new vendor by dropping an adapter file
 // here — the refresh route and the card page pick it up automatically.
@@ -40,6 +41,18 @@ export function sourceRights(id: string): SourceRights | null {
  */
 export function mayPersist(id: string): boolean {
   return sourceRights(id)?.persist ?? false;
+}
+
+/**
+ * How the source that fetched a row reports that venue's prices.
+ *
+ * Lets a row already in `card_market_sales` be normalized without a global
+ * platform table — which would be wrong for whichever vendor reports the same
+ * auction house differently. Unknown source or a source with no sales resolves
+ * to "unknown", so the row is excluded from medians rather than assumed.
+ */
+export function basisForSource(sourceId: string, platform: string | null): PriceBasis {
+  return ADAPTERS.find((a) => a.id === sourceId)?.salesBasis?.(platform) ?? "unknown";
 }
 
 export type SourceAvailability = { id: string; label: string; enabled: boolean; handles: boolean };
