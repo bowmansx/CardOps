@@ -30,6 +30,19 @@
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
+ * One band of a tiered percentage. `upTo: null` is the top band.
+ *
+ * Tiers are not a nicety. eBay's trading-card rate is 13.25% up to $7,500 and
+ * 2.35% on the portion above — so a flat 13.25% on a $10,000 slab computes
+ * $1,325 where the truth is $1,052.50. A $272 error, on exactly the cards where
+ * the number matters most.
+ */
+export type FeeTier = { upTo: number | null; pct: number };
+
+/** Per-order fee bands, by ORDER TOTAL. `upTo: null` is the top band. */
+export type PerOrderTier = { upTo: number | null; amount: number };
+
+/**
  * A platform's published fee structure.
  *
  * `verifiedAt` is nullable and load-bearing: a schedule nobody has checked
@@ -38,10 +51,21 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  */
 export type FeeSchedule = {
   platform: string;
-  /** Share of the feeable amount, as a fraction (0.1325 = 13.25%). */
-  pct: number;
-  /** Fixed amount charged once PER ORDER. */
-  perOrder: number;
+  /**
+   * Percentage bands applied to the feeable amount.
+   *
+   * eBay's card threshold is stated "calculated per item", so these apply to one
+   * card's own feeable total rather than the whole order's.
+   */
+  tiers: FeeTier[];
+  /**
+   * Fixed fee charged once PER ORDER, banded by order total.
+   *
+   * eBay: "For orders $10.00 or less the per order fee is $0.30, for orders over
+   * $10.00 the per order fee is $0.40." A flat $0.40 overstates the fee on every
+   * sub-$10 card, which is most of a real collection by count.
+   */
+  perOrderTiers: PerOrderTier[];
   /**
    * Does the percentage apply to the shipping the buyer paid?
    *
@@ -50,11 +74,53 @@ export type FeeSchedule = {
    * understates the fee on every low-value card, which is most of them.
    */
   pctAppliesToShipping: boolean;
+  /**
+   * Does the platform charge its percentage on SALES TAX it collected?
+   *
+   * eBay does, in as many words: the total amount of the sale "includes the item
+   * price, any handling charges, any shipping costs collected from the buyer,
+   * sales tax, and any other applicable fees." Almost nothing models this, and
+   * it makes the real fee meaningfully higher than price + shipping implies.
+   */
+  pctAppliesToSalesTax: boolean;
   /** Where the numbers came from. Required — an uncited rate is not usable. */
   source: string;
   /** ISO date the rate was last confirmed against the source, or null. */
   verifiedAt: string | null;
 };
+
+/** The percentage fee on a feeable amount, walking the bands. */
+export function tieredPct(feeable: number, tiers: FeeTier[]): number {
+  let fee = 0;
+  let floor = 0;
+  for (const t of tiers) {
+    const ceil = t.upTo ?? Infinity;
+    if (feeable <= floor) break;
+    fee += (Math.min(feeable, ceil) - floor) * t.pct;
+    floor = ceil;
+  }
+  return fee;
+}
+
+/** The per-order fee for an order of this total. */
+export function perOrderFee(orderTotal: number, tiers: PerOrderTier[]): number {
+  for (const t of tiers) if (orderTotal <= (t.upTo ?? Infinity)) return t.amount;
+  return tiers.length ? tiers[tiers.length - 1].amount : 0;
+}
+
+/** Which band a feeable amount falls in — the marginal rate and its floor. */
+function bandFor(feeable: number, tiers: FeeTier[]): { pct: number; floor: number; feeBelow: number } {
+  let floor = 0;
+  let feeBelow = 0;
+  for (const t of tiers) {
+    const ceil = t.upTo ?? Infinity;
+    if (feeable <= ceil) return { pct: t.pct, floor, feeBelow };
+    feeBelow += (ceil - floor) * t.pct;
+    floor = ceil;
+  }
+  const last = tiers[tiers.length - 1];
+  return { pct: last?.pct ?? 0, floor, feeBelow };
+}
 
 /**
  * Schedules, ADOPTED FROM THE EXISTING APP PRESETS.
