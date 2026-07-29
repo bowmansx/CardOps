@@ -2,10 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Camera, Loader2, CheckCircle2, ScanLine, RotateCcw, AlertTriangle } from "lucide-react";
+import { Camera, Loader2, ScanLine, RotateCcw, AlertTriangle } from "lucide-react";
 import { SPORT_CATEGORIES, ZONES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
 import { commitIntakeCard, recordCardPhotos, type IntakeInput } from "@/app/cards/intake/actions";
 import { CameraSheet } from "./CameraSheet";
+import { IntakeSessionList } from "./IntakeSessionList";
+import {
+  addToSession, removeFromSession, sessionLabel, type SessionCard,
+} from "@/lib/cards/intake-session";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
 import { uploadCardPhotos, type PhotoShot } from "@/lib/cards/upload";
 import { createClient } from "@/lib/supabase/client";
@@ -41,7 +45,11 @@ export function FullIntake({
   const [frontOriginal, setFrontOriginal] = useState<string | null>(null);
   const [backOriginal, setBackOriginal] = useState<string | null>(null);
   const [f, setF] = useState<Fields>({});
-  const [savedCount, setSavedCount] = useState(0);
+  // The cards booked in this sitting. Intake used to keep only a COUNT, so the
+  // card you had just done vanished the moment it succeeded - a typo noticed
+  // two cards later meant leaving intake to go and find it.
+  const [session, setSession] = useState<SessionCard[]>([]);
+  const savedCount = session.length;
   // A card that IS booked but whose photos didn't attach. Holding this is what
   // turns a dead end into a retry: the images stay in state and the retry
   // targets the existing card instead of booking another one.
@@ -98,7 +106,11 @@ export function FullIntake({
         vision_confidence: f.confidences ? { ...f.confidences, overall: f.overall_confidence } : undefined,
       });
       if (!res.ok || !res.id) { setErr(res.error ?? "Save failed."); return; }
-      bookedId = res.id;
+      // Bound once: the narrowing above does not survive into the setState
+      // callbacks below, which are closures.
+      const cardId: string = res.id;
+      const cardSku: string | null = res.sku ?? null;
+      bookedId = cardId;
 
       // STEP 2 - the browser puts the bytes straight into storage, inside the
       // user's own folder, which is the boundary card_photo_visible() already
@@ -130,11 +142,19 @@ export function FullIntake({
         // targets the card that already exists instead of booking a new one.
         setPendingPhotos({ cardId: res.id, label: cardTitle(f) });
         setErr(`Card booked, but its photos didn't attach: ${problems.join(" \u00b7 ")}`);
-        setSavedCount((n) => n + 1);
+        // Recorded as photos-MISSING, so the session list can say so rather
+        // than showing it as complete alongside the others.
+        setSession((l) => addToSession(l, {
+          id: cardId, sku: cardSku, label: sessionLabel(f) ?? "",
+          thumb: front, at: Date.now(), photosAttached: false,
+        }));
         return; // deliberately NOT reset() - the images are the only copy
       }
 
-      setSavedCount((n) => n + 1);
+      setSession((l) => addToSession(l, {
+        id: cardId, sku: cardSku, label: sessionLabel(f) ?? "",
+        thumb: front, at: Date.now(), photosAttached: true,
+      }));
       reset();
     } catch (e) {
       // A server action can REJECT - expired session, dropped connection, a
@@ -149,7 +169,10 @@ export function FullIntake({
           (e instanceof Error && e.message ? ` (${e.message})` : "") +
           ". Tap Retry photos - do not tap Book card again, that would create a second card.",
         );
-        setSavedCount((n) => n + 1);
+        setSession((l) => addToSession(l, {
+          id: bookedId as string, sku: null, label: sessionLabel(f) ?? "",
+          thumb: front, at: Date.now(), photosAttached: false,
+        }));
       } else {
         setErr(
           (e instanceof Error && e.message ? e.message + " - " : "") +
@@ -203,6 +226,8 @@ export function FullIntake({
         else if (rec.warning) problems.push(rec.warning);
       }
       if (problems.length) { setErr(`Still couldn't attach the photos: ${problems.join(" \u00b7 ")}`); return; }
+      // It worked - the card is no longer missing its evidence.
+      setSession((l) => l.map((c) => (c.id === pending.cardId ? { ...c, photosAttached: true } : c)));
       setPendingPhotos(null);
       reset();
     } catch (e) {
@@ -210,6 +235,41 @@ export function FullIntake({
     } finally {
       setBusy(null);
     }
+  }
+
+  /**
+   * Take a card back out of inventory.
+   *
+   * ARCHIVES, never deletes. The row already exists and may already have photos
+   * in storage; CLAUDE.md makes archiving the sanctioned path and card_ops
+   * cannot delete at all. Goes through /api/cards/bulk so the change is
+   * allowlisted and audited like every other status move.
+   */
+  async function archiveCard(id: string) {
+    setErr(null);
+    try {
+      const r = await fetch("/api/cards/bulk", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: [id], patch: { status: "archived" } }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.updated) {
+        setErr(d?.error ?? "Couldn't archive that card - it is still in your inventory.");
+        return;
+      }
+      setSession((l) => removeFromSession(l, id));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't archive that card.");
+    }
+  }
+
+  /** Reopen the camera for a card that is already booked. */
+  function rephotograph(c: SessionCard) {
+    setPendingPhotos({ cardId: c.id, label: c.label || "this card" });
+    setFront(null); setBack(null); setFrontOriginal(null); setBackOriginal(null);
+    setStep("capture");
+    setErr(null);
+    setCam("front");
   }
 
   function reset() {
@@ -228,9 +288,7 @@ export function FullIntake({
   return (
     <div className="mt-5 space-y-4">
       {savedCount > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-pos/30 bg-pos/5 px-3 py-2 text-sm text-pos">
-          <CheckCircle2 size={16} /> {savedCount} card{savedCount === 1 ? "" : "s"} booked this session.
-        </div>
+        <IntakeSessionList cards={session} onRemove={archiveCard} onAddPhotos={rephotograph} />
       )}
 
       {step === "capture" && (

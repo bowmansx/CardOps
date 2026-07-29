@@ -7,7 +7,7 @@ Five times in two days a request turned out to be for something already built.
 A hand-written list would go stale and then lie; this one walks the repo, so
 what it says exists, exists.
 
-*Last generated from the working tree. Counts: 55 tables, 36 pages, 53 API routes, 44 card modules.*
+*Last generated from the working tree. Counts: 55 tables, 36 pages, 53 API routes, 45 card modules.*
 
 ---
 
@@ -35,7 +35,6 @@ array, which inflates the count for tables that are genuinely dead.
 | `card_flag_events` | 3 |
 | `card_grading_submissions` | 3 |
 | `card_import_batches` | 4 |
-| `card_intake_sessions` | 4 |
 | `card_documents` | 8 |
 | `purchase_lot_adjustments` | 13 |
 | `card_pool_adjustments` | 25 |
@@ -257,6 +256,12 @@ Does: `getConnector`, `connectorOptions`
 The registry, in display order. Add a new vendor by dropping an adapter file
 
 Does: `runnableAdapters`, `sourceAvailability`
+
+### `intake-session`
+
+The cards booked in THIS sitting — what you just did, still on screen.
+
+Does: `addToSession`, `removeFromSession`, `sessionLabel`, `sessionSummary`, `sessionPace`
 
 ### `ledger`
 
