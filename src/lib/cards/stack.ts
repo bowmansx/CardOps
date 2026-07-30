@@ -173,6 +173,104 @@ export function stackFrames(frames: StackFrame[], w: number, h: number): StackRe
 }
 
 /**
+ * THE SAME SWEEP, RUN BACKWARDS: keep the specular pixel instead of rejecting it.
+ *
+ * Beau: "could it automatically take those scans and create different final
+ * photos?" This is the second one, and it is the more valuable of the two for
+ * grading.
+ *
+ * Flat, even light is what you want for a LISTING photo — it shows the artwork
+ * and hides the surface. Raking light is the opposite: a reflection skimming
+ * across a card is what makes a scratch, a print line, a crease or a dinged
+ * corner visible at all, because those are surface-normal defects and only show
+ * when the light glances off them. Graders tilt a card under a lamp for exactly
+ * this reason.
+ *
+ * A sweep already collects every angle. Taking the MOST specular sample at each
+ * position composites the raking view from all of them at once — a surface map no
+ * single frame contains, from capture the user already performed.
+ *
+ * Not a photo of the card as it looks. A photo of its surface, and it should be
+ * labelled that way wherever it appears.
+ */
+export function stackSurface(frames: StackFrame[], w: number, h: number): StackResult | null {
+  if (!frames.length || w < 1 || h < 1) return null;
+  const px = w * h;
+  if (frames.some((f) => f.data.length < px * 4)) return null;
+
+  // No photometric normalisation here, deliberately, and it is the opposite
+  // choice from `stackFrames`. There, gain correction stops a merely-dark frame
+  // winning everywhere. Here we are hunting the brightest specular response, and
+  // scaling frames toward a common median would flatten precisely the differences
+  // that reveal the surface.
+  const out = new Uint8ClampedArray(px * 4);
+  const used = new Set<number>();
+  let uncovered = 0, depthSum = 0, valid = 0, lit = 0;
+
+  for (let p = 0; p < px; p++) {
+    const o = p * 4;
+    let bestF = -1, bestScore = -Infinity, depth = 0;
+    for (let f = 0; f < frames.length; f++) {
+      const d = frames[f].data;
+      if (d[o + 3] === 0) continue;
+      depth++;
+      const score = Math.min(d[o], d[o + 1], d[o + 2]);
+      if (score > bestScore) { bestScore = score; bestF = f; }
+    }
+    if (bestF < 0) { uncovered++; continue; }
+    valid++;
+    depthSum += depth;
+    used.add(bestF);
+    const d = frames[bestF].data;
+    out[o] = d[o]; out[o + 1] = d[o + 1]; out[o + 2] = d[o + 2]; out[o + 3] = 255;
+    if (bestScore >= SPECULAR) lit++;
+  }
+
+  const denom = valid || 1;
+  return {
+    data: out,
+    report: {
+      w, h,
+      framesUsed: used.size,
+      // Reused with the OPPOSITE meaning, and named in the docs rather than
+      // silently: here a high figure means the sweep raked plenty of light across
+      // the card, which is what makes a surface map useful.
+      unresolved: lit / denom,
+      improved: lit / denom,
+      uncovered: uncovered / px,
+      meanDepth: depthSum / denom,
+    },
+  };
+}
+
+/**
+ * Is a surface map worth showing?
+ *
+ * It needs light to have actually swept ACROSS the card. A sweep performed in
+ * flat, even light produces a surface map identical to the ordinary photo — no
+ * raking reflection ever landed anywhere — and presenting that as a defect view
+ * invites someone to conclude a card is clean when nothing was ever illuminated
+ * at a revealing angle.
+ */
+export function surfaceWorthKeeping(r: StackReport, { minLit = 0.02 } = {}): boolean {
+  return r.meanDepth >= 2 && r.unresolved >= minLit && r.uncovered < 0.02;
+}
+
+/** What to tell the user about a surface map. Null when it is usable as-is. */
+export function surfaceAdvice(r: StackReport): string | null {
+  if (r.uncovered > 0.02) {
+    return `${pct(r.uncovered)} of the card wasn't in every shot, so part of the surface wasn't mapped.`;
+  }
+  if (r.meanDepth < 2) return "A surface map needs several angles — one shot can't rake light across the card.";
+  if (r.unresolved < 0.02) {
+    // The trap this exists to close: a flat-light sweep yields a surface map that
+    // looks clean because nothing was ever lit at a revealing angle.
+    return "No light raked across the card during that sweep, so this shows no more than the ordinary photo. Tilt it toward a lamp and sweep again — scratches only show when light glances off them.";
+  }
+  return null;
+}
+
+/**
  * Is the stacked result actually better than the single best frame?
  *
  * Worth asking explicitly. A sweep where the phone barely moved yields a

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { stackFrames, stackWorthKeeping, stackAdvice, clippedFraction, type StackFrame } from "@/lib/cards/stack";
+import {
+  stackFrames, stackSurface, stackWorthKeeping, stackAdvice,
+  surfaceWorthKeeping, surfaceAdvice, clippedFraction, type StackFrame,
+} from "@/lib/cards/stack";
 
 const W = 20, H = 20;
 
@@ -214,5 +217,89 @@ describe("clippedFraction", () => {
 
   it("returns null when there is nothing to measure", () => {
     expect(clippedFraction(new Uint8ClampedArray(W * H * 4), W, H, { x: 0, y: 0, w: 0, h: 0 })).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE SAME SWEEP RUN BACKWARDS. Flat light shows the artwork and hides the
+// surface; raking light is what makes a scratch visible at all. Graders tilt a
+// card under a lamp for exactly this reason.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("stackSurface", () => {
+  it("keeps the specular sample, compositing the raking view from every angle", () => {
+    const RED: [number, number, number] = [180, 40, 40];
+    const out = stackSurface([
+      frame(RED, { x: 4, y: 10, r: 3 }),
+      frame(RED, { x: 10, y: 10, r: 3 }),
+      frame(RED, { x: 16, y: 10, r: 3 }),
+    ], W, H)!;
+    // Every position a highlight passed over now shows it, in one image no
+    // single frame contained.
+    for (const x of [4, 10, 16]) {
+      const [r, g, b] = at(out.data, x, 10);
+      expect(Math.min(r, g, b)).toBeGreaterThan(200);
+    }
+    // Untouched artwork stays diffuse.
+    const [r] = at(out.data, 10, 2);
+    expect(r).toBeGreaterThan(150);
+    expect(at(out.data, 10, 2)[1]).toBeLessThan(80);
+  });
+
+  it("is the exact complement of the glare-free composite", () => {
+    const RED: [number, number, number] = [180, 40, 40];
+    const frames = [frame(RED, { x: 5, y: 10, r: 3 }), frame(RED, { x: 15, y: 10, r: 3 })];
+    const clean = stackFrames(frames, W, H)!;
+    const surface = stackSurface(frames, W, H)!;
+    // Same pixel: one rejected the highlight, the other sought it.
+    expect(Math.min(...at(clean.data, 5, 10))).toBeLessThan(80);
+    expect(Math.min(...at(surface.data, 5, 10))).toBeGreaterThan(200);
+  });
+
+  it("respects validity rather than reading an uncovered pixel as lit", () => {
+    const RED: [number, number, number] = [180, 40, 40];
+    const a = frame(RED, undefined, { invalid: (x) => x < 5 });
+    const b = frame(RED, undefined, { invalid: (x) => x < 5 });
+    const out = stackSurface([a, b], W, H)!;
+    expect(out.report.uncovered).toBeCloseTo(5 / W, 2);
+  });
+
+  it("refuses junk input", () => {
+    expect(stackSurface([], W, H)).toBeNull();
+    expect(stackSurface([{ data: new Uint8ClampedArray(16) }], W, H)).toBeNull();
+  });
+});
+
+describe("surfaceWorthKeeping / surfaceAdvice", () => {
+  // THE TRAP THIS CLOSES. A sweep in flat, even light produces a surface map
+  // identical to the ordinary photo — no raking reflection ever landed — and
+  // showing it as a defect view invites someone to conclude a card is clean when
+  // nothing was ever lit at a revealing angle.
+  it("refuses a flat-light sweep and says why", () => {
+    const RED: [number, number, number] = [180, 40, 40];
+    const out = stackSurface([frame(RED), frame(RED), frame(RED)], W, H)!;
+    expect(out.report.unresolved).toBe(0);
+    expect(surfaceWorthKeeping(out.report)).toBe(false);
+    const advice = surfaceAdvice(out.report)!;
+    expect(advice).toContain("No light raked across");
+    expect(advice).toContain("scratches only show");
+  });
+
+  it("keeps a sweep where light genuinely raked across the card", () => {
+    const RED: [number, number, number] = [180, 40, 40];
+    const out = stackSurface([
+      frame(RED, { x: 4, y: 10, r: 4 }),
+      frame(RED, { x: 10, y: 10, r: 4 }),
+      frame(RED, { x: 16, y: 10, r: 4 }),
+    ], W, H)!;
+    expect(surfaceWorthKeeping(out.report)).toBe(true);
+    expect(surfaceAdvice(out.report)).toBeNull();
+  });
+
+  it("needs more than one angle", () => {
+    const RED: [number, number, number] = [180, 40, 40];
+    const out = stackSurface([frame(RED, { x: 10, y: 10, r: 5 })], W, H)!;
+    expect(surfaceWorthKeeping(out.report)).toBe(false);
+    expect(surfaceAdvice(out.report)).toContain("several angles");
   });
 });
