@@ -156,6 +156,10 @@ export function CameraSheet({
   // The live edge read. Null means "no card found" and the overlay shows
   // nothing at all — a wrong outline is worse than no outline.
   const [det, setDet] = useState<Detection | null>(null);
+  // Mirrored into a ref so the auto-snap interval can read the CURRENT detection
+  // without listing `det` as a dependency — which would tear down and rebuild
+  // that interval several times a second.
+  const detRef = useRef<Detection | null>(null);
   const [detSize, setDetSize] = useState<{ w: number; h: number; src: Rect } | null>(null);
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null);
   const histRef = useRef<{ sharp: number; delta: number }[]>([]);
@@ -163,6 +167,21 @@ export function CameraSheet({
   // Read inside the auto-snap interval, which closes over its first render.
   const guideRef = useRef(true);
   const cooldownRef = useRef(0); // don't re-fire on the same card
+  /**
+   * After an automatic shot, wait for the card to actually CHANGE before firing
+   * again.
+   *
+   * The 1200ms cooldown was never enough to mean "don't re-fire on the same
+   * card", which is what it was for: a card left in frame re-locks in about a
+   * second and the session fills with duplicates of it. That was a footgun while
+   * auto-snap was opt-in; making it the default (2026-07-29) would have made it
+   * the normal experience of leaving a card on the desk.
+   *
+   * Cleared when the detector loses the card, or when the scene moves enough to
+   * be a different one. TIME is the wrong axis here — "has the subject changed"
+   * is the actual question.
+   */
+  const awaitingNewCardRef = useRef(false);
   const [menu, setMenu] = useState(false);
   // A rolling window of how much of the frame is blown out, and how the
   // exposure is drifting. Whether Beau's glare could EVER be swept around is a
@@ -510,6 +529,10 @@ export function CameraSheet({
       const best = pickSharpest(frames);
       shoot(true, best?.sharp ?? null);
       cooldownRef.current = Date.now() + 1200; // let the next card come into frame
+      // ...and don't fire again until it IS a next card. Only for batch runs: a
+      // template advances to a different shot of its own accord, and requiring
+      // the card to leave between the front and its corners would be absurd.
+      if (multi && !session) awaitingNewCardRef.current = true;
       histRef.current = [];
     } finally {
       busyRef.current = false;
@@ -599,6 +622,7 @@ export function CameraSheet({
       const fov = (2 * Math.atan(Math.tan((65 * Math.PI) / 360) * Math.max(0.05, cover)) * 180) / Math.PI;
       const d = detectCard(p.gray, p.w, p.h, { fovDegrees: fov });
       setDet(d);
+      detRef.current = d;
       setDetSize({ w: p.w, h: p.h, src: p.src });
 
       // Measured over the CARD when we have one, over the whole probe when we
@@ -711,6 +735,18 @@ export function CameraSheet({
       // deliberately well above the noise floor of a hand-held-but-static shot.
       setMoving(p.delta > 6);
       if (hist.length > HISTORY) hist.shift();
+
+      // The card has to leave, or the scene has to change substantially, before
+      // another automatic shot. A big delta means the card was picked up or
+      // swapped; losing detection means it left the frame.
+      if (awaitingNewCardRef.current) {
+        if (p.delta > 18 || !detRef.current) {
+          awaitingNewCardRef.current = false;
+          histRef.current = [];
+        }
+        setLocked(false);
+        return;
+      }
       // Sharp and still is not enough when the template asked for a specific
       // framing — firing early gets a perfectly exposed photo of the wrong
       // distance, which is exactly what a template exists to prevent.
