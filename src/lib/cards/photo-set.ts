@@ -22,7 +22,42 @@ export type PhotoRow = {
   derived_from: string | null;
   bucket: string;
   path: string;
+  /**
+   * `card_photos.capture_meta` — what the camera recorded about this shot.
+   *
+   * Read here for one reason: a SWEEP composite is not an ordinary photo, and
+   * one of the two kinds must never be published. See `stackedKind`.
+   */
+  capture_meta?: unknown;
 };
+
+/** What a sweep produced, or null for an ordinary single-exposure photo. */
+export type StackedKind = "clean" | "surface";
+
+/**
+ * Was this photo merged from a sweep, and which of the two is it?
+ *
+ * A `surface` image is DELIBERATELY RAKED — light skimming across the card to
+ * make scratches, print lines and creases visible. That is exactly what a grader
+ * wants and exactly what a buyer must never be shown: it looks like a damaged
+ * card to anyone who does not know what they are looking at.
+ *
+ * Read from the stored metadata rather than from the role, because the role comes
+ * from the template slot the shot was taken in — sweep on a "front" slot and both
+ * composites inherit `front`. The metadata is the only thing that knows which is
+ * which, and it is written at capture time by the camera.
+ */
+export function stackedKind(row: Pick<PhotoRow, "capture_meta">): StackedKind | null {
+  const m = row.capture_meta;
+  if (!m || typeof m !== "object") return null;
+  const s = (m as { stacked?: { kind?: unknown } }).stacked;
+  if (!s || typeof s !== "object") return null;
+  return s.kind === "surface" ? "surface" : s.kind === "clean" ? "clean" : null;
+}
+
+/** Is this an image that must not go out on a listing? */
+const isSurfaceView = (p: PhotoRow) =>
+  stackedKind(p) === "surface" || (p.role || p.kind) === "surface_angle";
 
 /** Presentation order: the whole card first, then the close detail. */
 const ROLE_RANK: Record<string, number> = {
@@ -67,7 +102,11 @@ export function displayPhotos(rows: PhotoRow[] | null | undefined): PhotoRow[] {
  * that would make a listing worse than having no detail shots at all.
  */
 export function listingPhotos(rows: PhotoRow[] | null | undefined, cap = 12): { photos: PhotoRow[]; truncated: boolean } {
-  const ordered = displayPhotos(rows);
+  // SURFACE VIEWS ARE EXCLUDED, and this is the one filter here that is about
+  // harm rather than about ordering. A raking-light image exists to make every
+  // scratch and print line as visible as possible; published as a product photo
+  // it advertises a card as damaged. Grading wants it, a buyer must not see it.
+  const ordered = displayPhotos(rows).filter((p) => !isSurfaceView(p));
   return { photos: ordered.slice(0, cap), truncated: ordered.length > cap };
 }
 
@@ -93,6 +132,27 @@ export function gradingPhotos(
     missing: WANT.filter((w) => !have.has(w)),
     truncated: ordered.length > cap,
   };
+}
+
+/**
+ * The caption for one photo, role plus how it was made.
+ *
+ * A grader shown a raking-light composite without being told what it is will
+ * read every highlight as a defect, which is the opposite of useful — it exists
+ * to reveal defects, so it makes a mint card look scuffed. And a glare-removed
+ * composite deserves saying too: it is merged from several exposures, not a
+ * single photograph, and that is relevant to anyone judging surface from it.
+ */
+export function photoCaption(row: PhotoRow): string {
+  const base = roleCaption((row.role || row.kind || "other") as string);
+  switch (stackedKind(row)) {
+    case "surface":
+      return `${base} — SURFACE MAP: merged from several angles with light deliberately raking across the card, so gloss, scratches and print lines show. Highlights here are the lighting doing its job, not necessarily damage.`;
+    case "clean":
+      return `${base} — merged from several angles to remove glare.`;
+    default:
+      return base;
+  }
 }
 
 /** Human label for a role, used to caption each image for the model. */

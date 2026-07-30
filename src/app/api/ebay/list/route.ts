@@ -98,7 +98,10 @@ export async function POST(request: Request) {
   // filled with corner close-ups before ever reaching the back of the card.
   const { data: photoRows, error: photoErr } = await supabase
     .from("card_photos")
-    .select("id, kind, role, variant, derived_from, bucket, path")
+    // capture_meta is what lets listingPhotos exclude a SURFACE MAP. Without
+    // the column the filter silently passes everything, and a raking-light image
+    // advertising every scratch goes out as a product photo.
+    .select("id, kind, role, variant, derived_from, bucket, path, capture_meta")
     .eq("card_id", card.id)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });

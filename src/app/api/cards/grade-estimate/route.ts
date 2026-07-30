@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { gradingPhotos, roleCaption, type PhotoRow } from "@/lib/cards/photo-set";
+import { gradingPhotos, photoCaption, type PhotoRow } from "@/lib/cards/photo-set";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { anthropic, MODEL } from "@/lib/anthropic";
@@ -97,7 +97,10 @@ export async function POST(request: Request) {
   // photographed from twelve angles was graded from two.
   const { data: photoRows, error: photoErr } = await supabase
     .from("card_photos")
-    .select("id, kind, role, variant, derived_from, bucket, path")
+    // capture_meta carries whether a shot is a SWEEP COMPOSITE. A raking-light
+    // surface map read as an ordinary photo makes a mint card look scuffed —
+    // every highlight is the lighting doing its job. photoCaption says so.
+    .select("id, kind, role, variant, derived_from, bucket, path, capture_meta")
     .eq("card_id", card.id)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
@@ -112,8 +115,8 @@ export async function POST(request: Request) {
   // silently treated as a view the card does not have.
   const loaded = (await Promise.all(set.photos.map(async (p) => {
     const url = await photoDataUrl(supabase, p.bucket, p.path);
-    return url ? { role: (p.role || p.kind || "other") as string, url } : null;
-  }))).filter(Boolean) as { role: string; url: string }[];
+    return url ? { role: (p.role || p.kind || "other") as string, caption: photoCaption(p), url } : null;
+  }))).filter(Boolean) as { role: string; caption: string; url: string }[];
   const unreadable = set.photos.length - loaded.length;
   if (!loaded.some((l) => l.role === "front")) {
     return NextResponse.json({ error: "Couldn't load the front photo." }, { status: 500 });
@@ -142,7 +145,7 @@ export async function POST(request: Request) {
           // Each image is captioned with WHICH view it is, so a corner
           // close-up is read as a corner rather than as a blurry whole card.
           ...loaded.flatMap((l) => [
-            { type: "text" as const, text: `${roleCaption(l.role)}:` },
+            { type: "text" as const, text: `${l.caption}:` },
             block(l.url),
           ]),
           {
