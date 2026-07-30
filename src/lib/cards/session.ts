@@ -34,6 +34,33 @@ export type CapturedShot = {
      */
     px?: { w: number; h: number };
     srcPx?: { w: number; h: number };
+    /**
+     * Present only on a MERGED image — one built from several frames of a sweep
+     * rather than captured in a single exposure.
+     *
+     * Recorded for the same reason `px` is: so the file can be told apart from a
+     * plain photograph later. A composite is derived evidence, and the frames it
+     * came from are discarded by design, so nothing else can establish afterwards
+     * how many angles it rests on or how much glare it failed to clear.
+     *
+     * `kind: "surface"` is the deliberately raked view — a photo of the card's
+     * SURFACE rather than of the card. Wherever it is displayed it has to be
+     * labelled that way, because it looks like a badly-lit photo to anyone who
+     * does not know what they are looking at.
+     */
+    stacked?: {
+      kind: "clean" | "surface";
+      /** Distinct frames that won at least one pixel. */
+      frames: number;
+      /** Mean frames available per pixel — whether there was a real sweep. */
+      meanDepth: number;
+      /** Fraction of the card where every angle still caught glare. */
+      unresolved: number;
+      /** Fraction where stacking actually changed something. */
+      improved: number;
+      /** Fraction no frame covered. */
+      uncovered: number;
+    };
   };
 };
 

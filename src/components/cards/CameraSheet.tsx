@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, X, Loader2, Images, Check, Wand2, PanelLeft, RotateCcw } from "lucide-react";
+import { Camera, X, Loader2, Images, Check, Wand2, PanelLeft, RotateCcw, Layers, Sparkles } from "lucide-react";
 import { SessionMenu, type SessionItem } from "./SessionMenu";
 import type { CapturedShot } from "@/lib/cards/session";
 import { downscale } from "@/lib/cards/img";
@@ -13,6 +13,12 @@ import { detectCard, releaseScratch, type Detection } from "@/lib/cards/edges";
 import { guideToTarget, type TemplateShot } from "@/lib/cards/templates";
 import { clipFraction, globalMedian, readGlare, glareAdvice } from "@/lib/cards/exposure";
 import { QUALITY_SPECS, PHOTO_PREF_DEFAULTS, type PhotoPrefs } from "@/lib/cards/photo-prefs";
+import {
+  EMPTY_CAPTURE, offerFrame, finishSweep, probeQuadToVideo, warpVideoFrame,
+  bufferToDataUrl, type SweepCapture, type SweepOutput,
+} from "@/lib/cards/sweep-frames";
+import { sweepProgress, sweepWideEnough, SWEEP_DEFAULTS, type SweepDecision } from "@/lib/cards/sweep";
+import { stackAdvice, surfaceAdvice } from "@/lib/cards/stack";
 
 // Card-scanner aspect guides (w/h): raw card 2.5"x3.5", PSA-style slab ~3.32"x5.44".
 const GUIDES = { raw: CARD_ASPECT, slab: SLAB_ASPECT } as const;
@@ -164,6 +170,30 @@ export function CameraSheet({
   // assumed. See lib/cards/exposure.
   const glareRef = useRef<{ clip: number; median: number }[]>([]);
   const [glare, setGlare] = useState<ReturnType<typeof readGlare> | null>(null);
+
+  // ── THE SWEEP ─────────────────────────────────────────────────────────────
+  // Beau: "can it collectively map around the glare... then could it
+  // automatically take those scans and create different final photos?"
+  //
+  // Fed from the EXISTING detection loop rather than a second timer. That loop
+  // already computes the quad, the sharpness and the median every tick, and a
+  // phone does not need another interval running while the user waves it around.
+  //
+  // The capture lives in a REF because the detection interval closes over it: a
+  // state value would be stale on every tick after the first, and the sweep would
+  // never accumulate past one frame. `sweepUi` is the render mirror.
+  const sweepRef = useRef<SweepCapture>(EMPTY_CAPTURE);
+  const sweepingRef = useRef(false);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepUi, setSweepUi] = useState<{ kept: number; target: number; hint: string | null; complete: boolean } | null>(null);
+  const [sweepOut, setSweepOut] = useState<SweepOutput | null>(null);
+  // How many keepers the run gathered, kept SEPARATELY from the capture so the
+  // frame buffers can be released the instant they have been composited. They are
+  // eight canonical rects — about 22 MB — and holding them alive just to render a
+  // count is 22 MB pinned for as long as the result panel is open.
+  const [sweepKept, setSweepKept] = useState(0);
+  const [sweepBusy, setSweepBusy] = useState(false);
+  const warpScratchRef = useRef<HTMLCanvasElement | null>(null);
   // Which slot the user has already looked at, so the inspect overlay shows
   // once per visit rather than on every render.
   const [seen, setSeen] = useState<number | null>(null);
@@ -174,6 +204,18 @@ export function CameraSheet({
   // question.
   const cur = session?.items[session.index] ?? null;
   const review = !!(session?.inspect && cur?.taken && seen !== session.index);
+
+  /** Drop everything a finished sweep was holding. */
+  function clearSweep() {
+    sweepRef.current = EMPTY_CAPTURE;
+    setSweepOut(null);
+    setSweepUi(null);
+    // Sized to the full sensor, so on a 4K phone this canvas alone is ~33 MB.
+    // Zeroing it lets the backing store go rather than surviving until the next
+    // sweep that may never come.
+    const c = warpScratchRef.current;
+    if (c) { c.width = 0; c.height = 0; }
+  }
 
   function stop() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -350,6 +392,88 @@ export function CameraSheet({
     });
   }
 
+  function startSweep() {
+    sweepRef.current = EMPTY_CAPTURE;
+    setSweepOut(null);
+    setSweepUi({ kept: 0, target: SWEEP_DEFAULTS.target, hint: null, complete: false });
+    sweepingRef.current = true;
+    setSweeping(true);
+  }
+
+  /** Abandon a run. The frames are dropped — they are the largest thing here. */
+  function cancelSweep() {
+    sweepingRef.current = false;
+    setSweeping(false);
+    sweepRef.current = EMPTY_CAPTURE;
+    setSweepUi(null);
+  }
+
+  /**
+   * Composite the run.
+   *
+   * Stops the sweep FIRST, so a tick arriving mid-composite cannot add a frame to
+   * a buffer that is being read. Then yields once before the heavy pass, so the
+   * "working" state actually paints — a synchronous stack on a phone freezes the
+   * frame for long enough to look broken.
+   */
+  const completeSweep = useCallback(async () => {
+    if (!sweepingRef.current) return;
+    sweepingRef.current = false;
+    setSweeping(false);
+    setSweepBusy(true);
+    try {
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      const cap = sweepRef.current;
+      const out = finishSweep(cap);
+      setSweepKept(cap.state.kept.length);
+      // Whether the sweep was WIDE, not merely complete: a phone that crept
+      // along can meet its quota with the reflection barely having moved.
+      const narrow = !!out && !sweepWideEnough(cap.state);
+      // RELEASE BEFORE PAINTING. The two composites are all the panel needs; the
+      // source frames are the largest allocation the camera makes and nothing
+      // reads them again.
+      sweepRef.current = EMPTY_CAPTURE;
+      setSweepOut(out);
+      if (narrow) {
+        setSweepUi((u) => (u ? { ...u, hint: "That sweep was narrow — a wider arc gives it more to work with." } : u));
+      }
+    } finally {
+      setSweepBusy(false);
+    }
+  }, []);
+
+  /** Hand a composite to the caller as a normal shot. */
+  function deliverComposite(which: "clean" | "surface") {
+    const out = sweepOut;
+    const v = videoRef.current;
+    if (!out || !v) return;
+    const src = which === "clean" ? out.clean : out.surface;
+    const url = bufferToDataUrl(src.data, out.w, out.h);
+    if (!url) { setErr("Couldn't encode that composite."); return; }
+    onCapture({
+      url,
+      // No separate original: the composite IS derived, and the frames it came
+      // from are gone by design. `stacked` records that honestly rather than
+      // letting a merged image pass as a single exposure.
+      original: null,
+      meta: {
+        mode: "in_app", auto: true, sharp: null, marginPct: 0,
+        px: { w: out.w, h: out.h },
+        srcPx: { w: v.videoWidth, h: v.videoHeight },
+        stacked: {
+          kind: which,
+          frames: src.report.framesUsed,
+          meanDepth: Math.round(src.report.meanDepth * 10) / 10,
+          unresolved: Math.round(src.report.unresolved * 1000) / 1000,
+          improved: Math.round(src.report.improved * 1000) / 1000,
+          uncovered: Math.round(src.report.uncovered * 1000) / 1000,
+        },
+      },
+    });
+    clearSweep();
+    setShots((n) => n + 1);
+  }
+
   /** Best of a short burst — kills the odd blurred frame at almost no cost. */
   async function burstShoot() {
     if (busyRef.current) return;
@@ -474,6 +598,36 @@ export function CameraSheet({
         // somewhere, short enough that moving to a new light shows up quickly.
         if (win.length > 40) win.shift();
         setGlare(readGlare(win));
+      }
+
+      // Offer this frame to a running sweep. Everything it needs was computed
+      // above for other reasons, so a sweep costs one warp per KEEPER and
+      // nothing at all per rejected frame.
+      if (sweepingRef.current) {
+        const vid = videoRef.current;
+        const quadV = d ? probeQuadToVideo(d.quad, p.w, p.h, p.src) : null;
+        // The guide's own proportions, not a constant — it is what the user
+        // framed against, so a slab run rectifies to a slab and not to a card.
+        const aspect = guideRect && guideRect.height > 0 ? guideRect.width / guideRect.height : CARD_ASPECT;
+        const r = offerFrame(
+          sweepRef.current,
+          { quad: quadV, sharp: sharpness(p.gray, p.w, p.h), clip: clip?.fraction ?? null, median: med },
+          quadV,
+          (q, ow, oh) => {
+            if (!vid) return null;
+            const scratch = (warpScratchRef.current ??= document.createElement("canvas"));
+            return warpVideoFrame(vid, scratch, q, ow, oh);
+          },
+          aspect,
+        );
+        sweepRef.current = r.capture;
+        const prog = sweepProgress(r.capture.state, r.decision);
+        setSweepUi({ kept: prog.kept, target: prog.target, hint: prog.hint, complete: prog.complete });
+        // Composite the moment the quota is met, rather than waiting for a tap.
+        // The frames are already in memory and the user's next move is to lower
+        // the phone — asking them to hold it steady for one more tap is how a
+        // finished sweep gets thrown away.
+        if (prog.complete) void completeSweep();
       }
     }, DETECT_MS);
     return () => { alive = false; clearInterval(id); releaseScratch(); };
@@ -846,6 +1000,68 @@ export function CameraSheet({
           </div>
         )}
 
+        {/*
+          * SWEEP — offered only once scanning has started, because it needs the
+          * detector: without corners a frame cannot be registered and cannot be
+          * stacked.
+          *
+          * Deliberately NOT offered when the light reading says `fixed`. A source
+          * too broad to escape sits in the same place at every angle, so a sweep
+          * is fifteen wasted seconds and a composite that changes nothing —
+          * `exposure.ts` exists to be able to say that before anyone tries.
+          */}
+        {ready && !osMode && started && !sweeping && !sweepOut && !sweepBusy && glare?.verdict !== "fixed" && (
+          <button
+            onClick={startSweep}
+            className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl bg-black/80 px-3 py-2 text-[12px] font-bold text-white/90 active:scale-95"
+          >
+            <Layers size={14} className="text-[#e8b923]" /> Sweep for glare
+          </button>
+        )}
+
+        {/* Live sweep coaching. The counter alone is what makes people think it is
+            broken — they hold the phone still and nothing moves. */}
+        {sweeping && sweepUi && (
+          <div className="absolute bottom-3 left-1/2 flex w-[92vw] max-w-md -translate-x-1/2 flex-col items-center gap-2">
+            <div className="w-full rounded-2xl bg-black/85 px-4 py-3">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[13px] font-black uppercase tracking-wide text-[#e8b923]">Sweeping</span>
+                <span className="figures text-[15px] font-bold text-white">{sweepUi.kept}/{sweepUi.target}</span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/20">
+                <div
+                  className="h-full rounded-full bg-[#e8b923] transition-[width] duration-200"
+                  style={{ width: `${Math.round((sweepUi.kept / sweepUi.target) * 100)}%` }}
+                />
+              </div>
+              {sweepUi.hint && (
+                <p className="mt-1.5 text-[13px] font-semibold leading-snug text-white">{sweepUi.hint}</p>
+              )}
+            </div>
+            <div className="flex w-full gap-2">
+              <button onClick={cancelSweep} className="flex-1 rounded-xl border border-white/30 py-2 text-[12px] font-bold text-white/80">
+                Cancel
+              </button>
+              {/* Usable early: three good frames already composite, and refusing
+                  would throw away work the user did. */}
+              <button
+                onClick={() => void completeSweep()}
+                disabled={sweepUi.kept < 2}
+                className="flex-1 rounded-xl bg-[#e8b923] py-2 text-[12px] font-black text-black disabled:opacity-40"
+              >
+                Use {sweepUi.kept} now
+              </button>
+            </div>
+          </div>
+        )}
+
+        {sweepBusy && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/70 text-white">
+            <Loader2 className="animate-spin" size={26} />
+            <p className="text-[13px] font-semibold">Merging the sweep…</p>
+          </div>
+        )}
+
         {!ready && !err && !osMode && (
           <div className="absolute inset-0 flex items-center justify-center text-white/70">
             <Loader2 className="animate-spin" size={28} />
@@ -853,6 +1069,84 @@ export function CameraSheet({
         )}
         {err && <p className="absolute inset-x-8 top-1/2 -translate-y-1/2 text-center text-sm text-white/80">{err}</p>}
       </div>
+
+      {/*
+        * THE TWO RESULTS. One sweep, two photos, and they are answers to
+        * different questions — which is why both are offered rather than the app
+        * picking.
+        *
+        * Every claim here is qualified by its own report. A composite that could
+        * not clear the glare is still the best available image, and it is offered
+        * — but it is not described as clean.
+        */}
+      {sweepOut && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-black/95 px-4 py-3">
+          <p className="text-center text-[11px] font-semibold uppercase tracking-wider text-white/50">
+            One sweep · {sweepOut.clean.report.framesUsed} of {sweepKept} shots used
+          </p>
+
+          <div className="mt-2 grid min-h-0 flex-1 grid-cols-2 gap-3">
+            {([
+              {
+                key: "clean" as const, res: sweepOut.clean, icon: <Sparkles size={12} />,
+                title: "Glare removed", sub: "The card",
+                ok: sweepOut.cleanWorthKeeping, advice: stackAdvice(sweepOut.clean.report),
+              },
+              {
+                key: "surface" as const, res: sweepOut.surface, icon: <Layers size={12} />,
+                title: "Surface map", sub: "Scratches & print lines",
+                ok: sweepOut.surfaceWorthKeeping, advice: surfaceAdvice(sweepOut.surface.report),
+              },
+            ]).map((panel) => {
+              const url = bufferToDataUrl(panel.res.data, sweepOut.w, sweepOut.h, 0.8);
+              return (
+                <div key={panel.key} className="flex min-h-0 flex-col">
+                  <p className="flex items-center gap-1 text-[11px] font-bold text-white">
+                    <span className="text-[#e8b923]">{panel.icon}</span> {panel.title}
+                  </p>
+                  <p className="text-[9px] leading-snug text-white/40">{panel.sub}</p>
+                  {url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */
+                    <img src={url} alt={panel.title} className="my-1.5 min-h-0 flex-1 rounded-lg object-contain" />
+                  ) : (
+                    <p className="my-1.5 flex-1 text-[10px] text-white/40">Couldn&apos;t render this one.</p>
+                  )}
+                  {/* The caveat sits ON the image it describes, not in a footnote. */}
+                  {panel.advice && (
+                    <p className="mb-1 text-[9px] leading-snug text-amber-300/90">{panel.advice}</p>
+                  )}
+                  <button
+                    onClick={() => deliverComposite(panel.key)}
+                    className={
+                      "rounded-xl py-2 text-[12px] font-black active:scale-95 " +
+                      (panel.ok ? "bg-[#e8b923] text-black" : "border border-white/30 text-white/80")
+                    }
+                  >
+                    {panel.ok ? "Use this" : "Use anyway"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {sweepUi?.hint && <p className="mt-1.5 text-center text-[10px] text-amber-300/90">{sweepUi.hint}</p>}
+
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={clearSweep}
+              className="flex-1 rounded-xl border border-white/30 py-2 text-[12px] font-bold text-white/80"
+            >
+              Discard both
+            </button>
+            <button
+              onClick={() => { setSweepOut(null); startSweep(); }}
+              className="flex-1 rounded-xl border border-white/30 py-2 text-[12px] font-bold text-white/80"
+            >
+              Sweep again
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Inspect what you already have. Two ways out and both explicit - no
           dead end, and no silent overwrite of a shot you were only checking. */}
