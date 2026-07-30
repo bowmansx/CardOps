@@ -54,7 +54,11 @@ export const PHOTO_PREF_DEFAULTS: PhotoPrefs = {
   scan_on_open: false,
   capture_mode: "in_app",
   photo_quality: "standard",
-  auto_snap: false,
+  // ON by default (2026-07-29). Beau, testing on a phone: "there still isn't
+  // kind of automatic capture it doesn't seem" — and there wasn't, because this
+  // was false and the toggle was invisible against the camera feed. A scanner
+  // that waits for a tap is a camera; the automatic shot is the feature.
+  auto_snap: true,
   burst_count: 3,
   auto_crop: "margin",
   crop_margin_pct: 0.04,

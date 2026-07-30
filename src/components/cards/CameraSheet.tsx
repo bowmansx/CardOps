@@ -731,21 +731,21 @@ export function CameraSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/95" style={{ colorScheme: "dark" }}>
+    <div className="fixed inset-0 z-50 flex flex-col bg-black" style={{ colorScheme: "dark" }}>
       <div className="flex items-center justify-between px-4 py-3 text-white">
         <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
           {session && (
             <button
               onClick={() => setMenu(true)}
               aria-label="Open session menu"
-              className="flex shrink-0 items-center gap-1 rounded-lg border border-white/25 px-2 py-1 text-[11px] font-semibold text-white/70"
+              className="flex shrink-0 items-center gap-1 rounded-lg border border-white bg-black px-2 py-1 text-[14px] font-semibold text-white"
             >
               <PanelLeft size={13} />
               {session.items.filter((i) => i.taken || i.existing).length}/{session.items.length}
             </button>
           )}
           <span className="truncate">{title}</span>
-          {multi && shots > 0 && <span className="figures ml-2 rounded bg-white/15 px-1.5 py-0.5 text-xs">{shots}</span>}
+          {multi && shots > 0 && <span className="figures ml-2 rounded bg-white/15 px-1.5 py-0.5 text-[14px]">{shots}</span>}
         </span>
         <span className="flex items-center gap-2">
           {!osMode && <button
@@ -753,14 +753,14 @@ export function CameraSheet({
             aria-pressed={auto}
             title="Snap automatically once the card is sharp and still"
             className={"flex items-center gap-1 rounded-lg border px-3 py-1.5 text-[13px] font-bold " +
-              (auto ? "border-[#e8b923] bg-[#e8b923]/30 text-white" : "border-white/30 text-white/70")}
+              (auto ? "border-[#e8b923] bg-[#e8b923] text-black" : "border-white bg-black text-white")}
           >
             <Wand2 size={13} /> Auto
           </button>}
-          {!osMode && <span className="flex overflow-hidden rounded-lg border border-white/30 text-[13px] font-bold">
+          {!osMode && <span className="flex overflow-hidden rounded-lg border border-white bg-black text-[13px] font-bold">
             {(["raw", "slab"] as const).map((g) => (
               <button key={g} onClick={() => setManualGuide(g)}
-                className={"px-3 py-1.5 " + (guide === g ? "bg-white/30 text-white" : "text-white/60")}>
+                className={"px-3 py-1.5 " + (guide === g ? "bg-white text-black" : "text-white")}>
                 {g === "raw" ? "Card" : "Slab"}
               </button>
             ))}
@@ -843,29 +843,29 @@ export function CameraSheet({
                 : `Found ${litCount} of 4 edges`}
             </span>
 
-            <span className="-mt-2 flex w-full items-stretch justify-around rounded-b-2xl bg-black/85 py-2 shadow-lg">
+            <span className="-mt-2 flex w-full items-stretch justify-around rounded-b-2xl bg-black py-2 shadow-lg">
               {/* EDGES FIRST. "Is it even seeing the card" is the question
                   being asked when someone waves a phone around and nothing
                   seems to happen, and it was buried at the end of the row in
                   the smallest colour on screen. */}
               <span className="flex flex-1 flex-col items-center">
                 <span className={"text-[26px] font-black leading-none tabular-nums " +
-                  (!det ? "text-white/70" : litCount === 4 ? "text-emerald-400" : "text-[#ffd400]")}>
+                  (!det ? "text-white" : litCount === 4 ? "text-emerald-400" : "text-[#ffd400]")}>
                   {det ? `${litCount}/4` : "—"}
                 </span>
-                <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">Edges</span>
+                <span className="mt-1 text-[13px] font-bold uppercase tracking-widest text-white">Edges</span>
               </span>
 
               <span className="w-px shrink-0 bg-white/15" />
 
               <span className="flex flex-1 flex-col items-center">
                 <span className={"text-[26px] font-black leading-none tabular-nums " +
-                  (det?.inches == null ? "text-white/70"
+                  (det?.inches == null ? "text-white"
                     : aim.fill === "ok" ? "text-emerald-400"
                     : aim.fill === "none" ? "text-white" : "text-[#ffd400]")}>
                   {det?.inches != null ? det.inches.toFixed(1) : "—"}
                 </span>
-                <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">
+                <span className="mt-1 text-[13px] font-bold uppercase tracking-widest text-white">
                   Inches
                   {det?.fill != null && shotTarget?.targetFill != null &&
                     ` ${Math.round(det.fill * 100)}/${Math.round(shotTarget.targetFill * 100)}%`}
@@ -876,12 +876,12 @@ export function CameraSheet({
 
               <span className="flex flex-1 flex-col items-center">
                 <span className={"text-[26px] font-black leading-none tabular-nums " +
-                  (det?.tilt == null ? "text-white/70"
+                  (det?.tilt == null ? "text-white"
                     : aim.tilt === "ok" ? "text-emerald-400"
                     : aim.tilt === "none" ? "text-white" : "text-[#ffd400]")}>
                   {det?.tilt != null ? `${det.tilt.toFixed(0)}\u00b0` : "—"}
                 </span>
-                <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/60">
+                <span className="mt-1 text-[13px] font-bold uppercase tracking-widest text-white">
                   Angle{shotTarget?.targetTilt != null && ` / ${shotTarget.targetTilt}\u00b0`}
                 </span>
               </span>
@@ -897,10 +897,10 @@ export function CameraSheet({
                 changed, so a still phone is told to move rather than left to
                 fill a bar that proves nothing. */}
             {glare && glare.verdict === "unknown" && glare.n > 0 && (
-              <span className="w-full rounded-xl bg-black/85 px-3 py-2 shadow-lg">
-                <span className="flex items-center justify-between text-[12px] font-bold uppercase tracking-wider text-white">
+              <span className="w-full rounded-xl bg-black px-3 py-2 shadow-lg">
+                <span className="flex items-center justify-between text-[14px] font-bold uppercase tracking-wider text-white">
                   <span>Reading your light</span>
-                  <span className="tabular-nums text-white/70">{Math.min(glare.n, 8)}/8</span>
+                  <span className="tabular-nums text-white">{Math.min(glare.n, 8)}/8</span>
                 </span>
                 <span className="mt-1.5 block h-2 w-full overflow-hidden rounded-full bg-white/20">
                   <span
@@ -908,7 +908,7 @@ export function CameraSheet({
                     style={{ width: `${Math.min(100, (glare.n / 8) * 100)}%` }}
                   />
                 </span>
-                <span className="mt-1.5 block text-center text-[12px] font-semibold text-white/80">
+                <span className="mt-1.5 block text-center text-[14px] font-semibold text-white">
                   {moving ? "Good — keep moving around the card" : "Move the phone around the card"}
                 </span>
               </span>
@@ -916,7 +916,7 @@ export function CameraSheet({
 
             {glare && glareAdvice(glare) && (
               <span className={"w-full rounded-xl px-3 py-2 text-center text-[13px] font-semibold leading-snug shadow-lg " +
-                (glare.verdict === "fixed" ? "bg-amber-400 text-black" : "bg-black/80 text-white")}>
+                (glare.verdict === "fixed" ? "bg-amber-400 text-black" : "bg-black text-white")}>
                 {glareAdvice(glare)}
                 <span className="ml-1 tabular-nums opacity-70">
                   ({Math.round(glare.peak * 100)}% blown out)
@@ -928,7 +928,7 @@ export function CameraSheet({
                 DISAGREES with the preset - the rest of the time it is noise on
                 a screen that has no room for any. */}
             {delivered && delivered.out < quality.maxEdge && (
-              <span className="rounded-lg bg-black/80 px-3 py-1 text-[12px] font-semibold tabular-nums text-white/80">
+              <span className="rounded-lg bg-black px-3 py-1 text-[14px] font-semibold tabular-nums text-white">
                 {delivered.out}px shot \u00b7 {quality.label} wanted {quality.maxEdge}
               </span>
             )}
@@ -958,7 +958,7 @@ export function CameraSheet({
                   <span className="rounded bg-black/75 px-2 py-0.5 text-[13px] font-bold text-white">{shotStep}</span>
                 )}
                 {shotHint && (
-                  <span className="max-w-full rounded-lg bg-black/80 px-2.5 py-1 text-center text-[13px] font-semibold leading-snug text-white">
+                  <span className="max-w-full rounded-lg bg-black px-2.5 py-1 text-center text-[13px] font-semibold leading-snug text-white">
                     {shotHint}
                   </span>
                 )}
@@ -970,7 +970,7 @@ export function CameraSheet({
             {auto && started && (
               <span
                 className={"pointer-events-none absolute -translate-x-1/2 rounded-xl px-4 py-1.5 text-[14px] font-bold shadow-lg " +
-                  (locked ? "bg-emerald-400 text-black" : "bg-black/80 text-white")}
+                  (locked ? "bg-emerald-400 text-black" : "bg-black text-white")}
                 style={{ left: guideRect.left + guideRect.width / 2, top: guideRect.top + guideRect.height + 10 }}
               >
                 {locked ? "Hold still…" : "Fill the frame · hold steady"}
@@ -980,10 +980,10 @@ export function CameraSheet({
         )}
         {flash && <div className="absolute inset-0 bg-white/70" />}
         {osMode && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-10 text-center text-white/75">
-            <Camera size={34} className="text-white/50" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-10 text-center text-white">
+            <Camera size={34} className="text-white" />
             <p className="text-sm font-semibold text-white">Using your phone&apos;s camera</p>
-            <p className="text-xs text-white/55">
+            <p className="text-[14px] text-white">
               Tap the shutter to open it. Better in low light — but no guide frame, no auto-snap,
               and the photo is kept whole rather than cropped to the card.
             </p>
@@ -1012,13 +1012,13 @@ export function CameraSheet({
         {ready && !osMode && !started && (
           <div className="absolute bottom-3 left-1/2 flex w-[92vw] max-w-md -translate-x-1/2 flex-col items-center gap-2">
             <button
-              onClick={() => setManualStart(true)}
+              onClick={() => { setManualStart(true); setAuto(true); }}
               className="w-full rounded-2xl bg-[#e8b923] py-4 text-lg font-black uppercase tracking-wide text-black shadow-lg active:scale-95"
             >
               Start scan
             </button>
-            <span className="rounded-lg bg-black/80 px-3 py-1.5 text-center text-[12px] font-semibold leading-snug text-white/80">
-              Line the card up in the frame first · build {process.env.NEXT_PUBLIC_BUILD ?? "dev"}
+            <span className="rounded-lg bg-black px-3 py-2 text-center text-[14px] font-bold leading-snug text-white">
+              Line the card up, then tap — it shoots by itself once the card locks.
             </span>
           </div>
         )}
@@ -1036,7 +1036,7 @@ export function CameraSheet({
         {ready && !osMode && started && !sweeping && !sweepOut && !sweepBusy && glare?.verdict !== "fixed" && (
           <button
             onClick={startSweep}
-            className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl bg-black/80 px-3 py-2 text-[12px] font-bold text-white/90 active:scale-95"
+            className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl bg-black px-3 py-2 text-[14px] font-bold text-white active:scale-95"
           >
             <Layers size={14} className="text-[#e8b923]" /> Sweep for glare
           </button>
@@ -1046,7 +1046,7 @@ export function CameraSheet({
             broken — they hold the phone still and nothing moves. */}
         {sweeping && sweepUi && (
           <div className="absolute bottom-3 left-1/2 flex w-[92vw] max-w-md -translate-x-1/2 flex-col items-center gap-2">
-            <div className="w-full rounded-2xl bg-black/85 px-4 py-3">
+            <div className="w-full rounded-2xl bg-black px-4 py-3">
               <div className="flex items-baseline justify-between">
                 <span className="text-[13px] font-black uppercase tracking-wide text-[#e8b923]">Sweeping</span>
                 <span className="figures text-[15px] font-bold text-white">{sweepUi.kept}/{sweepUi.target}</span>
@@ -1062,7 +1062,7 @@ export function CameraSheet({
               )}
             </div>
             <div className="flex w-full gap-2">
-              <button onClick={cancelSweep} className="flex-1 rounded-xl border border-white/30 py-2 text-[12px] font-bold text-white/80">
+              <button onClick={cancelSweep} className="flex-1 rounded-xl border border-white/30 py-2 text-[14px] font-bold text-white">
                 Cancel
               </button>
               {/* Usable early: three good frames already composite, and refusing
@@ -1070,7 +1070,7 @@ export function CameraSheet({
               <button
                 onClick={() => void completeSweep()}
                 disabled={sweepUi.kept < 2}
-                className="flex-1 rounded-xl bg-[#e8b923] py-2 text-[12px] font-black text-black disabled:opacity-40"
+                className="flex-1 rounded-xl bg-[#e8b923] py-2 text-[14px] font-black text-black disabled:opacity-40"
               >
                 Use {sweepUi.kept} now
               </button>
@@ -1079,18 +1079,18 @@ export function CameraSheet({
         )}
 
         {sweepBusy && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/70 text-white">
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/90 text-white">
             <Loader2 className="animate-spin" size={26} />
             <p className="text-[13px] font-semibold">Merging the sweep…</p>
           </div>
         )}
 
         {!ready && !err && !osMode && (
-          <div className="absolute inset-0 flex items-center justify-center text-white/70">
+          <div className="absolute inset-0 flex items-center justify-center text-white">
             <Loader2 className="animate-spin" size={28} />
           </div>
         )}
-        {err && <p className="absolute inset-x-8 top-1/2 -translate-y-1/2 text-center text-sm text-white/80">{err}</p>}
+        {err && <p className="absolute inset-x-8 top-1/2 -translate-y-1/2 text-center text-sm text-white">{err}</p>}
       </div>
 
       {/*
@@ -1103,8 +1103,8 @@ export function CameraSheet({
         * — but it is not described as clean.
         */}
       {sweepOut && (
-        <div className="absolute inset-0 z-20 flex flex-col bg-black/95 px-4 py-3">
-          <p className="text-center text-[11px] font-semibold uppercase tracking-wider text-white/50">
+        <div className="absolute inset-0 z-20 flex flex-col bg-black px-4 py-3">
+          <p className="text-center text-[14px] font-semibold uppercase tracking-wider text-white">
             One sweep · {sweepOut.clean.report.framesUsed} of {sweepKept} shots used
           </p>
 
@@ -1124,25 +1124,25 @@ export function CameraSheet({
               const url = bufferToDataUrl(panel.res.data, sweepOut.w, sweepOut.h, 0.8);
               return (
                 <div key={panel.key} className="flex min-h-0 flex-col">
-                  <p className="flex items-center gap-1 text-[11px] font-bold text-white">
+                  <p className="flex items-center gap-1 text-[14px] font-bold text-white">
                     <span className="text-[#e8b923]">{panel.icon}</span> {panel.title}
                   </p>
-                  <p className="text-[9px] leading-snug text-white/40">{panel.sub}</p>
+                  <p className="text-[13px] leading-snug text-white">{panel.sub}</p>
                   {url ? (
                     /* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */
                     <img src={url} alt={panel.title} className="my-1.5 min-h-0 flex-1 rounded-lg object-contain" />
                   ) : (
-                    <p className="my-1.5 flex-1 text-[10px] text-white/40">Couldn&apos;t render this one.</p>
+                    <p className="my-1.5 flex-1 text-[13px] text-white">Couldn&apos;t render this one.</p>
                   )}
                   {/* The caveat sits ON the image it describes, not in a footnote. */}
                   {panel.advice && (
-                    <p className="mb-1 text-[9px] leading-snug text-amber-300/90">{panel.advice}</p>
+                    <p className="mb-1 text-[13px] leading-snug text-amber-300">{panel.advice}</p>
                   )}
                   <button
                     onClick={() => deliverComposite(panel.key)}
                     className={
-                      "rounded-xl py-2 text-[12px] font-black active:scale-95 " +
-                      (panel.ok ? "bg-[#e8b923] text-black" : "border border-white/30 text-white/80")
+                      "rounded-xl py-2 text-[14px] font-black active:scale-95 " +
+                      (panel.ok ? "bg-[#e8b923] text-black" : "border border-white/30 text-white")
                     }
                   >
                     {panel.ok ? "Use this" : "Use anyway"}
@@ -1152,18 +1152,18 @@ export function CameraSheet({
             })}
           </div>
 
-          {sweepUi?.hint && <p className="mt-1.5 text-center text-[10px] text-amber-300/90">{sweepUi.hint}</p>}
+          {sweepUi?.hint && <p className="mt-1.5 text-center text-[13px] text-amber-300">{sweepUi.hint}</p>}
 
           <div className="mt-2 flex gap-2">
             <button
               onClick={clearSweep}
-              className="flex-1 rounded-xl border border-white/30 py-2 text-[12px] font-bold text-white/80"
+              className="flex-1 rounded-xl border border-white/30 py-2 text-[14px] font-bold text-white"
             >
               Discard both
             </button>
             <button
               onClick={() => { setSweepOut(null); startSweep(); }}
-              className="flex-1 rounded-xl border border-white/30 py-2 text-[12px] font-bold text-white/80"
+              className="flex-1 rounded-xl border border-white/30 py-2 text-[14px] font-bold text-white"
             >
               Sweep again
             </button>
@@ -1174,8 +1174,8 @@ export function CameraSheet({
       {/* Inspect what you already have. Two ways out and both explicit - no
           dead end, and no silent overwrite of a shot you were only checking. */}
       {review && cur?.taken && (
-        <div className="absolute inset-0 z-20 flex flex-col bg-black/95 px-6 py-4">
-          <p className="text-center text-[11px] font-semibold uppercase tracking-wider text-white/50">
+        <div className="absolute inset-0 z-20 flex flex-col bg-black px-6 py-4">
+          <p className="text-center text-[14px] font-semibold uppercase tracking-wider text-white">
             Already taken - {cur.label}
           </p>
           {/* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */}
@@ -1228,7 +1228,7 @@ export function CameraSheet({
       <div className="grid grid-cols-3 items-center px-6 py-6">
         <button
           onClick={() => fileRef.current?.click()}
-          className="flex items-center gap-1.5 justify-self-start text-xs font-semibold text-white/70 hover:text-white"
+          className="flex items-center gap-1.5 justify-self-start rounded-lg bg-white/15 px-3 py-2 text-[14px] font-bold text-white"
         >
           <Images size={18} /> Library
         </button>
@@ -1236,7 +1236,7 @@ export function CameraSheet({
           onClick={() => (osMode ? osCamRef.current?.click() : shoot(false))}
           disabled={!ready && !osMode}
           aria-label="Take photo"
-          className="h-16 w-16 justify-self-center rounded-full border-4 border-white bg-white/25 transition active:scale-95 disabled:opacity-40"
+          className="h-16 w-16 justify-self-center rounded-full border-4 border-white bg-white transition active:scale-95 disabled:opacity-40"
         >
           <Camera size={24} className="mx-auto text-white" />
         </button>
