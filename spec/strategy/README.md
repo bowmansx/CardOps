@@ -52,3 +52,10 @@ You described the brief as an "outbox". In `spec/` today, INBOX means *you
 write, the loop reads* and OUTBOX means the reverse. Using those words the
 other way round inside the same vault reads fine today and costs an hour of
 confusion later, so they're named for what they do instead.
+
+---
+
+**[[TEST-THE-CAMERA]]** — written overnight 2026-07-29. What changed in the
+camera, the three constants that will need tuning and which symptom maps to
+which, and the note that 14 commits are NOT deployed yet. Read it before picking
+up a phone.
