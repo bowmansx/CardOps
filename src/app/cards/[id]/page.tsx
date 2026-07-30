@@ -22,6 +22,7 @@ import { CardBooksControl } from "@/components/cards/CardBooksControl";
 import { BasisBreakdown } from "@/components/cards/BasisBreakdown";
 import { AddPhotos } from "@/components/cards/AddPhotos";
 import { lotAverages, cardAcquisitionBasis, cardBasis } from "@/lib/cards/basis";
+import { stackedKind } from "@/lib/cards/photo-set";
 import { WhatYouKeep } from "@/components/cards/WhatYouKeep";
 import { PasteComps } from "@/components/cards/PasteComps";
 import type { SettledSale } from "@/lib/cards/net-proceeds";
@@ -120,7 +121,11 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
   // Stored photos (private bucket → short-lived signed URLs).
   const { data: photos } = await supabase
     .from("card_photos")
-    .select("id, kind, role, bucket, path, variant, derived_from, position")
+    // capture_meta says whether a photo is a SWEEP COMPOSITE. Two thumbnails
+    // from one sweep look nearly identical except that one of them shows every
+    // scratch — unlabelled, that reads as a damaged card rather than as the
+    // surface view it is.
+    .select("id, kind, role, bucket, path, variant, derived_from, position, capture_meta")
     .eq("card_id", id)
     // Session order, as Beau asked - with created_at both as the tiebreak
     // within a slot and as the fallback for photos taken before position
@@ -141,10 +146,14 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
     await Promise.all(
       (photos ?? []).map(async (p) => {
         const { data: s } = await supabase.storage.from(p.bucket as string).createSignedUrl(p.path as string, 3600);
-        return { kind: p.kind as string, url: s?.signedUrl };
+        return {
+          kind: p.kind as string,
+          url: s?.signedUrl,
+          stacked: stackedKind(p as { capture_meta?: unknown }),
+        };
       }),
     )
-  ).filter((s): s is { kind: string; url: string } => !!s.url);
+  ).filter((s): s is { kind: string; url: string; stacked: "clean" | "surface" | null } => !!s.url);
 
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
@@ -323,8 +332,25 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
             {shots.map((s, i) => (
               <a key={i} href={s.url} target="_blank" rel="noreferrer" className="shrink-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={s.url} alt={s.kind} className="h-40 w-auto rounded-lg border border-hairline bg-white object-contain" />
-                <div className="figures mt-0.5 text-center text-[10px] text-ink/40">{s.kind}</div>
+                <img
+                  src={s.url}
+                  alt={s.stacked === "surface" ? `${s.kind} — surface map` : s.kind}
+                  className={"h-40 w-auto rounded-lg border bg-white object-contain " +
+                    (s.stacked === "surface" ? "border-amber-500" : "border-hairline")}
+                />
+                {/* A surface map is DELIBERATELY raked — every highlight is the
+                    lighting doing its job. Unlabelled it reads as damage, which
+                    is the opposite of what it is for. */}
+                {s.stacked === "surface" ? (
+                  <div className="mt-0.5 w-28 text-center text-[10px] font-bold leading-tight text-amber-700">
+                    SURFACE MAP
+                    <span className="block font-normal text-ink/45">raked light · not damage</span>
+                  </div>
+                ) : (
+                  <div className="figures mt-0.5 text-center text-[10px] text-ink/40">
+                    {s.kind}{s.stacked === "clean" ? " · merged" : ""}
+                  </div>
+                )}
               </a>
             ))}
           </div>
