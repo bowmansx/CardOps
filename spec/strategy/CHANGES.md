@@ -7,6 +7,103 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-07-30 - the #1 item shipped, and the pricing question closed
+
+**Material, and unusually so.** 31 commits and ~9,300 lines since the 28th. The
+top-ranked item in three consecutive revisions of this document is built, and a
+decision recorded in `spec/valuation/DECISIONS.md` closed the only open question
+this document had been carrying since the first entry. Archived as
+`journal/2026-07-30.md`.
+
+Checked: `BRIEF.md` (no new entries from Beau), `git log --since=2026-07-28`,
+`spec/valuation/DECISIONS.md`, `spec/strategy/GO-LIVE.md`,
+`spec/valuation/research/2026-07-29-vendor-access.md`, and the code behind each
+claim I was about to change.
+
+### What SHIPPED, and it closes ranked items
+
+- **The forward money engine — "what you keep."** `net-proceeds.ts` (593 lines),
+  `WhatYouKeep.tsx`, real eBay fee tiers with the per-order band and sales tax.
+  This was "the one thing" and it was estimated at 2-3 weeks. It took two days.
+- **Price provenance** (#2). `PriceProvenance.tsx`, `MarketBySource.tsx`.
+- **The grading fee reality** (#1), partly. Defaults moved from PSA 25 / BGS 22 /
+  SGC 18 / CGC 18 + $8 to **50 / 30 / 25 / 25 + $12**, and `GradeEV.tsx:86` now
+  renders the configured fee where it used to caption a hardcoded "~$20". The
+  tier picker is what remains, and it is re-ranked to #4.
+- **The midpoint EV bug** (#6a). `grade-ev/route.ts` now works across the whole
+  estimate instead of collapsing "PSA 8 to 10" to a single 9.
+- **Q1** — the intake session card list. As predicted, a wiring job on tables
+  that had sat unreferenced since day one.
+
+### What is NEW, versus what was already known
+
+**New, and it is a finding rather than a restatement:**
+
+- **`paste-sales.ts` has zero consumers in `src/`.** 330 lines, 262 lines of
+  tests, shipped 2026-07-29, and nothing calls it. There is no route and no
+  screen. Verified by grep, not inferred.
+- **There are now two fee models in one app.** `net-proceeds.ts` reaches the card
+  page, `SellForm` and `WhatYouKeep`; `grade-ev/route.ts` still computes
+  `FEES[g] + SHIP` on its own. "The same fee-and-net function is the missing
+  input in grade EV" was the *argument for building it*, and that half did not
+  land. Both of these are why **"the one thing" is now "finish what just
+  landed"** rather than a new build.
+- **The build-and-forget pattern is named as a pattern**, because the paste
+  parser makes it four: `card_intake_sessions`, `card_grading_submissions`,
+  `card_format_profiles`, and now this. Previous entries reported each instance
+  separately without connecting them.
+- **The buy sheet is unblocked** and moves from #11 to #1, because it was gated
+  on the money engine. It is gated on the $9 coverage test instead.
+- **PriceCharting's licence enters the ranked list at #2.** It was in
+  `GO-LIVE.md` as a deferred item; the product decision makes it a live one, and
+  free distribution does not save it — the term is about *who* uses the data.
+
+**Already known, folded in rather than presented as new:** the Q4 answer (the
+objective hierarchy is a query), the sticky-fields answer, the sales-are-public
+decision, and the go-live licence register. All were written on the 28th and
+29th and are referenced, not re-derived.
+
+### The pricing question is CLOSED, and it went Beau's way
+
+`DECISIONS.md`, 2026-07-28: *"cardops is a tool in the form of an app/website
+that people will need to purchase computing power beyond their free amount
+for."* Compute-metered with a free tier, over the research's flat $50-150/mo.
+The first entry in this log recorded that tension deliberately unresolved; it is
+now resolved, and the strategy says so rather than continuing to hold it open.
+
+Three consequences moved into Posture because they constrain code, not
+marketing: catalogue lookups must never consume credits (Scryfall), a hard stop
+rather than a soft one, and bulk floor checked first.
+
+### The comps question is answered, and the pass before it was wrong
+
+`research/2026-07-29-vendor-access.md` verified thecardapi's tiers against live
+pages. The carried question — whether any tier below Enterprise can backfill —
+has an answer: **no, except via the $99 Unlimited Lookback add-on, Pro-gated.**
+But it matters less than it appeared, because the lookback clamps `date_from`
+and `card_market_sales` is append-only: a 14-day window run daily becomes a year
+of history in a year.
+
+Worth recording that the *previous* research pass concluded there was no
+reachable permitted API and that pasting was permanent — and that the API was
+already in the repo, on a free tier whose 3-day window produced nothing. It
+asked what was free and reported that as the map of what exists. Same failure
+mode as the 2026-07-27 retraction: reasoning from a note instead of from the
+thing.
+
+### Not acted on, per the rules
+
+- **Beau's working copy is ahead of `origin/main` by four commits** that this run
+  did not read: attribution rendering, Terapeak/Seller Hub, PriceCharting terms,
+  and a pre-call page. `CLAUDE.md` there also references migration **20260751**,
+  which is not in `origin/main` — only `20260750_sale_provenance` is. Unpushed,
+  not merged, not touched.
+- No migration pasted, no branch merged, no cron secret set.
+- No market research run. Vendor facts here come from the 2026-07-29 pass
+  already in the vault.
+
+---
+
 ## 2026-07-28 (queue) - the strategy doc is now the to-do list too
 
 Beau: "state of play (known as strategy in obsidian) is going to serve as our to

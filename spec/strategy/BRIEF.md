@@ -24,6 +24,15 @@ words where they are, so you can see what you asked for and what came of it.
   subscription — mostly free to a level of compute and storage, pay when you
   exceed it. A dealer at volume consumes real compute and pays accordingly; a
   hobbyist costs nothing and pays nothing.
+
+  > *What came of it (2026-07-30):* **decided, and it went your way.** Recorded
+  > in [[../valuation/DECISIONS]] on 2026-07-28 and folded into [[STRATEGY]] —
+  > compute-metered with a free tier, over the research's flat $50–150/mo. It is
+  > no longer listed as an open tension. Three consequences moved into Posture
+  > because they constrain code: catalogue lookups must never consume credits
+  > (Scryfall's terms), a hard stop rather than a soft one, and the bulk floor
+  > checked before any paid lookup. Still needs a number from you: the storage
+  > tier thresholds.
 - **Never present a figure as more certain than it is.** Applies to the
   strategy too: say what was measured and what was judged.
 
