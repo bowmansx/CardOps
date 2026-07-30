@@ -65,6 +65,23 @@ export type TemplateShot = {
    * every existing template means today.
    */
   guide?: "raw" | "slab";
+  /**
+   * This shot is taken by a SWEEP, not a single tap.
+   *
+   * Beau: "we could even have a photo session template that walks you through a
+   * scanning technique."
+   *
+   * A sweep collects several angles and merges them, which is what a template is
+   * for: the technique stops being something you remember to do and becomes the
+   * step itself. It also replaces an instruction a template could only ever ASK
+   * for and never verify — every listing template today says "tilt to catch the
+   * light" on its surface shot and has no idea whether anyone did. A sweep
+   * measures the tilt, and says so when there wasn't any.
+   *
+   * One sweep yields TWO images, so a template pairing a card shot with a
+   * `surface_angle` shot gets both from a single pass.
+   */
+  sweep?: boolean;
 };
 
 export type PhotoTemplate = {
@@ -105,6 +122,10 @@ export function normalizeShots(raw: unknown): TemplateShot[] {
       // template asking to fill 300% of the frame is a mistake, and clamping
       // it to 100% would silently invent a requirement nobody wrote.
       guide: o.guide === "slab" ? "slab" : o.guide === "raw" ? "raw" : undefined,
+      // Only an explicit true. A template that merely mentions sweeping in its
+      // hint must not silently start one — the camera behaves differently, and
+      // that has to be something the template ASKED for.
+      sweep: o.sweep === true ? true : undefined,
       targetFill: num(o.targetFill, 0.05, 0.98),
       targetTilt: num(o.targetTilt, 0, 75),
       tolerance: num(o.tolerance, 0.01, 0.5),

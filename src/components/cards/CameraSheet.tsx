@@ -80,7 +80,7 @@ export function CameraSheet({
   shotStep?: string;
   /** The target framing and angle for THIS shot, when the template states
    *  them. Drives the live "move closer" guidance and the on-target lock. */
-  shotTarget?: Pick<TemplateShot, "targetFill" | "targetTilt" | "tolerance">;
+  shotTarget?: Pick<TemplateShot, "targetFill" | "targetTilt" | "tolerance" | "sweep">;
   /** One line of instruction for THIS shot, e.g. "Fill the frame with the
    *  corner". Templates carry these; without one the frame is just a label. */
   shotHint?: string;
@@ -473,6 +473,29 @@ export function CameraSheet({
     clearSweep();
     setShots((n) => n + 1);
   }
+
+  // A SWEEP SHOT ARMS ITSELF. The template asked for a sweep, so making the user
+  // find a button to obey it defeats the point of the template carrying the
+  // technique at all.
+  //
+  // Guarded on `started`, so it cannot begin while the phone is still swinging up
+  // from someone's side, and on the light reading: a source too broad to escape
+  // makes a sweep fifteen wasted seconds, and auto-starting one into that is
+  // worse than never offering it. `sweepArmedFor` keeps it to ONCE per shot —
+  // without it, cancelling a sweep would immediately restart it and there would
+  // be no way out.
+  const sweepArmedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${session?.index ?? 0}:${shotLabel ?? ""}`;
+    if (!shotTarget?.sweep || !started || !ready || osMode) return;
+    if (sweepArmedFor.current === key) return;
+    if (glare?.verdict === "fixed") return;
+    sweepArmedFor.current = key;
+    startSweep();
+    // startSweep only touches refs and setState; re-running on its identity
+    // would re-arm the sweep on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shotTarget?.sweep, started, ready, osMode, session?.index, shotLabel, glare?.verdict]);
 
   /** Best of a short burst — kills the odd blurred frame at almost no cost. */
   async function burstShoot() {
