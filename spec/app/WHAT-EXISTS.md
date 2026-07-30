@@ -7,7 +7,7 @@ Five times in two days a request turned out to be for something already built.
 A hand-written list would go stale and then lie; this one walks the repo, so
 what it says exists, exists.
 
-*Last generated from the working tree. Counts: 55 tables, 36 pages, 53 API routes, 45 card modules.*
+*Last generated from the working tree. Counts: 55 tables, 36 pages, 54 API routes, 56 card modules.*
 
 ---
 
@@ -102,6 +102,7 @@ array, which inflates the count for tables that are genuinely dead.
 - `/api/cards/intake/scan`
 - `/api/cards/intel`
 - `/api/cards/lots`
+- `/api/cards/market-sales/paste`
 - `/api/cards/movers`
 - `/api/cards/photo-presets`
 - `/api/cards/photo-templates`
@@ -185,6 +186,12 @@ Top-movers digest assembly (Beau, 2026-07-24). Pure: takes a user's cards and
 
 Does: `cardLabel`, `currentPrice`, `buildMoversDigest`
 
+### `distill`
+
+Realized sales → ONE market quote at this card's condition (2026-07-29).
+
+Does: `matchesCondition`, `asSoldPayload`, `distill`, `distillBySource`
+
 ### `edges`
 
 Card edge detection (Beau, 2026-07-26). Pure, unit-tested, no DOM —
@@ -239,6 +246,12 @@ AUTO-EXTRACTED from reference/grading-rubric.md (deep-researched, adversarially
 
 _(no exported functions)_
 
+### `homography`
+
+PLANAR REGISTRATION (2026-07-29) — the piece that makes frame stacking possible.
+
+Does: `homographyFromQuads`, `applyHomography`, `orderQuad`, `warpQuadToRect`, `outputSizeFor`
+
 ### `img`
 
 Client-only: downscale a captured photo to a JPEG data URL (max edge px).
@@ -255,7 +268,7 @@ Does: `getConnector`, `connectorOptions`
 
 The registry, in display order. Add a new vendor by dropping an adapter file
 
-Does: `runnableAdapters`, `sourceAvailability`
+Does: `runnableAdapters`, `salesAdapters`, `sourceRights`, `mayPersist`, `basisForSource`, `sourceAvailability`
 
 ### `intake-session`
 
@@ -275,11 +288,17 @@ CardOps liquidity (Beau, 2026-07-25) — pure functions, no I/O, server+client
 
 Does: `velocity`, `tierOf`, `weightedPrices`, `shareAtOrAbove`, `sellEstimate`, `formatEta`, `matchesExact`
 
+### `manual`
+
+MANUAL SOURCES — a person with a clipboard (2026-07-29).
+
+Does: `manualSource`, `isManualSource`
+
 ### `market-sales`
 
-Observed-sales history (Beau, 2026-07-23). Turns the Card API's raw sales into
+Observed-sales history (Beau, 2026-07-23). Turns normalized sales into
 
-Does: `saleKey`, `saleToRow`, `salesToRows`, `storedToSales`, `dailyMedianSeries`
+Does: `saleToRow`, `salesToRows`, `storedToSales`, `dailyMedianSeries`
 
 ### `match`
 
@@ -293,11 +312,29 @@ Card price movement (Beau, 2026-07-20). Pure, testable math over a card's
 
 Does: `pctChangeOverWindow`, `classifyMove`, `trendDeviation`
 
+### `net-proceeds`
+
+WHAT YOU KEEP (Beau, 2026-07-29).
+
+Does: `tieredPct`, `perOrderFee`, `scheduleNote`, `schedulePreset`, `observedFeeRate`, `resolveFeeRate`, `estimateProceeds`, `breakEvenPrice`, `offerVerdict`, `rateLabel`
+
 ### `news`
 
 Card news (Beau, 2026-07-20). Pure helpers for the news pipeline: derive the
 
 Does: `subjectsFromCards`, `googleNewsRssUrl`, `parseRssItems`
+
+### `observed-sale`
+
+ONE REALIZED SALE, in CardOps' own terms (2026-07-29).
+
+Does: `byNewest`
+
+### `paste-sales`
+
+PASTED SOLD COMPS -> ObservedSale[] (2026-07-29).
+
+Does: `detectDelimiter`, `mapHeader`, `parseMoney`, `detectDateOrder`, `parseDate`, `graderFromTitle`, `parsePastedSales`
 
 ### `photo-prefs`
 
@@ -309,7 +346,13 @@ Does: `normalizePhotoPrefs`, `estimateBytesPerCard`, `humanBytes`
 
 Which photos REPRESENT a card, and in what order (Beau, 2026-07-25) —
 
-Does: `displayPhotos`, `listingPhotos`, `gradingPhotos`, `roleCaption`
+Does: `stackedKind`, `displayPhotos`, `listingPhotos`, `gradingPhotos`, `photoCaption`, `roleCaption`
+
+### `price-basis`
+
+What a sale price ACTUALLY INCLUDES, and how to put two of them on the same
+
+Does: `hasPremiumRate`, `toAllIn`, `partitionByBasis`, `exclusionNote`
 
 ### `pricecharting`
 
@@ -322,6 +365,12 @@ _(no exported functions)_
 Server-only role resolution. RLS is the real boundary; these gate the UI.
 
 Does: `currentRole`, `hasCardAccess`
+
+### `rollup`
+
+COMPACTION: individual sales -> per-identity statistics that survive them.
+
+Does: `weekStart`, `monthStart`, `periodStart`, `rollupSales`, `rollupsToSeries`
 
 ### `scryfall`
 
@@ -353,6 +402,24 @@ Server-only: next sequential SKU for a category+year (read-max +1).
 
 Does: `nextSku`
 
+### `stack`
+
+GLARE REMOVAL BY STACKING (2026-07-29).
+
+Does: `stackFrames`, `stackSurface`, `surfaceWorthKeeping`, `surfaceAdvice`, `stackWorthKeeping`, `stackAdvice`, `clippedFraction`
+
+### `sweep`
+
+THE SWEEP (2026-07-29) — deciding which frames are worth keeping.
+
+Does: `quadDistance`, `sweepStep`, `sweepProgress`, `sweepWideEnough`, `sweepKeepers`
+
+### `sweep-frames`
+
+GLUING THE SWEEP TO THE CAMERA (2026-07-29).
+
+Does: `probeQuadToVideo`, `offerFrame`, `finishSweep`, `releaseCapture`, `warpVideoFrame`, `bufferToDataUrl`
+
 ### `templates`
 
 Photo templates (Beau, 2026-07-25) — CAPTURE_WORK_ITEMS.md P3.
@@ -363,7 +430,7 @@ Does: `normalizeShots`, `missingShots`, `shotStep`, `guideToTarget`
 
 The Card API adapter (Beau, 2026-07-21) — realized SOLD sales aggregated across
 
-Does: `saleQuery`, `distillSales`, `fetchCardApiSales`, `fetchCardApiByQuery`
+Does: `saleQuery`, `cardApiSaleKey`, `toObserved`, `fetchCardApiSales`, `fetchCardApiByQuery`
 
 ### `types`
 
@@ -375,7 +442,7 @@ _(no exported functions)_
 
 Multi-source pricing (Beau, 2026-07-20). A "source quote" is one vendor's
 
-_(no exported functions)_
+Does: `canPersist`
 
 ### `types`
 

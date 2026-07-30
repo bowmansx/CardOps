@@ -7,6 +7,64 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-07-29 (overnight) - the valuation spine, the money engine, and the camera
+
+A long run. Grouped by what it means rather than by commit.
+
+**THE HEADLINE, AND IT IS A CORRECTION.** The 2026-07-28 research told Beau that
+third-party sold comps cannot be automated and pasting is permanent. That was
+FALSE, and it was falsified by a file already in this repo:
+`price-sources/thecardapi.ts`, shipped 2026-07-21, is a realized-sales API on a
+free tier with a 3-day lookback. It produced almost nothing, and "produces
+nothing" got written up as "does not exist". Full depth is a billing tier, and
+§4a of their terms explicitly permits storing responses "to serve your users"
+and displaying "transaction history... within your own product interface".
+[[FINDINGS]] now opens with a warning banner saying so; the old headline is
+struck rather than quietly edited.
+
+**Four money bugs, all found by reading the vendor's own docs.**
+
+1. eBay is quoted all-in, Goldin is HAMMER with ~22% still to come. They were
+   being medianed together, so a Goldin-comped card read ~22% cheap.
+2. `price_confirmed: false` is a fast-settle estimate and was being STORED —
+   and the accumulator upserts with ignoreDuplicates, so it could never be
+   corrected.
+3. `grader` is populated on ~12% of records, and raw-ness was inferred from its
+   absence, so most graded sales counted as raw comps and inflated every
+   ungraded valuation.
+4. eBay's real fee schedule is TIERED - 13.25% to $7,500 then 2.35% - and its
+   per-order fee is $0.30 under $10, $0.40 above. A flat rate mis-states a
+   $10,000 card by $272. Sales tax is in the fee base too, which nobody models.
+
+**The architecture question Beau asked, and its answer.** "we don't specifically
+want to build around any one api too much, do we?" Correct, and we were coupled:
+one vendor's wire format had become the internal sale type. Now every source
+normalizes into `ObservedSale` and declares its own `rights` — persist,
+redisplay, pool — which the write path CONSULTS and default-denies. A licence
+term is code rather than a comment. A paste parser satisfies the same interface
+as an API, which matters because the manual lane is the one with real depth.
+
+**What you keep.** The forward money engine: break-even by INVERTING the fee
+equation rather than marking basis up, because fees are charged on the higher
+price too and the naive version tells you an offer clears when it loses money.
+Fee rate prefers Beau's own settled sales over any published table.
+
+**The camera.** One sweep now yields two photos: glare removed, and a
+raking-light SURFACE map that no phone app produces. Registration came free from
+the corner detection that already existed. `exposure.ts` still gates it — a light
+source too broad to escape is diagnosed rather than swept at.
+
+**Two migrations applied tonight** (20260750 provenance + cold tier, 20260751 the
+sweep template), verified against information_schema rather than trusting the
+"Success" banner.
+
+**Still open, and they are Beau's:** the $9 coverage test on The Card API; whether
+he has an eBay STORE subscription, which would make the verified fee schedule the
+wrong page; whether PriceCharting's terms actually forbid re-display, which is
+still UNVERIFIED and currently makes that connector invisible to anyone but him.
+
+---
+
 ## 2026-07-28 (queue) - the strategy doc is now the to-do list too
 
 Beau: "state of play (known as strategy in obsidian) is going to serve as our to
