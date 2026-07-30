@@ -6,7 +6,7 @@
 // file used to be typed against `CardApiSale`, which meant a second sales
 // source would have had to translate into a competitor's field names to be
 // stored. See `observed-sale.ts` for the boundary.
-import type { ObservedSale } from "./observed-sale";
+import type { ObservedSale, SaleProvenance } from "./observed-sale";
 import { mayPersist, basisForSource } from "./price-sources";
 import { toAllIn, type PriceBasis } from "./price-basis";
 
@@ -29,10 +29,54 @@ export type MarketSaleRow = {
   grade: number | null;
   platform: string | null;
   sold_at: string | null;
+
+  // ── Added by migration 20260750, applied 2026-07-29 ──────────────────────
+  /**
+   * Which lane this row arrived through. The database CHECKs it against
+   * `added_by`: a vendor row may not claim a contributor, an own_sale row must
+   * have one.
+   */
+  provenance: SaleProvenance;
+  /**
+   * Who contributed it. `GO-LIVE.md` records why this exists: `card_id` is
+   * nullable ON DELETE SET NULL, so without this, deleting a card severs the
+   * only link back to whoever supplied a sale — and a poisoned row becomes
+   * permanently un-attributable.
+   */
+  added_by: string | null;
+  /**
+   * What `price` includes, STORED rather than re-derived at read time.
+   *
+   * `basisForSource` can infer it from the source today, but that inference is
+   * only as good as the source's convention NOW. A vendor that changes how it
+   * reports an auction house would silently reinterpret years of stored history;
+   * a value written at fetch time cannot be rewritten by a later change.
+   */
+  price_basis: PriceBasis;
+  /** Graded/raw as the source could state it. NULL means genuinely unknown. */
+  is_graded: boolean | null;
+};
+
+/**
+ * Who is contributing this row, and through which lane.
+ *
+ * Defaults to the vendor case because that is what the price-refresh cron does
+ * and it is the overwhelming majority of rows. A caller storing anything else
+ * has to say so, which is the right way round: `vendor` is the only lane that
+ * asserts nothing about a person.
+ */
+export type SaleOrigin = {
+  provenance?: SaleProvenance;
+  /**
+   * The contributing user. Constrained by the database, not just by convention:
+   * `vendor` rows must leave this null and `own_sale` rows must set it.
+   */
+  addedBy?: string | null;
 };
 
 export function saleToRow(
   identityId: string, cardId: string | null, s: ObservedSale, source: string,
+  origin: SaleOrigin = {},
 ): MarketSaleRow | null {
   if (!Number.isFinite(s.price) || s.price <= 0) return null;
   // A fast-settle estimate is not a realized sale. It must not be stored: the
@@ -40,10 +84,25 @@ export function saleToRow(
   // once is never corrected — it would sit in the shared history at the wrong
   // price permanently.
   if (!s.confirmed) return null;
+
+  const provenance = origin.provenance ?? "vendor";
+  // Enforced here as well as in the database. A CHECK violation would fail the
+  // WHOLE upsert batch — one mislabelled row would silently cost every other
+  // sale in that fetch — so the shape is corrected before it is sent rather
+  // than discovered at the far end.
+  const addedBy = provenance === "vendor" ? null : origin.addedBy ?? null;
+
   return {
     identity_id: identityId, card_id: cardId, source, external_id: s.externalId,
     title: s.title, price: round2(s.price), currency: s.currency,
     grader: s.grader, grade: s.grade, platform: s.platform, sold_at: s.soldAt,
+    provenance,
+    added_by: addedBy,
+    // The basis the SOURCE declared, travelling with the row. See the note on
+    // the field: re-deriving it later reinterprets history whenever a vendor
+    // changes convention.
+    price_basis: s.priceBasis,
+    is_graded: s.isGraded,
   };
 }
 
@@ -69,6 +128,7 @@ export type RowBatch = {
  */
 export function salesToRows(
   identityId: string, cardId: string | null, sales: ObservedSale[], source: string,
+  origin: SaleOrigin = {},
 ): RowBatch {
   if (!mayPersist(source)) return { rows: [], refusedSource: source, unconfirmed: 0 };
 
@@ -77,7 +137,7 @@ export function salesToRows(
   let unconfirmed = 0;
   for (const s of sales) {
     if (!s.confirmed) { unconfirmed++; continue; }
-    const r = saleToRow(identityId, cardId, s, source);
+    const r = saleToRow(identityId, cardId, s, source, origin);
     if (r && !seen.has(r.external_id)) { seen.add(r.external_id); rows.push(r); } // in-batch dedup too
   }
   return { rows, refusedSource: null, unconfirmed };

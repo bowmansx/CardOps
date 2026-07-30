@@ -151,3 +151,65 @@ describe("storedToSales", () => {
     expect(s.isGraded).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROVENANCE. Migration 20260750, applied 2026-07-29. The database CHECKs the
+// relationship between `provenance` and `added_by`, and a violation fails the
+// WHOLE upsert batch — so the shape is corrected before it is sent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("saleToRow — provenance columns", () => {
+  it("defaults to the vendor lane, which asserts nothing about a person", () => {
+    const r = saleToRow("i1", "c1", sale(), "thecardapi")!;
+    expect(r.provenance).toBe("vendor");
+    expect(r.added_by).toBeNull();
+  });
+
+  it("attributes a paste to whoever contributed it", () => {
+    const r = saleToRow("i1", "c1", sale(), "paste-terapeak", {
+      provenance: "manual_paste", addedBy: "user-7",
+    })!;
+    expect(r.provenance).toBe("manual_paste");
+    expect(r.added_by).toBe("user-7");
+  });
+
+  // The DB CHECK says a vendor row may not claim a contributor. Sending one
+  // would fail the whole batch, so a caller that supplies both is corrected
+  // rather than allowed to poison every other sale in the same fetch.
+  it("strips a contributor from a vendor row instead of failing the batch", () => {
+    const r = saleToRow("i1", "c1", sale(), "thecardapi", {
+      provenance: "vendor", addedBy: "user-7",
+    })!;
+    expect(r.added_by).toBeNull();
+  });
+
+  // Stored rather than re-derived: re-deriving reinterprets years of history
+  // the day a vendor changes how it reports an auction house.
+  it("stores the basis the source declared", () => {
+    expect(saleToRow("i1", "c1", sale({ priceBasis: "hammer" }), "thecardapi")!.price_basis).toBe("hammer");
+    expect(saleToRow("i1", "c1", sale({ priceBasis: "unknown" }), "thecardapi")!.price_basis).toBe("unknown");
+  });
+
+  // NULL means nobody recorded it. Collapsing to false would assert every row
+  // was raw, which is the inflation bug this whole column exists to end.
+  it("keeps an unknown graded flag null", () => {
+    expect(saleToRow("i1", "c1", sale({ isGraded: null }), "thecardapi")!.is_graded).toBeNull();
+    expect(saleToRow("i1", "c1", sale({ isGraded: true }), "thecardapi")!.is_graded).toBe(true);
+    expect(saleToRow("i1", "c1", sale({ isGraded: false }), "thecardapi")!.is_graded).toBe(false);
+  });
+});
+
+describe("salesToRows carries the origin to every row", () => {
+  it("stamps a whole paste batch with its contributor", () => {
+    const b = salesToRows("i1", "c1", [
+      sale({ externalId: "a" }), sale({ externalId: "b" }),
+    ], "paste-130point", { provenance: "manual_paste", addedBy: "user-9" });
+    expect(b.rows).toHaveLength(2);
+    expect(b.rows.every((r) => r.provenance === "manual_paste" && r.added_by === "user-9")).toBe(true);
+  });
+
+  it("leaves a cron batch as vendor rows with no contributor", () => {
+    const b = salesToRows("i1", "c1", [sale()], "thecardapi");
+    expect(b.rows[0]).toMatchObject({ provenance: "vendor", added_by: null });
+  });
+});

@@ -108,7 +108,15 @@ export async function POST(request: Request) {
     }, { status: 409 });
   }
 
-  const batch = salesToRows(card.identity_id, card.id, parsed.sales, src.id);
+  // ATTRIBUTED TO THE PERSON WHO PASTED IT. These rows land on the shared
+  // identity, so every owner of the card inherits them — and `GO-LIVE.md`
+  // records that without `added_by`, deleting the originating card severs the
+  // only link back to who supplied a sale, leaving a poisoned row permanently
+  // un-attributable. A paste is exactly the lane where that matters.
+  const batch = salesToRows(card.identity_id, card.id, parsed.sales, src.id, {
+    provenance: "manual_paste",
+    addedBy: user.id,
+  });
   if (batch.refusedSource) {
     // Should be unreachable — manual sources declare persist:true — so if it
     // fires, a source was added without rights and that is worth shouting about
