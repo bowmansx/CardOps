@@ -1,6 +1,66 @@
 # CardOps — where things stand and what's left
 
-## ✅ STATE AS OF 2026-07-25 (end of session)
+## ✅ STATE AS OF 2026-07-29 (overnight)
+
+**Migrations 20260750 and 20260751 are APPLIED and verified** against
+`information_schema`, not against the SQL editor's "Success" banner — which had
+already been on screen from the previous run and would have said the same thing
+had nothing happened. `card_market_sales` gained provenance / added_by /
+price_basis / fetched_at / is_graded, `card_market_rollups` exists with
+read-only RLS, and the sweep photo template is seeded.
+
+> [!warning] 21 commits are on local `main` and NOT deployed.
+> The camera work is not on card-ops-zeta.vercel.app until `git push`. The
+> database is deliberately AHEAD of the deployed code, which is safe: both
+> migrations are additive with defaults, and the deployed build ignores columns
+> it does not know about.
+
+**What shipped into the repo today, grouped by what it means:**
+
+- **The valuation spine.** Every sales source normalizes into `ObservedSale`
+  and declares its `rights` (persist / redisplay / pool), which the write path
+  consults and DEFAULT-DENIES for an unknown source. A licence is code.
+- **Four money bugs fixed**, all found by reading vendors' own docs rather than
+  by reasoning: hammer prices medianed against all-in (~22% error), provisional
+  prices stored permanently, raw comps polluted by graded sales whose grade was
+  never extracted, and eBay's genuinely tiered fee schedule.
+- **The forward money engine** — break-even by inverting the fee equation, fee
+  rate preferring Beau's own settled sales over any published table.
+- **The paste lane**, end to end. The one source of real depth that no API sells.
+- **The camera sweep** — one pass, two photos: glare removed, and a raking-light
+  surface map. Plus the legibility rebuild and automatic capture actually firing.
+
+**Three vendor questions closed by reading the actual terms:**
+
+- The Card API §4a **permits** storing to serve your users and displaying
+  transaction history in your own product interface. The pricing wall was never
+  a wall.
+- PriceCharting **forbids** use in "any software... accessible to third parties"
+  without written permission — the cautious reading was right. Internal business
+  use needs a LEGENDARY subscription; permission has a contact, brady@vgpc.com.
+- PriceCharting has **no sales history at any tier**, which is a data limit
+  rather than a licence one and makes it permanently a second opinion.
+
+### Next, in order
+
+**Still Beau's, and unchanged by anything above:**
+
+1. **`git push`** — nothing above is testable on a phone until it deploys.
+2. **The $9 coverage test.** 50 cards of known value through The Card API's
+   Starter tier; count matched quotes. That number decides whether pricing is a
+   coverage problem or a depth problem.
+3. **Do you have an eBay STORE subscription?** If so the verified fee schedule
+   is the wrong page and every break-even is off.
+4. **Switch on Seller Hub** — free, one click, and it is the gate in front of
+   Terapeak. Whether Terapeak still exists is genuinely unknown; `/sh/ovw`
+   redirects to the opt-in exactly as `/sh/research` does, so the redirect never
+   said anything about Terapeak.
+5. Read `spec/strategy/TEST-THE-CAMERA.md` before picking up a phone — it maps
+   each likely symptom to the one constant that fixes it.
+
+---
+
+## STATE AS OF 2026-07-25 (end of session)
 
 **Everything built today is applied, merged and deployed.** The queue below is
 now entirely items only Beau can do.
