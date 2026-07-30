@@ -3,6 +3,7 @@ import { scryfall } from "./scryfall";
 import { thecardapi } from "./thecardapi";
 import type { CardForPricing, PriceSourceAdapter, SourceRights } from "./types";
 import type { PriceBasis } from "../price-basis";
+import { manualSource } from "./manual";
 
 // The registry, in display order. Add a new vendor by dropping an adapter file
 // here — the refresh route and the card page pick it up automatically.
@@ -27,9 +28,15 @@ export function salesAdapters(card: CardForPricing): SalesAdapter[] {
   return runnableAdapters(card).filter((a): a is SalesAdapter => typeof a.fetchSales === "function");
 }
 
-/** A source's declared licence rights, or null if the id isn't a known source. */
+/**
+ * A source's declared licence rights, or null if the id isn't a known source.
+ *
+ * Looks in BOTH registries. Manual sources aren't adapters — a paste has nothing
+ * to fetch — but a pasted sale is stored in the same table under the same gate,
+ * so it needs the same rights lookup or `mayPersist` default-denies every paste.
+ */
 export function sourceRights(id: string): SourceRights | null {
-  return ADAPTERS.find((a) => a.id === id)?.rights ?? null;
+  return ADAPTERS.find((a) => a.id === id)?.rights ?? manualSource(id)?.rights ?? null;
 }
 
 /**
@@ -52,7 +59,14 @@ export function mayPersist(id: string): boolean {
  * to "unknown", so the row is excluded from medians rather than assumed.
  */
 export function basisForSource(sourceId: string, platform: string | null): PriceBasis {
-  return ADAPTERS.find((a) => a.id === sourceId)?.salesBasis?.(platform) ?? "unknown";
+  const fromAdapter = ADAPTERS.find((a) => a.id === sourceId)?.salesBasis?.(platform);
+  if (fromAdapter) return fromAdapter;
+  // A paste has no fixed convention — the person pasting declared it at import
+  // time. Once the migration lands, `price_basis` is stored per row and this
+  // fallback stops mattering; until then a paste source's usual meaning is the
+  // best available answer, and it is a stated default rather than a guess about
+  // a platform we know nothing about.
+  return manualSource(sourceId)?.defaultBasis ?? "unknown";
 }
 
 export type SourceAvailability = {
@@ -78,3 +92,4 @@ export function sourceAvailability(card: CardForPricing): SourceAvailability[] {
 
 export * from "./types";
 export * from "./blend";
+export * from "./manual";

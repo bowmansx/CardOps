@@ -23,6 +23,7 @@ import { BasisBreakdown } from "@/components/cards/BasisBreakdown";
 import { AddPhotos } from "@/components/cards/AddPhotos";
 import { lotAverages, cardAcquisitionBasis, cardBasis } from "@/lib/cards/basis";
 import { WhatYouKeep } from "@/components/cards/WhatYouKeep";
+import { PasteComps } from "@/components/cards/PasteComps";
 import type { SettledSale } from "@/lib/cards/net-proceeds";
 import { MarketBySource } from "@/components/cards/MarketBySource";
 import { currentRole } from "@/lib/cards/roles";
@@ -295,6 +296,10 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
             grade: c.grade ?? null, condition_type: c.condition_type,
           } as CardForPricing)}
         />
+
+        {/* The recovery path from "no comps at this grade" — collapsed until
+            wanted, so it costs nothing on a card that already has history. */}
+        <PasteComps cardId={c.id} className="mt-4" />
 
         {/* WHAT YOU KEEP. Market value is a commodity — eBay gives it away with
             a camera scan. This is the half nobody else can compute, because it
