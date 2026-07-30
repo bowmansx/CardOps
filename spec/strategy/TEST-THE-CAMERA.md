@@ -103,7 +103,21 @@ looking at does not cover even your own company), and permission has a named
 contact — **brady@vgpc.com**. That is a short email, and it is the difference
 between the connector working for your friends or only for you.
 
-**Terapeak.** Whether it still exists is unresolved. The claim that it offers
-three years of sold data including accepted Best Offers is inherited from the
-same research pass that said automated sold comps were impossible while one was
-integrated in this repo. It should not be load-bearing until someone confirms it.
+**Terapeak — the BLOCKER is identified, its existence still is not.**
+
+Seller Hub is not switched on for your eBay account. That is now tested rather
+than inferred: `/sh/ovw`, the Seller Hub overview and the most basic page it has,
+redirects to the same "Start using Seller Hub" opt-in as `/sh/research` does. So
+the redirect never meant "Terapeak is gone" — it meant every `/sh/*` path is
+behind an opt-in you have not taken.
+
+It is **free** ("There's no charge to use Seller Hub") and one click, and it is
+the gate in front of Terapeak whatever state Terapeak is in. I did not click it —
+enabling a service on your account while you are asleep is not mine to do.
+
+**Once it is on, thirty seconds settles the whole question:** open Seller Hub and
+look for a Research tab. If it is there, Terapeak exists and the only thing that
+was ever wrong was the door. If it is not, the claim about three years of sold
+data comes out of the strategy — it is inherited from the same research pass that
+said automated sold comps were impossible while one was already integrated in
+this repo, and it should not be load-bearing on that provenance.
