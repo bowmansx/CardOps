@@ -50,12 +50,30 @@ against the commercial reading before the first invoice.
   constraint, not a nice-to-have: catalogue lookups must never consume credits,
   including after an allowance is exhausted.** The moment "out of credits"
   hides a card's name, it is behind a paywall.
-- **PriceCharting: it does not.** "Internal use only" is about WHO uses the
-  data, not what it costs. A friend's screen showing a PriceCharting-derived
-  value is that friend using it, free or not - the same term blocks giving it
-  away. Two clean paths: **ask them** for a redistribution quote (often an
-  email, not a legal project), or restrict that connector to the operator's own
-  account and serve other users from sources that permit it.
+- **PriceCharting: it does not — and this is now VERIFIED, not inferred.**
+  Read 2026-07-29 at `pricecharting.com/page/terms-of-service`, under "Price Data
+  Acceptable Use", verbatim:
+
+  > "Price Data cannot be used in any software, application, or system that is
+  > accessible to third parties, including customers, clients, or the general
+  > public, without express written permission."
+
+  Free or paid makes no difference; the term is about WHO SEES IT. Two things the
+  actual text added that the earlier guess missed:
+
+  1. **Internal business use requires a LEGENDARY subscription** — "usage by the
+     subscriber and their authorized employees or contractors, strictly within
+     the organization, and not for external display or redistribution". The
+     cheaper API tiers license PERSONAL use only, so even Beau-and-his-own-
+     company is above the tier he was pricing.
+  2. **There is a named contact for permission: brady@vgpc.com.** The
+     redistribution ask this file hypothesised turns out to be exactly the email
+     it guessed at, and now there is an address for it.
+
+  One narrow permission does exist and is easy to over-read: price data "may be
+  referenced on external websites" with citation and a visible hyperlink. That is
+  editorial reference; the software clause above treats an application as a
+  different case.
 
 Engineering judgement about how such terms usually read, not legal advice.
 Read the actual agreements before going live.

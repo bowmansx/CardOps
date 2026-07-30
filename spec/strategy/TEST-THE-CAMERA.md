@@ -93,11 +93,15 @@ hand.
 
 ## Still unverified, and I want to be plain about it
 
-**PriceCharting's terms.** `rights.redisplay` is false on that connector, which
-means a friend on your app sees no PriceCharting value at all. That rests on an
-"internal use only" reading nobody has confirmed, and it shares a lineage with
-two claims that turned out wrong yesterday. It needs checking in BOTH directions
-— if their terms permit re-display, the connector is needlessly crippled.
+**~~PriceCharting's terms.~~ RESOLVED overnight — read, and the cautious reading
+was right.** Their terms say Price Data "cannot be used in any software,
+application, or system that is accessible to third parties... without express
+written permission", so `rights.redisplay: false` is confirmed rather than
+guessed. Two things worth acting on: internal business use needs a **Legendary**
+subscription (the cheap API tiers are personal-use only, so the $50 you were
+looking at does not cover even your own company), and permission has a named
+contact — **brady@vgpc.com**. That is a short email, and it is the difference
+between the connector working for your friends or only for you.
 
 **Terapeak.** Whether it still exists is unresolved. The claim that it offers
 three years of sold data including accepted Best Offers is inherited from the

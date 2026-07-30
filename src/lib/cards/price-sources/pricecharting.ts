@@ -68,13 +68,34 @@ export const pricecharting: PriceSourceAdapter = {
   enabled: () => !!process.env.PRICECHARTING_TOKEN,
   handles: () => true, // broad — let the vendor's search decide if it matches
 
-  // INTERNAL USE ONLY until a redistribution licence exists. That term is about
-  // WHO uses the data, not what it costs — a friend's screen showing a
-  // PriceCharting-derived value is that friend using it, free or not, so
-  // "we don't charge for it" does not rescue this. `GO-LIVE.md` records the two
-  // clean paths: ask them for a redistribution quote, or serve this source only
-  // to the operator's own account. Until one of those happens, redisplay stays
-  // false and no PriceCharting quote may be shown to another user.
+  // VERIFIED 2026-07-29 against pricecharting.com/page/terms-of-service, under
+  // "Price Data Acceptable Use". This was an assumption until then; it is now
+  // quoted, and it holds:
+  //
+  //   "Price Data cannot be used in any software, application, or system that is
+  //    accessible to third parties, including customers, clients, or the general
+  //    public, without express written permission."
+  //
+  // CardOps serving a value to a friend is software accessible to a third party.
+  // Free or paid makes no difference — the term is about WHO SEES IT. So
+  // `redisplay` is false, and that is a confirmed limit rather than a cautious
+  // guess.
+  //
+  // TWO THINGS THAT WERE NOT KNOWN BEFORE READING IT:
+  //
+  // 1. Even INTERNAL use has a floor: "Price Data can be used for your Internal
+  //    Business Purposes if you maintain a valid and current LEGENDARY
+  //    subscription" — usage "by the subscriber and their authorized employees or
+  //    contractors, strictly within the organization, and not for external
+  //    display or redistribution". So the cheaper API tiers do not license
+  //    internal business use at all, only personal use.
+  // 2. There is a named way out: "To request permission, contact brady@vgpc.com."
+  //    That is the redistribution ask `GO-LIVE.md` hypothesised, with an address.
+  //
+  // Note the ONE thing that is permitted without asking, because it is narrower
+  // than it first looks: price data "may be referenced on external websites"
+  // given citation and a visible hyperlink. That is editorial reference, and the
+  // software clause above is explicit that an application is a different case.
   rights: {
     persist: false,
     redisplay: false,
