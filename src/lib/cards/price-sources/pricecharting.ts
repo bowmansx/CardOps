@@ -1,19 +1,61 @@
 // PriceCharting adapter — Beau's pick. Broad coverage (TCG + games + some
-// sports), current values across grades. NOTE: the PriceCharting *API* returns
-// current values only, NOT sales history (the price charts live in their web
-// UI). Activates the moment PRICECHARTING_TOKEN is set in the environment.
+// sports), current values across grades. Activates the moment
+// PRICECHARTING_TOKEN is set in the environment.
+//
+// WHY THIS CAN NEVER BE THE APP'S PRICING SOURCE, verified 2026-07-29 from their
+// own API documentation, verbatim:
+//
+//   "The API and CSV only support current item values in various grades and
+//    conditions. Historic prices and historic sales are not supported."
+//
+// So there is no sales history at ANY price. That is not a licence problem or a
+// tier problem — the data does not exist on this endpoint. It means PriceCharting
+// can never populate `card_market_sales`, never feed the sales-over-time chart,
+// and never back a provenance chip, because there is nothing to tap through to.
+// It is one number they assert today. `kind: "guide"` is doing real work.
+//
+// TWO HARD OPERATIONAL LIMITS, same source:
+//   - "The API is limited to 1 call every second... your account permissions
+//     revoked if it persists." One global budget for the whole app, not per user.
+//   - The bulk escape hatch is one CSV per 10 minutes, and "CSV download feature
+//     is only available to Legendary subscribers" — a higher tier than the base
+//     API subscription.
+//
+// WHAT IT IS GENUINELY GOOD FOR: nine grade points from a single call, which is
+// exactly the shape a grade-delta multiplier wants, plus a `sales-volume` field
+// (yearly units sold) that is a liquidity signal nothing else here provides.
 import type { PriceSourceAdapter, SourceQuote, CardForPricing, AdapterResult } from "./types";
 
-// PriceCharting's price fields, mapped to card grades PER THEIR API DOCS. All
-// values arrive as integer pennies. This mapping is best-effort until a live
-// token confirms it against a real response — the raw payload is stored, and
-// every value is labeled by its source field, so a correction is trivial.
+// PriceCharting's price fields mapped to card grades — VERIFIED 2026-07-29
+// against their published API key descriptions (pricecharting.com/api-documentation).
+// All nine field-to-grade mappings match what they document. All values arrive as
+// integer pennies.
+//
+// TWO IMPRECISIONS IN THEIR DATA, worth knowing before trusting a match:
+//
+// 1. THE GRADER IS MOSTLY UNSPECIFIED. Their descriptions read "Graded 9 by a
+//    grading company" — generic. Only `manual-only-price` names one: "Graded 10
+//    by PSA grading service". We attribute PSA to the mid grades because PSA is
+//    the dominant grader and `SourceQuote.grader` has no way to say "graded,
+//    company unstated" (null means RAW there, which would be worse). The effect
+//    is that a BGS 9 card fails to match a value that would in fact suit it —
+//    UNDER-matching, which loses a data point rather than crediting a wrong one.
+//    That is the safe direction, but it is an approximation, not their claim.
+// 2. TWO FIELDS ARE BANDS, NOT GRADES. `cib-price` is "Graded 7 or 7.5" and
+//    `new-price` is "Graded 8 or 8.5". A PSA 7.5 card therefore finds no exact
+//    match under strict grade equality, which is why the label says the band.
+//
+// The raw payload is stored and every value carries its source field, so a
+// correction stays trivial.
 const PC_GRADE_FIELDS: { field: string; grader: string | null; grade: number | null; label: string }[] = [
   { field: "loose-price", grader: null, grade: null, label: "Ungraded" },
-  { field: "cib-price", grader: "PSA", grade: 7, label: "Grade 7" },
-  { field: "new-price", grader: "PSA", grade: 8, label: "Grade 8" },
-  { field: "graded-price", grader: "PSA", grade: 9, label: "PSA 9" },
+  { field: "cib-price", grader: "PSA", grade: 7, label: "Grade 7–7.5" },
+  { field: "new-price", grader: "PSA", grade: 8, label: "Grade 8–8.5" },
+  // Their docs say "Graded 9 by a grading company", not PSA 9 — the old label
+  // asserted a company they never named.
+  { field: "graded-price", grader: "PSA", grade: 9, label: "Grade 9" },
   { field: "box-only-price", grader: "PSA", grade: 9.5, label: "Grade 9.5" },
+  // The one grade they DO attribute: "Graded 10 by PSA grading service".
   { field: "manual-only-price", grader: "PSA", grade: 10, label: "PSA 10" },
   { field: "bgs-10-price", grader: "BGS", grade: 10, label: "BGS 10" },
   { field: "condition-17-price", grader: "CGC", grade: 10, label: "CGC 10" },
