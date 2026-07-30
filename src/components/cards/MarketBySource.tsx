@@ -6,6 +6,7 @@ import { Layers, Loader2, RefreshCw, ExternalLink, Clock } from "lucide-react";
 import { consensusForCard } from "@/lib/cards/price-sources/blend";
 import type { SourceQuote } from "@/lib/cards/price-sources/types";
 import { asSoldPayload } from "@/lib/cards/distill";
+import { sourceRights } from "@/lib/cards/price-sources";
 import { PriceProvenance, NoCompAtGrade } from "./PriceProvenance";
 
 // "Market — by source" (Beau, 2026-07-20): each vendor's current values shown
@@ -219,6 +220,27 @@ export function MarketBySource({
               );
             })}
           </div>
+
+          {/* ATTRIBUTION, where the source's licence requires it. Not
+              decorative: PriceCharting's own permission to reference their data
+              is conditional on being "clearly cited as the source" with "a
+              visible hyperlink". Declared in the adapter's rights and rendered
+              here — a condition stated in code and never shown is a condition
+              the app claims to meet and does not. */}
+          {(() => {
+            const r = sourceRights(source);
+            if (!r?.attribution) return null;
+            return (
+              <p className="mt-1 text-[10px] text-ink/40">
+                Data from{" "}
+                {r.attributionUrl ? (
+                  <a href={r.attributionUrl} target="_blank" rel="noreferrer" className="text-flag underline">
+                    {r.attribution}
+                  </a>
+                ) : r.attribution}
+              </p>
+            );
+          })()}
 
           {/* WHERE THAT NUMBER CAME FROM. Only sold quotes carry evidence — a
               guide value is one figure a vendor asserts, with nothing behind it

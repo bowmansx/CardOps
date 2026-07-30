@@ -28,6 +28,7 @@ export const scryfall: PriceSourceAdapter = {
     redisplay: true,
     pool: false,
     attribution: "Scryfall",
+    attributionUrl: "https://scryfall.com/",
     deleteOnTerminationDays: null,
   },
 

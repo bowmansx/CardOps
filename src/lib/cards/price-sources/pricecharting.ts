@@ -101,6 +101,7 @@ export const pricecharting: PriceSourceAdapter = {
     redisplay: false,
     pool: false,
     attribution: "PriceCharting",
+    attributionUrl: "https://www.pricecharting.com/",
     deleteOnTerminationDays: null,
   },
 

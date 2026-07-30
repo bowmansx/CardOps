@@ -78,8 +78,18 @@ export type SourceRights = {
    * own information...". A source can be persistable and un-poolable.
    */
   pool: boolean;
-  /** Attribution that must render wherever this data appears, if any. */
+  /**
+   * Attribution that must render wherever this data appears, if any.
+   *
+   * NOT decorative. PriceCharting's terms make citation part of the permission
+   * itself — price data may be referenced "provided that PriceCharting is
+   * clearly cited as the source, and a visible hyperlink to PriceCharting is
+   * included". An attribution declared here and never rendered is a licence
+   * condition the app claims to meet and does not.
+   */
   attribution: string | null;
+  /** Where the visible hyperlink should point. Null when text alone suffices. */
+  attributionUrl?: string | null;
   /**
    * Days after the subscription ends within which stored rows must be deleted.
    * The Card API §5 says 30. An obligation nobody can execute is an obligation

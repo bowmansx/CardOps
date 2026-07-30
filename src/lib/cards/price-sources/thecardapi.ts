@@ -229,6 +229,7 @@ export const thecardapi: PriceSourceAdapter = {
     redisplay: true,
     pool: false,
     attribution: "The Card API",
+    attributionUrl: "https://thecardapi.com/",
     deleteOnTerminationDays: 30, // §5, on cancellation or termination
   },
 
