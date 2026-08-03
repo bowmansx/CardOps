@@ -7,6 +7,37 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-08-03 - nothing on main; the work is real but unpushed
+
+**Not material, from where this document can see.** `origin/main` has not moved
+since the 30th — zero commits, HEAD still `3a2ac9d`. `BRIEF.md` has no new
+entries from Beau, committed or working-tree. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only`, `git log --since=2026-07-30` on the loop clone
+(empty), `BRIEF.md`, and a read-only look at the working copy.
+
+**Noted, not acted on.** Beau's working copy is now **38 commits ahead** of
+`origin/main` — 71 files, ~8,700 lines, all unpushed. The last entry recorded
+four; that count is stale, not wrong. Among them: the valuation engine got a
+route and a panel, the paste lane got wired end to end, and the camera sweep
+landed. Several of those close things this document ranked. **They are not
+reflected in the ranking, because ranking work I cannot read from a pushed
+commit would be guessing.** The next run that sees them on `main` should treat
+them as material.
+
+**Three migrations are pending** in that range and unpasted here:
+`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`. Not pasted, not merged, per the rules.
+
+**A conflict is coming in this file.** The overnight build loop writes its own
+entries into `spec/strategy/CHANGES.md` in the working copy — there is already
+a `2026-08-02 (overnight, into the 3rd)` entry there that origin has never
+seen. This entry adds a second top-of-file hunk. When those 38 commits are
+pushed, resolve by keeping both, newest first.
+
+---
+
 ## 2026-07-30 - the #1 item shipped, and the pricing question closed
 
 **Material, and unusually so.** 31 commits and ~9,300 lines since the 28th. The
