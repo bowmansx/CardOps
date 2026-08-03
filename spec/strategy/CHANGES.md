@@ -95,7 +95,16 @@ Git's unresolved conflict markers into this file. Resolved by keeping BOTH
 entries — they were two different runs, not two versions of one — in the
 newest-first order this document states.
 
-**Still open, and they are Beau's:** 33 unpushed commits; migration 20260752;
+**One migration to paste, and it is the last blocker on the transfers.**
+`20260753_parallel_ratios` is a VIEW and a FUNCTION — no table, no cron, two
+DROPs to reverse — supplying the paired observations `transfer.ts` measures its
+multipliers from. A view rather than a scheduled rollup on purpose: the six
+crons are deliberately 401ing until the cutover, so anything needing a refresh
+would have been born broken. **Never run against a database.** Its header
+carries the Postgres 15 requirement and two verification queries.
+
+**Still open, and they are Beau's:** 35 unpushed commits; migrations 20260752
+and 20260753;
 the $9 coverage test; whether there is an eBay Store subscription; Seller Hub
 opt-in; the eBay written-permission request; scoping Obsidian Git to `spec/`.
 
