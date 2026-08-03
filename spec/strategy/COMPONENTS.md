@@ -35,7 +35,15 @@ these three is how a to-do list becomes a wall of guilt.
 **Status:** partial
 **Files:** `src/lib/cards/price-sources/types.ts`, `src/lib/cards/price-sources/index.ts`, `src/lib/cards/price-sources/manual.ts`
 **Done:** persist / redisplay / pool declared per source and consulted by the write path, default-denying unknown sources. `mayPoolFrom(source, credential)` makes poolability depend on whose key paid.
-**Left:** `deleteOnTerminationDays` is declared and no tooling executes it — The Card API §5 requires deleting stored rows within 30 days of cancelling, and nothing can currently do that.
+**Left:** Nothing. `deleteOnTerminationDays` gained tooling 2026-08-02 — see `retention` below.
+
+### retention
+**Status:** partial
+**Files:** `src/lib/cards/retention.ts`, `src/app/api/cards/market-sales/purge/route.ts`, `app/api/cards/market-sales/purge/route.ts`
+**Done:** The clause `SourceRights` had declared since it landed and nothing could carry out — The Card API §5 gives 30 days from cancellation. A licence term the code states and cannot perform reads as a commitment made and then ignored. `retentionDuty` dates the deadline from termination; the route counts before it deletes, deletes only on explicit `confirm`, is owner-only, and has no cron path by design.
+**The two things it refuses to do:** it never touches a row the user produced — scope is (source AND `provenance='vendor'`), because sweeping up own sales and pasted comps sitting in the same table would destroy work under cover of compliance. And it never silently deletes a ROLLUP: whether a statistic derived from a vendor's rows is still that vendor's data is unsettled, so those are reported for a person to decide.
+**Why it uses the service client:** `card_market_sales` has no DELETE policy for authenticated callers at all. Under the user client the delete matches zero rows and returns NO ERROR, so the counter would report thousands of deletions having removed nothing. The delete now `.select()`s what it removed and hard-stops if that is zero — and with no service key the route refuses outright rather than reporting an obligation discharged that wasn't.
+**Left:** No UI — it is a POST nobody can reach from a screen, so today it needs curl. Nothing records WHEN a subscription was terminated, so `retentionDuty` has to be told; a `terminated_at` per source belongs with the BYO source configs.
 
 ### byo-source-configs
 **Status:** stalled
