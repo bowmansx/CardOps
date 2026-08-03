@@ -66,6 +66,18 @@ these three is how a to-do list becomes a wall of guilt.
 **Done:** Compaction into per-identity/grade/period statistics that carry provenance. Additive — deletes nothing.
 **Left:** Nothing READS the rollups. `rollupsToSeries` exists and no chart calls it, so history older than the hot window is computed and then ignored. Also gated on `CRON_SECRET`, so it 401s until the cutover.
 
+### own-book-source
+**Status:** partial
+**Files:** `src/lib/cards/price-sources/own-book.ts`
+**Done:** A user's own settled sales as comps — the highest-trust source available and it needs nobody's permission, because a seller is a party to their own transaction. Price is settled not scraped, identity is exact rather than title-matched, condition is known rather than inferred from a ~12%-populated grader field, and accepted Best Offers carry their real negotiated number. Title is deliberately left NULL so the pooling decision never has to be retrofitted through stored data.
+**Left:** Nothing reads it yet — the orchestrator needs a caller that supplies the rows. `rights.pool` is false pending the Lane C decision.
+
+### orchestrator
+**Status:** partial
+**Files:** `src/lib/cards/orchestrator.ts`
+**Done:** Valuation engine Phase 1.4. Walks sources cheapest-first and stops on SUFFICIENCY rather than on success — a source returning rows is not a reason to stop, the question is whether the evidence supports an answer at the confidence asked for. Budget checked before the call, not after. A failed source is distinguished from an empty one and is not charged for.
+**Left:** No caller. Needs wiring to a route that supplies `read` with the real Supabase queries, and the sufficiency thresholds are judgement rather than calibrated.
+
 ### valuation-engine
 **Status:** designed
 **Files:** `BUILD_LOG.md`, `reference/VALUATION_ENGINE.md`

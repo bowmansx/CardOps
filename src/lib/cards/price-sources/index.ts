@@ -1,13 +1,17 @@
 import { pricecharting } from "./pricecharting";
 import { scryfall } from "./scryfall";
 import { thecardapi } from "./thecardapi";
+import { ownBook } from "./own-book";
 import type { CardForPricing, PriceSourceAdapter, SourceRights } from "./types";
 import type { PriceBasis } from "../price-basis";
 import { manualSource } from "./manual";
 
 // The registry, in display order. Add a new vendor by dropping an adapter file
 // here — the refresh route and the card page pick it up automatically.
-export const ADAPTERS: PriceSourceAdapter[] = [thecardapi, pricecharting, scryfall];
+// OWN-BOOK FIRST, and the order is the cost order. The orchestrator walks this
+// list cheapest-first and stops when the evidence is sufficient, so a card with
+// three of the user's own settled sales never spends a vendor call at all.
+export const ADAPTERS: PriceSourceAdapter[] = [ownBook, thecardapi, pricecharting, scryfall];
 
 /** Adapters that are BOTH configured and cover this card — the ones to run. */
 export function runnableAdapters(card: CardForPricing): PriceSourceAdapter[] {
