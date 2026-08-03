@@ -80,9 +80,10 @@ these three is how a to-do list becomes a wall of guilt.
 
 ### valuation-run
 **Status:** partial
-**Files:** `src/lib/cards/valuation-run.ts`, `src/app/api/cards/valuation/route.ts`, `app/api/cards/valuation/route.ts`
+**Files:** `src/lib/cards/valuation-run.ts`, `src/app/api/cards/valuation/route.ts`, `app/api/cards/valuation/route.ts`, `src/components/cards/ValuationPanel.tsx`
 **Done:** The join that made four finished modules reachable — orchestrator, own-book, distill and thin-reason were each pure, tested, and callable from nothing. `POST /api/cards/valuation` walks sources cheapest-first, prices from whatever it gathered, and when it cannot, returns the REASON with the transfer that reason licenses. Confidence is derived from the evidence and not from the budget asked for, so the same comps never report differently because someone was in a hurry. A source that never declared a cost sorts LAST, mirroring `mayPersist`'s default-deny. Read-only: it computes a valuation and writes nothing, because adopting a number is a decision.
-**Left:** No UI calls it. The transfer methods are unimplemented, so a thin card still ends with no price. Nothing writes the verdict anywhere, so a valuation is not yet auditable after the fact.
+**Left:** The transfer methods are unimplemented, so a thin card gets a reason and still no price. Nothing writes the verdict anywhere, so a valuation is not auditable after the fact — re-running is the only way to see how one was reached. Untested against a real card with real sales.
+**UI:** `ValuationPanel` on the card page renders the walk itself — asked, skipped, empty — because a screen that shows only the winners reads as "we checked everything" (rule 10). The abstention gets the same visual weight as a price: a pricing screen that goes blank when it doesn't know teaches people to distrust it when it does.
 
 ### thin-reason
 **Status:** partial

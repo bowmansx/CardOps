@@ -27,6 +27,7 @@ import { WhatYouKeep } from "@/components/cards/WhatYouKeep";
 import { PasteComps } from "@/components/cards/PasteComps";
 import type { SettledSale } from "@/lib/cards/net-proceeds";
 import { MarketBySource } from "@/components/cards/MarketBySource";
+import { ValuationPanel } from "@/components/cards/ValuationPanel";
 import { currentRole } from "@/lib/cards/roles";
 import { suggestedListPrice } from "@/lib/cards/valuation";
 import { sourceAvailability, type CardForPricing } from "@/lib/cards/price-sources";
@@ -291,6 +292,13 @@ export default async function CardDetail({ params }: { params: Promise<{ id: str
             </div>
           );
         })()}
+
+        {/* The valuation engine: one price, and the walk that produced it —
+            which sources were asked in what order, which were skipped, and when
+            there is no price, WHY. Above "by source" deliberately: that panel
+            answers "what does each vendor say", this one answers "what is it
+            worth", and the second is the question people arrive with. */}
+        <ValuationPanel cardId={c.id} className="mt-4" />
 
         {/* Market — by source: each vendor separately + a blended consensus. */}
         <MarketBySource
