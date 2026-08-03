@@ -59,3 +59,9 @@ confusion later, so they're named for what they do instead.
 camera, the three constants that will need tuning and which symptom maps to
 which, and the note that 14 commits are NOT deployed yet. Read it before picking
 up a phone.
+
+**[[COMPONENTS]]** — every component started, its status, and what would finish
+it. Machine-checked by `node scripts/component-check.mjs`, which fails if an
+entry claims a file that does not exist OR if a module exists that no entry
+claims. Also holds what was discussed and deliberately NOT built, so those stop
+resurfacing as new ideas.
