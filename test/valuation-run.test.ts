@@ -179,3 +179,29 @@ describe("runValuation", () => {
     expect(verdict.spent).toBe(0);
   });
 });
+
+describe("the user's own pricing rules govern the engine", () => {
+  const gatherFive = async () =>
+    gatherComps(card, [{ id: "own-book", costPerCall: 0, latency: 5 }],
+      async () => ({ sales: [10, 20, 30, 40, 1000].map((price) => sale({ price })) }),
+      { nowMs: NOW });
+
+  it("uses the configured aggregate instead of a hardcoded median", async () => {
+    const g = await gatherFive();
+    expect(verdictFor(card, g, thin(), { nowMs: NOW }).price).toBe(30);
+    expect(verdictFor(card, g, thin(), { nowMs: NOW, aggregate: { aggregate: { fn: "mean" } } }).price).toBe(220);
+  });
+
+  // The message that would otherwise be a lie: these comps DID match the card's
+  // condition, and telling someone to go find comps they already have is worse
+  // than saying nothing.
+  it("says the rules abstained, not that nothing matched", async () => {
+    const g = await gatherFive();
+    const v = verdictFor(card, g, thin(), { nowMs: NOW, aggregate: { min_comps: 10 } });
+
+    expect(v.price).toBeNull();
+    expect(v.narrative).toContain("5 matched this card's condition");
+    expect(v.narrative).toContain("your pricing rules ask for more");
+    expect(v.narrative).not.toContain("none matched");
+  });
+});

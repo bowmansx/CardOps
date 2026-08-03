@@ -23,6 +23,8 @@ import { ownSalesToObserved, type OwnSaleRow } from "@/lib/cards/price-sources/o
 import type { ObservedSale } from "@/lib/cards/observed-sale";
 import { sourceCosts, runValuation } from "@/lib/cards/valuation-run";
 import type { Budget } from "@/lib/cards/orchestrator";
+import type { DistillAggregate } from "@/lib/cards/distill";
+import type { StrategyParams } from "@/lib/cards/valuation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -65,12 +67,12 @@ export async function POST(request: Request) {
 
   const { data: card, error: cardErr } = await supabase
     .from("cards")
-    .select("id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, identity_id")
+    .select("id, player, year, set_name, card_number, parallel, sport_category, grader, grade, condition_type, identity_id, pricing_strategy")
     .eq("id", body.cardId)
     .maybeSingle();
   if (cardErr) return NextResponse.json({ error: `Card read failed: ${cardErr.message}` }, { status: 500 });
   if (!card) return NextResponse.json({ error: "Card not found." }, { status: 404 });
-  const c = card as CardForPricing & { identity_id: string | null };
+  const c = card as CardForPricing & { identity_id: string | null; pricing_strategy: string | null };
 
   const now = Date.now();
   // Warnings that must reach the screen. A valuation built on a partial read is
@@ -180,11 +182,39 @@ export async function POST(request: Request) {
   const ownSales365 = ownSales.filter((s) =>
     s.soldAt && Date.parse(`${s.soldAt}T00:00:00Z`) >= now - 365 * DAY).length;
 
+  // ── The user's own pricing rules ────────────────────────────────────────
+  // The card page already lets Beau configure how sales become a number —
+  // trimmed mean vs median, IQR fences, a minimum comp count, a multiplier for
+  // "my cards sell under the comps". Ignoring that here would make the engine
+  // quietly disagree with the value shown two panels down on the same screen.
+  //
+  // `round_99` is deliberately NOT carried across. Charm pricing is a LISTING
+  // convention and belongs to `suggestedListPrice`; a valuation of $47.99 claims
+  // a precision that came from marketing rather than from evidence.
+  let agg: DistillAggregate = {};
+  let strategyKey: string | null = null;
+  if (c.pricing_strategy) {
+    const { data: strat, error: stratErr } = await supabase
+      .from("card_pricing_strategies").select("params").eq("key", c.pricing_strategy).maybeSingle();
+    if (stratErr) {
+      warnings.push(`Your pricing rules couldn't be read (${stratErr.message}), so this used the default median.`);
+    } else {
+      const p = (strat?.params as StrategyParams | null)?.pipeline;
+      if (p) {
+        strategyKey = c.pricing_strategy;
+        agg = {
+          guards: p.guards, min_comps: p.min_comps, aggregate: p.aggregate,
+          ...(p.adjust?.multiplier != null ? { adjust: { multiplier: p.adjust.multiplier } } : {}),
+        };
+      }
+    }
+  }
+
   const { verdict } = await runValuation(
     c, sources, read,
     { issueYear: c.year, setHasSales, lastSaleDays, ownSales365 },
-    { budget, maxSpend: typeof body.maxSpend === "number" ? body.maxSpend : undefined, nowMs: now },
+    { budget, maxSpend: typeof body.maxSpend === "number" ? body.maxSpend : undefined, nowMs: now, aggregate: agg },
   );
 
-  return NextResponse.json({ verdict, budget, warnings });
+  return NextResponse.json({ verdict, budget, strategy: strategyKey, warnings });
 }

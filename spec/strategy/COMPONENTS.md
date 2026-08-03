@@ -289,7 +289,8 @@ this session and know a caveat, the caveat is stated rather than smoothed over.
 **Status:** partial
 **Files:** `src/lib/cards/valuation.ts`, `src/components/cards/PricingBuilder.tsx`
 **Done:** `PipelineV1` — configurable comp scope, grade delta, windows, IQR guards, six aggregates, min-comps abstention. `adjustToGrade` returns null rather than guessing when it cannot convert.
-**Left:** This is the closest thing to the valuation engine's ladder, and the engine spec does not acknowledge it exists. Reconcile before building a second pricing path.
+**Reconciled 2026-08-02.** The warning here was "reconcile before building a second pricing path", and the valuation engine promptly became a third. The arithmetic is now shared: `aggregateEntries` (guards → min_comps → aggregate) was extracted from `interpretPipeline` and `distill` delegates to it, so the same comps cannot produce different money depending on which screen asked. The FILTERING still differs and legitimately so — `interpretPipeline` filters by comp scope and window, `distill` by card condition and price basis, and those answer different questions about which sales count. The valuation route reads the card's configured strategy and passes its guards, min_comps, aggregate and multiplier through.
+**Left:** `round_99` is deliberately NOT carried into a valuation — charm pricing is a listing convention and belongs to `suggestedListPrice`; a valuation of $47.99 claims a precision that came from marketing. `adjustToGrade` and the multiplier tables are still unused by the engine, which is the remaining half of the reconciliation.
 
 ## Market & selling
 

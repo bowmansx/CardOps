@@ -11,12 +11,24 @@ import type { ObservedSale } from "./observed-sale";
 import { byNewest } from "./observed-sale";
 import { partitionByBasis, exclusionNote } from "./price-basis";
 import type { CardForPricing, SourceQuote } from "./price-sources/types";
+import { aggregateEntries, type PipelineV1 } from "./valuation";
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
-const median = (xs: number[]) => {
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+/**
+ * The arithmetic half of a pricing pipeline — guards, min_comps, aggregate.
+ *
+ * OPTIONAL, and the default reproduces the plain median this used to hard-code
+ * exactly. It exists so the user's own configured pricing preferences (set in
+ * `PricingBuilder`, stored on the card) can govern the valuation engine too,
+ * rather than the engine quietly using a different rule from the one the card
+ * page shows. The FILTERING stays here — condition matching and price-basis
+ * normalization are this module's job and nothing else does them.
+ */
+export type DistillAggregate = Pick<PipelineV1, "guards" | "min_comps" | "aggregate" | "adjust">;
+
+/** How to describe the number in a quote's label. */
+const AGG_LABEL: Record<NonNullable<PipelineV1["aggregate"]>["fn"], string> = {
+  median: "median", mean: "mean", trimmed_mean: "trimmed mean",
+  wavg_recency: "recency-weighted", last_sale: "last sale", min: "low", max: "high",
 };
 
 /**
@@ -53,6 +65,16 @@ export type DistilledQuote = {
   excluded: number;
   /** Provisional figures held out of the median. */
   unconfirmed: number;
+  /**
+   * How many sales survived condition matching AND basis resolution — the ones
+   * that were genuinely eligible to be priced.
+   *
+   * Exists so a caller can tell the two abstentions apart. "Nothing matched this
+   * card's condition" and "four matched but your rules ask for five" are
+   * different facts with different fixes, and reporting the first when the
+   * second happened sends someone hunting for comps they already have.
+   */
+  usable: number;
 };
 
 /** One sale as shown behind a price — the evidence a provenance chip opens. */
@@ -115,21 +137,37 @@ export function asSoldPayload(payload: unknown): SoldQuotePayload | null {
  * Every price is converted to all-in before it is medianed; sales whose basis
  * can't be resolved are dropped and COUNTED, never quietly discarded.
  */
-export function distill(sales: ObservedSale[], card: CardForPricing, source: string): DistilledQuote {
+export function distill(
+  sales: ObservedSale[], card: CardForPricing, source: string,
+  agg: DistillAggregate = {},
+): DistilledQuote {
   // A provisional figure is not a realized sale.
   const confirmed = sales.filter((s) => s.confirmed);
   const unconfirmed = sales.length - confirmed.length;
 
   const matched = confirmed.filter((s) => matchesCondition(s, card));
-  if (!matched.length) return { quote: null, excluded: 0, unconfirmed };
+  if (!matched.length) return { quote: null, excluded: 0, unconfirmed, usable: 0 };
 
   // Put every surviving sale on the same footing before taking a median.
   const { usable, excluded } = partitionByBasis(matched);
-  if (!usable.length) return { quote: null, excluded: excluded.length, unconfirmed };
+  if (!usable.length) return { quote: null, excluded: excluded.length, unconfirmed, usable: 0 };
+
+  // The arithmetic, shared with `interpretPipeline` rather than reimplemented.
+  // A `min_comps` the caller set can abstain here, which is why this happens
+  // BEFORE the payload is built — a quote with evidence attached to no price is
+  // a contradiction.
+  const price = aggregateEntries(usable.map((s) => ({ price: s.allIn, date: s.soldAt })), agg);
+  // MATCHED, BUT THE RULES SAID NO. `usable` is carried through so the caller
+  // can say "four matched, your rules ask for five" rather than the false
+  // "nothing matched this card's condition".
+  if (price == null) return { quote: null, excluded: excluded.length, unconfirmed, usable: usable.length };
 
   const recent = [...usable].sort(byNewest);
   const graded = card.condition_type === "graded";
   const gradeLabel = graded ? `${card.grader ?? "Graded"}${card.grade != null ? " " + card.grade : ""}` : "Ungraded";
+  // The label names the function actually used. "Median of 7" over a
+  // recency-weighted average would be a plain misstatement of what the number is.
+  const aggLabel = AGG_LABEL[agg.aggregate?.fn ?? "median"];
 
   // A sample of the exact sales behind the median, so a card page can answer
   // "show me why this price". BOTH numbers are kept: `price` is what the source
@@ -163,15 +201,16 @@ export function distill(sales: ObservedSale[], card: CardForPricing, source: str
       kind: "sold",
       grader: graded ? card.grader ?? null : null,
       grade: graded ? card.grade ?? null : null,
-      price: round2(median(usable.map((s) => s.allIn))),
+      price,
       currency: recent[0]?.currency ?? "USD",
-      label: `${gradeLabel} · median of ${usable.length}`,
+      label: `${gradeLabel} · ${aggLabel} of ${usable.length}`,
       url: recent[0]?.url ?? null,
       product_ref: null,
       payload,
     },
     excluded: excluded.length,
     unconfirmed,
+    usable: usable.length,
   };
 }
 

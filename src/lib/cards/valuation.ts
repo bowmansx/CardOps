@@ -258,29 +258,56 @@ export function interpretPipeline(
           return adj == null ? null : { price: adj, date: c.sale_date };
         })
         .filter((e): e is { price: number; date: string | null } => e != null));
+  return aggregateEntries(entries, p, now);
+}
+
+/** One price and its date — the unit every aggregate operates on. */
+export type PricedEntry = { price: number; date: string | null };
+
+/**
+ * GUARDS → MIN_COMPS → AGGREGATE, the last third of a pricing pipeline.
+ *
+ * Extracted 2026-08-02 because it had become the third implementation of "turn
+ * these sales into one number" in this codebase, and the three would have
+ * drifted. `interpretPipeline` reaches it after scope and window filtering;
+ * `distill` reaches it after condition matching and price-basis normalization.
+ * The FILTERING differs legitimately between those two — they answer different
+ * questions about which sales count — but the arithmetic afterwards must not,
+ * or the same comps produce different money depending on which screen asked.
+ *
+ * Returns null rather than a number below `min_comps`. An abstention is the
+ * designed outcome, not a failure: trading it for a confidently wrong number is
+ * the worse of the two under this app's posture.
+ */
+export function aggregateEntries(
+  entries: PricedEntry[],
+  p: Pick<PipelineV1, "guards" | "min_comps" | "aggregate" | "adjust">,
+  now = Date.now(),
+): number | null {
   const g = p.guards ?? {};
-  if (g.abs_min != null) entries = entries.filter((e) => e.price >= g.abs_min!);
-  if (g.abs_max != null) entries = entries.filter((e) => e.price <= g.abs_max!);
-  if (g.iqr_k != null && entries.length >= 4) {
-    const sorted = entries.map((e) => e.price).sort((a, b) => a - b);
+  let kept = entries;
+  if (g.abs_min != null) kept = kept.filter((e) => e.price >= g.abs_min!);
+  if (g.abs_max != null) kept = kept.filter((e) => e.price <= g.abs_max!);
+  if (g.iqr_k != null && kept.length >= 4) {
+    const sorted = kept.map((e) => e.price).sort((a, b) => a - b);
     const q1 = quartile(sorted, 0.25), q3 = quartile(sorted, 0.75);
     const fence = (q3 - q1) * g.iqr_k;
-    entries = entries.filter((e) => e.price >= q1 - fence && e.price <= q3 + fence);
+    kept = kept.filter((e) => e.price >= q1 - fence && e.price <= q3 + fence);
   }
   if (g.drop_top_pct || g.drop_bottom_pct) {
-    const byPrice = [...entries].sort((a, b) => a.price - b.price);
+    const byPrice = [...kept].sort((a, b) => a.price - b.price);
     const dropTop = Math.floor(byPrice.length * (g.drop_top_pct ?? 0));
     const dropBot = Math.floor(byPrice.length * (g.drop_bottom_pct ?? 0));
     // Clamped end (never `|| undefined`): dropping everything must yield an
     // empty pool (→ min_comps abstain), not invert into keeping everything.
-    const kept = new Set(byPrice.slice(dropBot, Math.max(0, byPrice.length - dropTop)));
-    entries = entries.filter((e) => kept.has(e));
+    const survivors = new Set(byPrice.slice(dropBot, Math.max(0, byPrice.length - dropTop)));
+    kept = kept.filter((e) => survivors.has(e));
   }
 
   const minComps = Math.max(1, p.min_comps ?? 1);
-  if (entries.length < minComps) return null;
+  if (kept.length < minComps) return null;
 
-  const prices = entries.map((e) => e.price);
+  const prices = kept.map((e) => e.price);
   const agg = p.aggregate ?? { fn: "median" as const };
   let v: number;
   switch (agg.fn) {
@@ -288,8 +315,8 @@ export function interpretPipeline(
     case "trimmed_mean": v = trimmedMean(prices, agg.trim_pct ?? 0.1); break;
     case "last_sale": {
       // Order-independent (top_n may have re-sorted by price): pick max date.
-      let best = entries[0];
-      for (const e of entries) {
+      let best = kept[0];
+      for (const e of kept) {
         const t = e.date ? new Date(e.date).getTime() : -Infinity;
         const bt = best.date ? new Date(best.date).getTime() : -Infinity;
         if (t > bt) best = e;
@@ -302,7 +329,7 @@ export function interpretPipeline(
     case "wavg_recency": {
       const hl = agg.half_life_days ?? 30;
       let num = 0, den = 0;
-      for (const e of entries) {
+      for (const e of kept) {
         const age = e.date ? Math.max(0, (now - new Date(e.date).getTime()) / 86_400_000) : hl * 4;
         const w = Math.pow(0.5, age / hl);
         num += e.price * w; den += w;

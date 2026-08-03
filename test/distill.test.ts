@@ -159,3 +159,51 @@ describe("distillBySource", () => {
     expect(quotes.map((q) => q.source)).toEqual(["thecardapi"]);
   });
 });
+
+// ── The user's own pricing rules, applied to gathered sales ────────────────
+//
+// Extracted 2026-08-02: `interpretPipeline` and `distill` had each grown their
+// own "turn these prices into one number", and two implementations of the same
+// arithmetic drift. `distill` now delegates to the same `aggregateEntries` the
+// configurable pipeline uses, so the engine cannot quietly disagree with the
+// value shown two panels down on the same card.
+describe("distill — configured aggregate", () => {
+  const four = [10, 20, 30, 1000].map((price) => sale({ grader: null, price }));
+
+  it("defaults to the plain median it always used", () => {
+    expect(distill(four, raw, "src").quote?.price).toBe(25);
+  });
+
+  it("honours a configured aggregate function", () => {
+    expect(distill(four, raw, "src", { aggregate: { fn: "mean" } }).quote?.price).toBe(265);
+    expect(distill(four, raw, "src", { aggregate: { fn: "min" } }).quote?.price).toBe(10);
+  });
+
+  // The $1000 sale is the one an IQR fence exists to remove.
+  it("applies configured guards before aggregating", () => {
+    const q = distill(four, raw, "src", { guards: { iqr_k: 1.5 }, aggregate: { fn: "mean" } }).quote;
+    expect(q?.price).toBe(20); // mean(10,20,30) — the outlier fenced out
+  });
+
+  it("names the function it actually used, not 'median'", () => {
+    const q = distill(four, raw, "src", { aggregate: { fn: "wavg_recency" } }).quote;
+    expect(q?.label).toContain("recency-weighted of 4");
+  });
+
+  // Trading an abstention for a confidently wrong number is the worse outcome
+  // under this app's posture — so min_comps abstains rather than shrinking.
+  it("abstains when fewer comps survive than the rules require", () => {
+    const d = distill(four, raw, "src", { min_comps: 5 });
+    expect(d.quote).toBeNull();
+    // ...and reports that they MATCHED, so a caller doesn't claim otherwise.
+    expect(d.usable).toBe(4);
+  });
+
+  // "Nothing matched your condition" and "four matched, your rules want five"
+  // are different facts with different fixes.
+  it("distinguishes a condition miss from a rules abstention", () => {
+    const wrongGrade = distill([sale({ grader: "PSA", grade: 9, price: 100 })], graded("PSA", 10), "src");
+    expect(wrongGrade.quote).toBeNull();
+    expect(wrongGrade.usable).toBe(0);
+  });
+});

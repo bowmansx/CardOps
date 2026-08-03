@@ -18,7 +18,7 @@
 // confident number nobody can check.
 import type { ObservedSale } from "./observed-sale";
 import type { CardForPricing, SourceCost, SourceQuote } from "./price-sources/types";
-import { distill, type SoldQuotePayload } from "./distill";
+import { distill, type SoldQuotePayload, type DistillAggregate } from "./distill";
 import {
   gatherComps, gatherNarrative, SUFFICIENCY,
   type Budget, type GatherResult,
@@ -135,7 +135,7 @@ export function verdictFor(
   card: CardForPricing,
   gather: GatherResult,
   thinCtx: ThinContext,
-  opts: { budget?: Budget; nowMs?: number } = {},
+  opts: { budget?: Budget; nowMs?: number; aggregate?: DistillAggregate } = {},
 ): Verdict {
   const budget = opts.budget ?? "standard";
   const now = opts.nowMs ?? Date.now();
@@ -145,7 +145,7 @@ export function verdictFor(
   // here the way `distillBySource` keeps them for the card page: the orchestrator
   // stopped as soon as the evidence was sufficient, so a per-source breakdown
   // would usually be a single source and read as a comparison that was never made.
-  const d = distill(comps, card, "engine");
+  const d = distill(comps, card, "engine", opts.aggregate);
 
   const confidence = confidenceFrom(comps, gather.satisfied, now);
   const gatherLine = gatherNarrative(gather, budget);
@@ -174,12 +174,20 @@ export function verdictFor(
   // means the card needs a comp at its own grade, an unresolvable basis means a
   // venue's premium is uncited. Silent either way would read as "no data".
   const discarded: string[] = [];
-  if (comps.length && d.excluded) discarded.push(`${d.excluded} whose price basis couldn't be resolved`);
-  if (comps.length && d.unconfirmed) discarded.push(`${d.unconfirmed} still provisional`);
-  const dropped = comps.length && !d.quote
-    ? ` ${comps.length} sale${comps.length === 1 ? "" : "s"} were found but none matched this card's condition${
-        discarded.length ? `, and ${discarded.join(" and ")} were held out` : ""}.`
-    : "";
+  if (d.excluded) discarded.push(`${d.excluded} whose price basis couldn't be resolved`);
+  if (d.unconfirmed) discarded.push(`${d.unconfirmed} still provisional`);
+  const held = discarded.length ? `, and ${discarded.join(" and ")} were held out` : "";
+
+  let dropped = "";
+  if (comps.length) {
+    const n = `${comps.length} sale${comps.length === 1 ? "" : "s"}`;
+    dropped = d.usable > 0
+      // MATCHED AND STILL NO PRICE. Only the caller's own `min_comps` can do
+      // this, and saying "nothing matched" here would send someone hunting for
+      // comps they already have.
+      ? ` ${n} were found and ${d.usable} matched this card's condition, but your pricing rules ask for more before naming a number.`
+      : ` ${n} were found but none matched this card's condition${held}.`;
+  }
 
   return {
     price: null,
@@ -210,7 +218,7 @@ export async function runValuation(
   sources: SourceCost[],
   read: (id: string) => Promise<{ sales: ObservedSale[]; note?: string } | null>,
   thinCtx: ThinContext,
-  opts: { budget?: Budget; maxSpend?: number; nowMs?: number } = {},
+  opts: { budget?: Budget; maxSpend?: number; nowMs?: number; aggregate?: DistillAggregate } = {},
 ): Promise<{ verdict: Verdict; gather: GatherResult }> {
   const gather = await gatherComps(card, sources, read, opts);
   return { verdict: verdictFor(card, gather, thinCtx, opts), gather };
