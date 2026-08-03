@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  sourceCosts, confidenceFrom, verdictFor, runValuation, UNPRICED_SOURCE,
+  sourceCosts, confidenceFrom, freshestCompDays, verdictFor, runValuation, UNPRICED_SOURCE,
   type CostableSource,
 } from "@/lib/cards/valuation-run";
 import { costOrder, gatherComps, type SourceCost } from "@/lib/cards/orchestrator";
@@ -203,5 +203,45 @@ describe("the user's own pricing rules govern the engine", () => {
     expect(v.narrative).toContain("5 matched this card's condition");
     expect(v.narrative).toContain("your pricing rules ask for more");
     expect(v.narrative).not.toContain("none matched");
+  });
+});
+
+// "Thin" is a judgement a reader has to take on trust; "the most recent sale was
+// 14 months ago" is a fact they can act on. Two different failures both render
+// as thin — too few comps, and comps that are all old — and only this tells
+// them apart.
+describe("freshestCompDays", () => {
+  it("measures from the NEWEST comp, not the oldest or the average", () => {
+    expect(freshestCompDays([
+      sale({ soldAt: daysAgo(400) }), sale({ soldAt: daysAgo(12) }), sale({ soldAt: daysAgo(90) }),
+    ], NOW)).toBe(12);
+  });
+
+  // A sale that can't be placed in time says nothing about whether the market is
+  // current, so it counts as neither old nor new.
+  it("skips undated comps rather than defaulting them either way", () => {
+    expect(freshestCompDays([sale({ soldAt: null }), sale({ soldAt: daysAgo(50) })], NOW)).toBe(50);
+    expect(freshestCompDays([sale({ soldAt: null })], NOW)).toBeNull();
+    expect(freshestCompDays([], NOW)).toBeNull();
+  });
+
+  it("never reports a negative age", () => {
+    expect(freshestCompDays([sale({ soldAt: daysAgo(-3) })], NOW)).toBe(0);
+  });
+
+  it("rides along with the verdict", async () => {
+    const g = await gatherComps(card, [{ id: "own-book", costPerCall: 0, latency: 5 }],
+      async () => ({ sales: Array.from({ length: 5 }, () => sale({ soldAt: daysAgo(400) })) }),
+      { nowMs: NOW });
+    const v = verdictFor(card, g, thin(), { nowMs: NOW });
+
+    // THE EXACT CASE THIS EXISTS FOR. Five comps is enough by count, so the
+    // reader is not short of evidence — but none is inside the freshness window,
+    // so the run is "thin". Without `freshestDays` that reads identically to
+    // having found one lonely sale, and the two want opposite responses: go find
+    // more comps, versus these comps are real but the market has moved.
+    expect(v.price).toBe(100);
+    expect(v.confidence).toBe("thin");
+    expect(v.freshestDays).toBe(400);
   });
 });

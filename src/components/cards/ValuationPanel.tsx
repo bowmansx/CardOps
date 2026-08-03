@@ -32,9 +32,27 @@ type Verdict = {
   skipped: string[];
   empty: { id: string; note?: string }[];
   spent: number;
+  freshestDays: number | null;
   thin: { reason: string; label: string; method: string; narrative: string } | null;
   narrative: string;
 };
+
+/**
+ * How old the freshest evidence is, in words.
+ *
+ * "Thin" is a judgement a reader has to take on trust; "the most recent sale was
+ * 14 months ago" is a fact they can act on. The two failures that both render as
+ * thin — too few comps, and comps that are all old — want completely different
+ * responses, and only this tells them apart.
+ */
+function freshness(days: number | null): { text: string; stale: boolean } | null {
+  if (days == null) return null;
+  if (days <= 1) return { text: "Most recent sale: today", stale: false };
+  if (days < 60) return { text: `Most recent sale: ${days} days ago`, stale: false };
+  const months = Math.round(days / 30);
+  if (months < 24) return { text: `Most recent sale: ${months} months ago`, stale: days > 180 };
+  return { text: `Most recent sale: over ${Math.floor(months / 12)} years ago`, stale: true };
+}
 
 type Budget = "fast" | "standard" | "deep";
 
@@ -169,6 +187,17 @@ export function ValuationPanel({ cardId, className = "" }: { cardId: string; cla
             )}
           </div>
           {conf && <p className="mt-0.5 text-[10px] leading-snug text-ink/45">{conf.blurb}</p>}
+
+          {/* The age of the evidence, as a fact rather than a judgement. */}
+          {(() => {
+            const f = freshness(verdict.freshestDays);
+            if (!f) return null;
+            return (
+              <p className={"figures mt-0.5 text-[10px] " + (f.stale ? "text-amber-700" : "text-ink/40")}>
+                {f.text}
+              </p>
+            );
+          })()}
 
           {/* The evidence behind the number — same chip the source rows use. */}
           {verdict.evidence && (

@@ -89,6 +89,17 @@ export type Verdict = {
   empty: { id: string; note?: string }[];
   /** Money spent reaching this answer. */
   spent: number;
+  /**
+   * How old the freshest comp behind this price is, in days. Null when none was
+   * dated.
+   *
+   * `confidence` already says the evidence is weak; this says HOW. "Thin"
+   * describes a judgement someone has to take on trust, "the most recent sale
+   * was 14 months ago" is a fact they can act on — and the two failures that
+   * produce "thin" (too few comps vs. old comps) want completely different
+   * responses from whoever is reading.
+   */
+  freshestDays: number | null;
   /** Set only when the engine could not price the card directly. */
   thin: {
     reason: ThinReason;
@@ -100,6 +111,26 @@ export type Verdict = {
   /** Plain-language account of the whole run, for the reasoning trace. */
   narrative: string;
 };
+
+/**
+ * Days since the most recent DATED comp, or null when none carried a date.
+ *
+ * Undated sales are skipped rather than treated as old or as new — a sale that
+ * cannot be placed in time says nothing about whether the market is current, and
+ * either default would be a claim the data does not support.
+ */
+export function freshestCompDays(comps: ObservedSale[], nowMs: number): number | null {
+  let newest = -Infinity;
+  for (const c of comps) {
+    if (!c.soldAt) continue;
+    const t = Date.parse(`${c.soldAt}T00:00:00Z`);
+    if (Number.isFinite(t) && t > newest) newest = t;
+  }
+  if (!Number.isFinite(newest)) return null;
+  // Clamped at zero: a sale dated today is 0 days old, and a clock skew that
+  // produced -1 would render as "in 1 day".
+  return Math.max(0, Math.round((nowMs - newest) / 86_400_000));
+}
 
 /**
  * Confidence from what was actually gathered.
@@ -149,6 +180,7 @@ export function verdictFor(
 
   const confidence = confidenceFrom(comps, gather.satisfied, now);
   const gatherLine = gatherNarrative(gather, budget);
+  const freshestDays = freshestCompDays(comps, now);
 
   if (d.quote) {
     return {
@@ -157,7 +189,7 @@ export function verdictFor(
       confidence,
       quote: d.quote,
       evidence: (d.quote.payload as SoldQuotePayload) ?? null,
-      asked, skipped: gather.skipped, empty, spent,
+      asked, skipped: gather.skipped, empty, spent, freshestDays,
       thin: null,
       narrative: gatherLine,
     };
@@ -195,7 +227,7 @@ export function verdictFor(
     confidence: "thin",
     quote: null,
     evidence: null,
-    asked, skipped: gather.skipped, empty, spent,
+    asked, skipped: gather.skipped, empty, spent, freshestDays,
     thin: {
       reason,
       label: THIN_LABEL[reason],
