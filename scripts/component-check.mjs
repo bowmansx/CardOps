@@ -54,7 +54,7 @@ for (const line of doc.split(/\r?\n/)) {
   if (f) cur.files = [...f[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
 }
 
-const VALID = new Set(["shipped", "partial", "stalled", "designed", "discussed"]);
+const VALID = new Set(["shipped", "partial", "stalled", "designed", "discussed", "shelved"]);
 const problems = [];
 
 for (const e of entries) {

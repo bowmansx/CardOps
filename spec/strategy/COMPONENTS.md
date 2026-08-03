@@ -14,9 +14,12 @@ fails loudly instead.
 | `stalled` | Blocked on a decision or an external answer. **The blocker is named.** |
 | `designed` | Written down, no code. |
 | `discussed` | Said out loud, never written down until now. |
+| `shelved` | Deliberately paused. **A choice, not a blocker.** Kept here so it is findable, not so it nags. |
 
 `partial` and `stalled` are different on purpose. Partial is work; stalled is a
-question. Mixing them is how a to-do list becomes a wall of guilt.
+question. And `shelved` is neither — it is a decision to stop, which deserves to
+be recorded as a decision rather than decaying into a stale open item. Mixing
+these three is how a to-do list becomes a wall of guilt.
 
 ---
 
@@ -65,9 +68,10 @@ question. Mixing them is how a to-do list becomes a wall of guilt.
 
 ### valuation-engine
 **Status:** designed
-**Files:** `BUILD_LOG.md`
-**Done:** The spec is diffed against the repo; five findings logged, two of which change its Phase 1.
-**Left:** Everything. And `reference/VALUATION_ENGINE.md` does not exist, so the liquidity ladder A–G, analog transfer and the confidence formula have to be DESIGNED, not implemented. Beau confirmed 2026-07-30 he is not aware of it existing anywhere.
+**Files:** `BUILD_LOG.md`, `reference/VALUATION_ENGINE.md`
+**Done:** The spec diffed against the repo (five findings, two of which change its Phase 1), and the missing design written from scratch 2026-07-30 — grounded in what exists rather than invented, because the ladder, the comp store, the adapter interface and the configurable method were all already shipped under other names.
+**Left:** Implementation. The one genuinely missing piece of the ladder is splitting `unknown` into `too_new` and `too_rare` — different failure modes needing different transfer methods, and applying one to the other prices a 2026 rookie off a 2019 sibling.
+**Blocked on a decision:** the prior multiplier tables the prompt says to seed from do not exist in the repo. Starting observed-only means the engine abstains far more often early — which may be RIGHT, but it is a different product than the prompt describes.
 
 ---
 
@@ -141,7 +145,13 @@ question. Mixing them is how a to-do list becomes a wall of guilt.
 ## Platform
 
 ### tier-2-config-authoring
-**Status:** discussed
+**Status:** shelved
+**Shelved:** 2026-07-30 by Beau — "i think i'm going too far right now... let's
+shelf it but keep it in our summary of projects opened." Nothing was built, so
+there is no cost to picking it up later.
+**Why it is worth keeping:** it is the shape that makes the credit model make
+sense, and the fence is already in place — `PipelineV1` has only trading-card
+nouns in it, so the schema itself constrains what a generated config can express.
 **Left:** Let a user describe what they want in words and have the model emit a validated config — `PipelineV1`, a photo template, a source setup — rather than code. Scoped to trading-card concepts; anything outside flagged for approval rather than refused or run. Every generated config diffed and confirmed before it takes effect, and recorded on the valuation it produced.
 
 ### credit-metering
@@ -279,7 +289,26 @@ this session and know a caveat, the caveat is stated rather than smoothed over.
 ### comps-paste-legacy
 **Status:** partial
 **Files:** `src/components/cards/CompsPaste.tsx`
-**Left:** Predates `PasteComps` and the `ObservedSale` spine. Two paste paths now exist writing to different tables — reconcile or retire.
+**CORRECTION (2026-07-30):** I first logged this as "two paste paths writing to
+different tables — reconcile or retire", written from memory. Reading the code
+shows that was overstated. They are two SCOPES, not two implementations of one
+thing:
+
+- `card_comps` — comps attached to THIS CARD. Read by eight places (grade-EV,
+  intel, the daemon, the sell page, both refresh paths). AI-parsed, and it
+  accepts SCREENSHOTS, which the deterministic parser cannot.
+- `card_market_sales` — market history attached to the IDENTITY, shared across
+  every owner of that card.
+
+`compsAsSales` already bridges the first into `ObservedSale`, and `estimate-run`
+combines all three sources. The data model is deliberate and works.
+
+**What IS real:** the UX. Two "paste your comps" boxes on two different pages,
+with different capabilities and different destinations, and nothing telling a
+user which is which — so the same action produces different results depending on
+which page they happened to be on.
+**Left:** Make the distinction legible, or route both through one screen that
+picks the destination itself. Do NOT merge the tables.
 
 ## Books, lots & admin
 
