@@ -78,6 +78,13 @@ these three is how a to-do list becomes a wall of guilt.
 **Done:** Valuation engine Phase 1.4. Walks sources cheapest-first and stops on SUFFICIENCY rather than on success — a source returning rows is not a reason to stop, the question is whether the evidence supports an answer at the confidence asked for. Budget checked before the call, not after. A failed source is distinguished from an empty one and is not charged for. Wired 2026-08-02.
 **Left:** The sufficiency thresholds are judgement rather than calibrated, and there are no outcomes to calibrate against yet. A source's daily QUOTA is not modelled — `costPerCall` measures money, and The Card API is a flat subscription whose scarce resource is rows per day.
 
+### transfer-methods
+**Status:** partial
+**Files:** `src/lib/cards/transfer.ts`
+**Done:** The three transfers `thin-reason` licenses, performed rather than named. Every multiplier is MEASURED from cards where both variants were actually observed — the build prompt asked to seed prior tables ("a /5 is worth ~4× a base card") and those tables do not exist in this repo; inventing them would put an indefensible number at the centre of every thin card's price. Paired, never pooled: comparing all /5s against all base cards conflates the parallel effect with the PLAYER effect, because /5s get pulled for stars and base cards trade for commons. Median of ratios, not ratio of medians, so one expensive card with both variants can't dominate a set. Below three pairs it abstains. The ratio, pair count and spread travel WITH the price — 4.1× across three cards ranging 2×–9× is a different claim from 4.1× across thirty ranging 3.9×–4.3×.
+**`gone_quiet` is deliberately NOT discounted.** Any decay rate would be invented — nothing here measures how a set's price level moves over time — and an invented rate on a real price produces a number that looks derived and isn't. "Last sold for $340, eighteen months ago" is more honest and more useful to someone deciding a list price.
+**Left:** No caller. Wiring `analog_parallel` needs the paired observations for a whole set, which is too heavy as a live per-card query — it wants a rollup keyed on (set, year, parallel-pair) refreshed on a schedule, not a 300-identity read inside a valuation request. That rollup does not exist. `comparable_product` additionally needs a year-over-year anchor and a player-tier match, neither of which is modelled.
+
 ### valuation-run
 **Status:** partial
 **Files:** `src/lib/cards/valuation-run.ts`, `src/app/api/cards/valuation/route.ts`, `app/api/cards/valuation/route.ts`, `src/components/cards/ValuationPanel.tsx`
