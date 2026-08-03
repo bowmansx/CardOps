@@ -70,19 +70,25 @@ these three is how a to-do list becomes a wall of guilt.
 **Status:** partial
 **Files:** `src/lib/cards/price-sources/own-book.ts`
 **Done:** A user's own settled sales as comps — the highest-trust source available and it needs nobody's permission, because a seller is a party to their own transaction. Price is settled not scraped, identity is exact rather than title-matched, condition is known rather than inferred from a ~12%-populated grader field, and accepted Best Offers carry their real negotiated number. Title is deliberately left NULL so the pooling decision never has to be retrofitted through stored data.
-**Left:** Nothing reads it yet — the orchestrator needs a caller that supplies the rows. `rights.pool` is false pending the Lane C decision.
+**Left:** `rights.pool` is false pending the Lane C decision. Reached by `POST /api/cards/valuation` since 2026-08-02 — the identity is the join, not the card id, so a user who sold this card twice and bought a third copy is priced off both of their own sales.
 
 ### orchestrator
-**Status:** partial
+**Status:** shipped
 **Files:** `src/lib/cards/orchestrator.ts`
-**Done:** Valuation engine Phase 1.4. Walks sources cheapest-first and stops on SUFFICIENCY rather than on success — a source returning rows is not a reason to stop, the question is whether the evidence supports an answer at the confidence asked for. Budget checked before the call, not after. A failed source is distinguished from an empty one and is not charged for.
-**Left:** No caller. Needs wiring to a route that supplies `read` with the real Supabase queries, and the sufficiency thresholds are judgement rather than calibrated.
+**Done:** Valuation engine Phase 1.4. Walks sources cheapest-first and stops on SUFFICIENCY rather than on success — a source returning rows is not a reason to stop, the question is whether the evidence supports an answer at the confidence asked for. Budget checked before the call, not after. A failed source is distinguished from an empty one and is not charged for. Wired 2026-08-02.
+**Left:** The sufficiency thresholds are judgement rather than calibrated, and there are no outcomes to calibrate against yet. A source's daily QUOTA is not modelled — `costPerCall` measures money, and The Card API is a flat subscription whose scarce resource is rows per day.
+
+### valuation-run
+**Status:** partial
+**Files:** `src/lib/cards/valuation-run.ts`, `src/app/api/cards/valuation/route.ts`, `app/api/cards/valuation/route.ts`
+**Done:** The join that made four finished modules reachable — orchestrator, own-book, distill and thin-reason were each pure, tested, and callable from nothing. `POST /api/cards/valuation` walks sources cheapest-first, prices from whatever it gathered, and when it cannot, returns the REASON with the transfer that reason licenses. Confidence is derived from the evidence and not from the budget asked for, so the same comps never report differently because someone was in a hurry. A source that never declared a cost sorts LAST, mirroring `mayPersist`'s default-deny. Read-only: it computes a valuation and writes nothing, because adopting a number is a decision.
+**Left:** No UI calls it. The transfer methods are unimplemented, so a thin card still ends with no price. Nothing writes the verdict anywhere, so a valuation is not yet auditable after the fact.
 
 ### thin-reason
 **Status:** partial
 **Files:** `src/lib/cards/thin-reason.ts`
 **Done:** Splits the ladder's `unknown` into `too_new` / `too_rare` / `gone_quiet`, which is the one class `VALUATION_ENGINE.md` found genuinely missing. Each licenses a DIFFERENT transfer — last year's equivalent product, a neighbouring parallel, or the card's own discounted history — and `unknown` licenses none, because with no idea why a card is thin any transfer is a guess wearing a method's name. Youth is checked before rarity: a three-week-old /5 is both, and treating it as rare reaches sideways into siblings that have not traded either. A refinement of `tierOf`, not a seventh tier, so no existing switch had to be re-checked.
-**Left:** No caller — nothing computes `setHasSales`, which is the one fact it cannot derive and the caller has to go and get. The transfer methods themselves are named but unimplemented.
+**Left:** The transfer methods are named and unimplemented — a verdict says `analog_parallel` and nothing performs one, so a thin card gets a reason and still no price. `setHasSales` is now computed by the valuation route, matching on set name AND year because "Bowman Chrome" is issued annually and each year is its own market.
 **Known imprecision:** issue YEAR is not release DATE. With no `releaseDate` anywhere in the schema, the fallback treats the current calendar year as new — so a January product still reads new in December. Conservatively wrong, and stated in the file. The first version measured days from January 1st and called a November release eight months old on the day it shipped.
 
 ### valuation-engine

@@ -107,9 +107,37 @@ export type SourceRights = {
   deleteOnTerminationDays: number | null;
 };
 
+/**
+ * What one call to a source costs, for the orchestrator's walk order.
+ *
+ * Declared HERE rather than in the orchestrator so a new adapter states its own
+ * price alongside its own licence. A central cost table in the orchestrator
+ * would have to be edited every time a vendor lands, and the one that got
+ * forgotten would silently sort as free and be tried first.
+ */
+export type SourceCost = {
+  id: string;
+  /** Money per call, in USD. 0 for free sources. */
+  costPerCall: number;
+  /**
+   * Rough milliseconds a call takes. Breaks ties between free sources: reading
+   * rows already in the database beats a network round trip that also costs
+   * nothing.
+   */
+  latency: number;
+};
+
 export type PriceSourceAdapter = {
   id: string;
   label: string;
+  /**
+   * What a call to this source costs, if it is ever worth asking.
+   *
+   * OPTIONAL, and an absent value is treated as EXPENSIVE rather than free by
+   * `sourceCosts` — a source that never stated its price is one nobody checked,
+   * and sorting it first would spend money the walk order exists to avoid.
+   */
+  cost?: Omit<SourceCost, "id">;
   /** Configured/available in this environment (e.g. a token is set)? */
   enabled: () => boolean;
   /** Does this source even cover this card (category gate)? */

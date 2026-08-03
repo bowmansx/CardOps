@@ -202,6 +202,17 @@ export const thecardapi: PriceSourceAdapter = {
   id: "thecardapi",
   label: "The Card API · sold",
   enabled: () => !!process.env.THECARDAPI_TOKEN,
+
+  // FREE AT THE MARGIN, and that is a real claim rather than a shrug. This is a
+  // flat monthly subscription ($199 Pro + $99 Unlimited Lookback), so one more
+  // call this hour costs nothing — money leaves once a month regardless. Putting
+  // a fabricated per-call figure here would make `maxSpend` a fiction.
+  //
+  // WHAT IS ACTUALLY SCARCE is the daily row cap, and `costPerCall` cannot say
+  // so — a quota is a different resource from money and is not modelled anywhere
+  // yet. Until it is, latency alone keeps this behind own-book, which is the
+  // ordering that matters.
+  cost: { costPerCall: 0, latency: 400 },
   handles: () => true, // broad sold-sales aggregator: sports + TCG
 
   // Terms of Service §4a (Thompson Data Products, LLC, last updated July 2026),

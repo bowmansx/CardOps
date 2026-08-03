@@ -20,7 +20,12 @@
 // order and calls the stop. That keeps it testable without a network and keeps
 // the RLS context in the caller's hands, which is where it has to be.
 import type { ObservedSale } from "./observed-sale";
-import type { CardForPricing } from "./price-sources/types";
+import type { CardForPricing, SourceCost } from "./price-sources/types";
+
+// Re-exported so callers keep importing the walk order's vocabulary from the
+// module that USES it. The definition lives beside the adapter contract, where a
+// new source declares its own cost next to its own licence.
+export type { SourceCost };
 
 /**
  * How hard to try, per RUN rather than as a global setting.
@@ -53,17 +58,6 @@ export const SUFFICIENCY: Record<Budget, SufficiencyTarget> = {
   fast:     { minComps: 2, freshWithinDays: 365, minFresh: 1 },
   standard: { minComps: 5, freshWithinDays: 180, minFresh: 2 },
   deep:     { minComps: 12, freshWithinDays: 90, minFresh: 3 },
-};
-
-export type SourceCost = {
-  id: string;
-  /** Money per call. 0 for free sources. */
-  costPerCall: number;
-  /**
-   * Rough seconds a call takes. Breaks ties between free sources: reading rows
-   * already in the database beats a network round trip that also costs nothing.
-   */
-  latency: number;
 };
 
 /**

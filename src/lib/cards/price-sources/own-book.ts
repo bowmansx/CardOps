@@ -147,6 +147,12 @@ export const ownBook: PriceSourceAdapter = {
   enabled: () => true,
   handles: () => true,
 
+  // FREE AND FIRST. Rows already in the database — no money, no network, no
+  // quota. The 5ms is what puts it ahead of every other free source in the walk
+  // order, which is the whole reason a card with enough of its owner's own sales
+  // never spends a vendor call at all.
+  cost: { costPerCall: 0, latency: 5 },
+
   rights: {
     persist: true,
     redisplay: true,
