@@ -103,8 +103,9 @@ crons are deliberately 401ing until the cutover, so anything needing a refresh
 would have been born broken. **Never run against a database.** Its header
 carries the Postgres 15 requirement and two verification queries.
 
-**Still open, and they are Beau's:** 35 unpushed commits; migrations 20260752
-and 20260753;
+**Still open, and they are Beau's:** the whole local branch is unpushed (check
+`git rev-list --count origin/main..HEAD` — a number written here goes stale on
+the next commit); migrations 20260752 and 20260753;
 the $9 coverage test; whether there is an eBay Store subscription; Seller Hub
 opt-in; the eBay written-permission request; scoping Obsidian Git to `spec/`.
 
