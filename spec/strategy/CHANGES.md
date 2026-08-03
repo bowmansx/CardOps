@@ -7,11 +7,23 @@ Full history of the document itself is in `journal/`.
 
 ---
 
-## 2026-08-02 (overnight) - the engine got a caller, and three paths became one
+## 2026-08-02 (overnight, into the 3rd) - the engine got a caller, and three paths became one
 
-**Six commits, and none of them adds a feature.** They connect things that were
-already finished and reached nobody, and remove a duplication I had just made
-worse.
+**Fourteen commits, and almost none of them adds a feature.** They connect
+things that were already finished and reached nobody, remove a duplication I had
+just made worse, and put tests around the parts a dev server cannot check.
+
+**First, the groundwork** (five commits before midnight): `BUILD_LOG.md` records
+that a spec written without reading the code states hypotheses, not facts — the
+valuation build prompt asked to rebuild things that existed and cited a design
+document that wasn't here, so I wrote `reference/VALUATION_ENGINE.md` from the
+code instead. Poolability moved from being a property of a SOURCE to a property
+of (source, whose credential paid): The Card API on CardOps' key may be pooled
+because §4a licenses serving "your users", plural; the same adapter on a user's
+own key may not, because that licence is theirs. `COMPONENTS.md` and
+`scripts/component-check.mjs` became a registry that fails the build on drift
+rather than rotting quietly. Then valuation Phase 1 — own-book as a source, and
+an orchestrator that knows when to stop asking.
 
 **THE ENGINE HAD NO CALLER.** `orchestrator` decided who to ask and when to
 stop, `own-book` supplied the cheapest and most trustworthy comps, `distill`
@@ -63,16 +75,31 @@ than guessing whether a statistic derived from a vendor's data is still theirs.
 It uses the service client because `card_market_sales` has no DELETE policy at
 all — under the user client it would have deleted nothing and reported success.
 
+**"Thin" was hiding two different failures.** Too few comps and comps that are
+all old both rendered the same, and they want opposite responses — go find more
+comps, versus these comps are real but the market has moved. The verdict now
+carries the age of the freshest evidence as a fact: "Most recent sale: 13 months
+ago".
+
+**The routes are tested, because a dev server cannot test them.** I started one
+to check the new endpoints and every route 500s — including
+`/api/cards/nonexistent-route-xyz`. It is middleware building a Supabase client
+with no local credentials, so it fails before routing and says nothing about any
+route. `test/helpers/fake-supabase.ts` records the query chain instead of
+issuing it, which catches what typechecks and fails at runtime: a filter on the
+wrong column, a missing `.order()` before `.range()`, an error branch nobody
+exercised. 29 route tests, passing first run.
+
 **A merge conflict I caused and then fixed.** `git add -A` committed Obsidian
 Git's unresolved conflict markers into this file. Resolved by keeping BOTH
 entries — they were two different runs, not two versions of one — in the
 newest-first order this document states.
 
-**Still open, and they are Beau's:** 30 unpushed commits; migration 20260752;
+**Still open, and they are Beau's:** 33 unpushed commits; migration 20260752;
 the $9 coverage test; whether there is an eBay Store subscription; Seller Hub
 opt-in; the eBay written-permission request; scoping Obsidian Git to `spec/`.
 
-*808 test cases, 50 files. Typecheck clean. Registry shows no drift.*
+*841 test cases, 52 files. Typecheck clean. Registry shows no drift.*
 
 ---
 
