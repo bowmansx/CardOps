@@ -78,6 +78,13 @@ these three is how a to-do list becomes a wall of guilt.
 **Done:** Valuation engine Phase 1.4. Walks sources cheapest-first and stops on SUFFICIENCY rather than on success — a source returning rows is not a reason to stop, the question is whether the evidence supports an answer at the confidence asked for. Budget checked before the call, not after. A failed source is distinguished from an empty one and is not charged for.
 **Left:** No caller. Needs wiring to a route that supplies `read` with the real Supabase queries, and the sufficiency thresholds are judgement rather than calibrated.
 
+### thin-reason
+**Status:** partial
+**Files:** `src/lib/cards/thin-reason.ts`
+**Done:** Splits the ladder's `unknown` into `too_new` / `too_rare` / `gone_quiet`, which is the one class `VALUATION_ENGINE.md` found genuinely missing. Each licenses a DIFFERENT transfer — last year's equivalent product, a neighbouring parallel, or the card's own discounted history — and `unknown` licenses none, because with no idea why a card is thin any transfer is a guess wearing a method's name. Youth is checked before rarity: a three-week-old /5 is both, and treating it as rare reaches sideways into siblings that have not traded either. A refinement of `tierOf`, not a seventh tier, so no existing switch had to be re-checked.
+**Left:** No caller — nothing computes `setHasSales`, which is the one fact it cannot derive and the caller has to go and get. The transfer methods themselves are named but unimplemented.
+**Known imprecision:** issue YEAR is not release DATE. With no `releaseDate` anywhere in the schema, the fallback treats the current calendar year as new — so a January product still reads new in December. Conservatively wrong, and stated in the file. The first version measured days from January 1st and called a November release eight months old on the day it shipped.
+
 ### valuation-engine
 **Status:** designed
 **Files:** `BUILD_LOG.md`, `reference/VALUATION_ENGINE.md`
