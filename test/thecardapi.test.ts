@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { saleQuery, toObserved, cardApiSaleKey, type CardApiSale } from "@/lib/cards/price-sources/thecardapi";
 import { thecardapi } from "@/lib/cards/price-sources/thecardapi";
+import { mayPoolFrom } from "@/lib/cards/price-sources";
 import type { CardForPricing } from "@/lib/cards/price-sources/types";
 
 const graded = (grader: string, grade: number): CardForPricing => ({
@@ -84,8 +85,30 @@ describe("the adapter declares its licence", () => {
   // §4a permits storing "to serve your users" and displaying transaction
   // history in your own product interface; §5 requires deletion within 30 days
   // of cancellation, which is only executable because rows carry their source.
-  it("permits storage and re-display, and not pooling", () => {
-    expect(thecardapi.rights).toMatchObject({ persist: true, redisplay: true, pool: false, deleteOnTerminationDays: 30 });
+  it("permits storage and re-display", () => {
+    expect(thecardapi.rights).toMatchObject({ persist: true, redisplay: true, deleteOnTerminationDays: 30 });
+  });
+
+  // §4a licenses storing responses "to serve your users" — plural, in a clause
+  // that names SaaS products. So pooling across CardOps tenants is permitted ON
+  // CARDOPS' OWN KEY, and only there: the same adapter configured with a USER'S
+  // key is that user's subscription, and re-displaying what it fetched to a
+  // different tenant is the redistribution every blocking licence names.
+  it("is poolable on the platform credential and private on a user's", () => {
+    expect(thecardapi.rights.pool).toBe(true);
+    expect(mayPoolFrom("thecardapi", "platform")).toBe(true);
+    expect(mayPoolFrom("thecardapi", { userId: "user-1" })).toBe(false);
+  });
+
+  // PriceCharting forbids use in "any software... accessible to third parties",
+  // so it is never poolable — not even on our own key.
+  it("never pools a source whose own terms forbid it, whoever holds the key", () => {
+    expect(mayPoolFrom("pricecharting", "platform")).toBe(false);
+    expect(mayPoolFrom("pricecharting", { userId: "user-1" })).toBe(false);
+  });
+
+  it("default-denies pooling for a source nobody registered", () => {
+    expect(mayPoolFrom("some-new-vendor", "platform")).toBe(false);
   });
 
   it("supplies sales, so the accumulator picks it up without naming it", () => {

@@ -7,7 +7,7 @@
 // source would have had to translate into a competitor's field names to be
 // stored. See `observed-sale.ts` for the boundary.
 import type { ObservedSale, SaleProvenance } from "./observed-sale";
-import { mayPersist, basisForSource } from "./price-sources";
+import { mayPersist, mayPoolFrom, basisForSource, type CredentialOwner } from "./price-sources";
 import { toAllIn, type PriceBasis } from "./price-basis";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -55,6 +55,16 @@ export type MarketSaleRow = {
   price_basis: PriceBasis;
   /** Graded/raw as the source could state it. NULL means genuinely unknown. */
   is_graded: boolean | null;
+  /**
+   * Who may see this row. NULL = everyone; set = only that user.
+   *
+   * Added by 20260752 and it closes a hole rather than adding a feature. The
+   * read policy shared every row with every user, so `rights.pool: false` was
+   * declared in code and enforced nowhere — a rule that is not enforced at the
+   * read layer is not a rule. Now the database decides, and the write path has
+   * to state an answer for every row.
+   */
+  private_to: string | null;
 };
 
 /**
@@ -72,6 +82,15 @@ export type SaleOrigin = {
    * `vendor` rows must leave this null and `own_sale` rows must set it.
    */
   addedBy?: string | null;
+  /**
+   * WHOSE SUBSCRIPTION PAID FOR THE FETCH. Decides who may see the result.
+   *
+   * Defaults to `"platform"` because that is what the price-refresh cron is, and
+   * because the alternative default — assuming a user credential — would mark
+   * every cron row private and quietly destroy the shared history that makes one
+   * fetch serve twenty owners.
+   */
+  credential?: CredentialOwner;
 };
 
 export function saleToRow(
@@ -92,6 +111,22 @@ export function saleToRow(
   // than discovered at the far end.
   const addedBy = provenance === "vendor" ? null : origin.addedBy ?? null;
 
+  // WHO MAY SEE IT. Writes go through the service client, which bypasses RLS, so
+  // this is the only thing standing between a user's own subscription and every
+  // other tenant — the policy cannot save us here, it can only enforce what we
+  // wrote (audit bug class 1).
+  const credential: CredentialOwner = origin.credential ?? "platform";
+  const shared = mayPoolFrom(source, credential);
+  const privateTo = shared
+    ? null
+    : credential === "platform"
+      // Platform credential, un-poolable source: nobody owns it, so nobody may
+      // be shown it. `addedBy` is the only candidate holder — a paste belongs to
+      // whoever pasted it. With neither, the row is private to no one and would
+      // be invisible, so it is better not written at all than written unseeable.
+      ? addedBy
+      : credential.userId;
+
   return {
     identity_id: identityId, card_id: cardId, source, external_id: s.externalId,
     title: s.title, price: round2(s.price), currency: s.currency,
@@ -103,6 +138,7 @@ export function saleToRow(
     // changes convention.
     price_basis: s.priceBasis,
     is_graded: s.isGraded,
+    private_to: privateTo,
   };
 }
 

@@ -68,14 +68,23 @@ export type SourceRights = {
   /** May an individual sale be shown to an end user as evidence for a price? */
   redisplay: boolean;
   /**
-   * May rows feed a CROSS-TENANT aggregate?
+   * May rows be shown to a user OTHER than the one whose fetch produced them?
    *
-   * Separate from `persist` on purpose. Storing a vendor's sale against a shared
-   * identity so every owner of that card sees it is ordinary caching. Blending
-   * users' own marketplace orders into a comp shown to a different user is a
-   * pool, and eBay's licence forbids exactly that — it anticipates the consent
-   * argument by name: "Notwithstanding Your Users' access to and use of their
-   * own information...". A source can be persistable and un-poolable.
+   * TRUE HERE IS NECESSARY BUT NOT SUFFICIENT. Poolability is not a property of
+   * a source at all — it is a property of (source, WHOSE CREDENTIAL paid for the
+   * call), and this field can only speak to the first half. The Card API on
+   * CardOps' own key may be pooled, because §4a licenses storing responses "to
+   * serve your users", plural. THE SAME ADAPTER ON A USER'S OWN KEY MAY NOT: that
+   * licence is theirs, and showing what their key retrieved to a different tenant
+   * is CardOps redistributing under someone else's subscription.
+   *
+   * `mayPoolFrom(source, credential)` is the real answer. This is one input to it.
+   *
+   * Separate from `persist` on purpose: storing a sale against a shared identity
+   * so every owner of that card sees it is ordinary caching; blending users' own
+   * marketplace data into a comp shown to someone else is a pool, and eBay's
+   * licence forbids exactly that — it anticipates the consent argument by name:
+   * "Notwithstanding Your Users' access to and use of their own information...".
    */
   pool: boolean;
   /**

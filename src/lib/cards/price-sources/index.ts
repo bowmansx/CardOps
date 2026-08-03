@@ -51,6 +51,40 @@ export function mayPersist(id: string): boolean {
 }
 
 /**
+ * WHOSE SUBSCRIPTION PAID FOR THE CALL.
+ *
+ * `"platform"` — CardOps' own key, from an environment variable. Data fetched
+ * this way is ours to serve to our users, where the licence says so.
+ *
+ * A user id — that user's own key, configured in `card_source_configs`. This is
+ * what makes the whole bring-your-own model work: PriceCharting's "internal use
+ * only" and every similar term blocks US REDISTRIBUTING TO A USER, and blocks
+ * nothing about a user using the subscription they pay for. Move the credential
+ * and the same data becomes reachable — but it stays THEIRS.
+ */
+export type CredentialOwner = "platform" | { userId: string };
+
+/**
+ * May a row from this fetch be shown to anyone other than the person who caused
+ * it?
+ *
+ * Two conditions, and BOTH are required:
+ *   1. the source's own terms allow it at all, and
+ *   2. the call was made on CardOps' credential.
+ *
+ * A user's own key fails (2) however permissive the source is. That is not
+ * caution — it is the difference between a user reading their own subscription
+ * and CardOps redistributing it, which is the exact act every blocking licence
+ * names.
+ *
+ * DEFAULT-DENY on an unknown source, same as `mayPersist`.
+ */
+export function mayPoolFrom(id: string, credential: CredentialOwner): boolean {
+  if (credential !== "platform") return false;
+  return sourceRights(id)?.pool ?? false;
+}
+
+/**
  * How the source that fetched a row reports that venue's prices.
  *
  * Lets a row already in `card_market_sales` be normalized without a global

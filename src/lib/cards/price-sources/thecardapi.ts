@@ -211,13 +211,20 @@ export const thecardapi: PriceSourceAdapter = {
   // "Displaying card prices, transaction history, and market data within your
   // own product interface". Derived analytics are stated to be our IP.
   //
-  // POOL IS FALSE, and not because of this licence. §4 forbids re-exposing the
-  // records "as a standalone dataset or competing data product" — storing them
-  // against a shared identity so every owner of that card sees them is the
-  // permitted caching case, not that. It is false because a cross-tenant pool
-  // is a different decision with a different legal question behind it (whether
-  // user-supplied marketplace exports fall outside "eBay Content"), and that
-  // question is unanswered. Defaulting it to true would answer it by accident.
+  // POOL IS TRUE, corrected 2026-07-30. It was false, and that conflated two
+  // different questions. §4a licenses "storing API responses locally in your own
+  // database TO SERVE YOUR USERS" — plural, in a clause that names SaaS products
+  // explicitly. Pooling Card-API rows across CardOps tenants is the permitted
+  // caching case, and holding them private was throwing away the shared history
+  // that lets one fetch serve twenty owners of the same card.
+  //
+  // The unanswered question that made me set this false belongs to a DIFFERENT
+  // source: whether user-supplied marketplace exports fall outside "eBay
+  // Content". That is the paste lane's problem, not this one.
+  //
+  // AND IT ONLY APPLIES ON CARDOPS' OWN KEY. `mayPoolFrom` requires the platform
+  // credential as well as this flag; the same adapter configured with a USER'S
+  // key produces private rows, because that subscription is theirs.
   //
   // NOTE the free tier is NOT covered by any of the above: §4a ends "Free tier
   // usage is limited to personal, non-commercial, and evaluation purposes
@@ -227,7 +234,7 @@ export const thecardapi: PriceSourceAdapter = {
   rights: {
     persist: true,
     redisplay: true,
-    pool: false,
+    pool: true,
     attribution: "The Card API",
     attributionUrl: "https://thecardapi.com/",
     deleteOnTerminationDays: 30, // §5, on cancellation or termination
