@@ -1,3 +1,121 @@
+# BUILD_LOG
+
+Judgment calls, one entry per decision: what, why, commit. Newest first.
+
+---
+
+# Valuation Engine
+
+## 2026-07-30 — Pre-Phase-1: the spec diffed against the repo
+
+Required by `CLAUDE.md`: *"Diff every spec against the repo before implementing
+it... Verify each claim, then SAY which ones were wrong before building."* That
+rule was added on 2026-07-25 after a spec cited a `VALUATION_ENGINE.md` that was
+not in the repo.
+
+### FINDING 1 — `reference/VALUATION_ENGINE.md` still does not exist
+
+The build prompt opens: *"Read first: `reference/VALUATION_ENGINE.md`... Roughly
+60% of this spec is already designed there."*
+
+It is not there. `reference/` holds 22 files and that is not one of them; no file
+in the repo mentions it. So each of these, cited as an existing design to
+implement, has no source: the source registry, the liquidity ladder A–G
+("implement classes A–G exactly as specified in §2"), analog transfer
+("implement §4 pseudocode"), the confidence formula, the reasoning trace.
+
+**Consequence:** ~60% of the spec is not "already designed", it is undesigned.
+Phase 2 cannot implement §2 because there is no §2. Either the document exists
+outside the repo and needs pasting in, or the ladder and analog method are design
+work before they are implementation work.
+
+### FINDING 2 — four proposed tables already exist under other names
+
+| Spec proposes | Exists as | Note |
+|---|---|---|
+| `comps` | `card_comps` | fingerprint, card_id, source, grader, grade, sale_price, currency, sale_date, listing_url, raw, fetched_at |
+| `comps` (identity-keyed) | `card_market_sales` | Closer to intent: keyed on `identity_id`, shared cross-tenant. Gained provenance / price_basis / added_by / is_graded / fetched_at on 2026-07-29 (20260750, APPLIED). |
+| `valuations` | `card_valuations` | **Conflict:** existing is `unique (card_id, grader, grade)` — a CURRENT-value table. Immutable append-only with `superseded_by` requires dropping that constraint. ALTER, not CREATE, and existing rows need a migration story. |
+| `multipliers` | `card_grade_multipliers` | No prior/observed split, no observation_count, no IQR. The spec's version is a real upgrade but it is an ALTER on a live table. |
+
+`valuation_outcomes` and `data_sources` are genuinely new.
+
+### FINDING 3 — the adapter interface already exists, built 2026-07-29
+
+`PriceSourceAdapter.fetchSales?(card, opts): Promise<SalesResult>` returning
+`ObservedSale[]`, plus `enabled()`, `handles()`, `salesBasis()` and a `rights`
+block. `fetchComps` and `fetchSales` are the same function; building `CompSource`
+beside it gives the app two adapter registries for one job.
+
+`data_sources.legal_basis` is a weaker form of `rights`, which already separates
+persist / redisplay / pool — three different permissions the enum collapses into
+one. Keep the richer shape, add the operational columns around it.
+
+### FINDING 4 — BOTH recommended external adapters are legally blocked
+
+Verified within the last 24 hours against the vendors' own published terms.
+
+**Card Hedge** ("Recommend Card Hedge for breadth") — published terms grant no
+storage and no re-display right; a verification pass on 2026-07-29 refuted it on
+exactly that ground. Its ToS "Effective Date" also renders as the current date on
+every load, so there is no establishing which version was accepted.
+
+**PriceCharting** ("BASELINE ONLY... store every pull as history since it keeps
+none") — read 2026-07-29 at pricecharting.com/page/terms-of-service:
+
+> "Price Data cannot be used in any software, application, or system that is
+> accessible to third parties, including customers, clients, or the general
+> public, without express written permission."
+
+Storing their computed values and showing them to users is precisely the
+prohibited act. Internal business use additionally requires a LEGENDARY
+subscription. `rights.redisplay` is already false on that adapter for this
+reason. Permission has a contact: brady@vgpc.com.
+
+**The spec does not mention the source that passes.** The Card API is already
+integrated, returns real individual sales rather than computed values, and its
+§4a explicitly permits "Caching and storing API responses locally in your own
+database to serve your users" and "Displaying card prices, transaction history,
+and market data within your own product interface."
+
+**DECISION:** Phase 1's second adapter is **The Card API**. Same interface, same
+cost tier, and the only one of the three that may lawfully be stored and
+re-displayed — which is the whole premise of a durable comp store.
+
+### FINDING 5 — `buyer_premium_included boolean` is a regression
+
+The repo has `price_basis` as `all_in | hammer | unknown`. The third state is
+load-bearing: Goldin quotes hammer with ~22% to come, and Lelands / SCP / Hakes /
+REA are houses whose premium no source we have states. A boolean forces those to
+`false`, which reads as "no premium" and under-states every one. The enum lets
+them be excluded and REPORTED as excluded. Keeping the enum.
+
+### WHAT IS GENUINELY NEW AND GOOD
+
+Recorded so it is not lost among the corrections. Five of the six NEW pieces are
+strong:
+
+1. **Track A / Track B.** The sharpest idea here. Validating a valuer on your own
+   sales is circular — you priced it, listed it there, it sold. Separating
+   unbiased prediction from pricing-efficiency measurement is correct and rare.
+2. **The candidate ledger**, and treating exclusion overrides as training data.
+3. **Prior vs observed multipliers** with a confidence penalty for priors.
+   `adjustToGrade` already returns null when it cannot convert — the right shape.
+4. **Per-run lenses** rather than a global setting.
+5. **TOO_NEW vs TOO_RARE** as distinct failure modes needing different methods.
+6. `data_sources` as a monitored registry — worth having as an extension of
+   `rights`, not a parallel system.
+
+### OPEN, BLOCKING PHASE 2 (not Phase 1)
+
+- Does `VALUATION_ENGINE.md` exist outside the repo? If not, the ladder and
+  analog transfer need designing first.
+- "Seed prior_value from the January 2026 tables" — those tables are not in the
+  repo either. `reference/pricing-factors.md` is a factor MAP, not a multiplier
+  table.
+
+---
+
 # BUILD_LOG — foundation-fixes
 
 Judgment calls made while executing the foundation plan (2026-07-25 review →
