@@ -7,6 +7,33 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-08-13 - ten quiet days; nothing moved anywhere
+
+**Not material, and this time not because of the push boundary.** `origin/main`
+is still `eb7624e` (2026-08-03). Beau's working copy is also still at
+2026-08-03 — its newest commit is `14f4fd3`, and `git log --since=2026-08-03`
+is empty in both. Ten days with no commits on either side. No strategy rewrite,
+no republish, no research.
+
+Checked: `git pull --ff-only` and `git fetch` on the loop clone (no movement),
+`git log --since` on both repos, and a read-only diff of `BRIEF.md` between the
+two — byte-identical, last changed 2026-07-30. `spec/INBOX.md` untouched since
+2026-07-26.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits
+ahead of `origin/main`, and the same three migrations are still pending and
+unpasted — `20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`. Confirmed by listing `supabase/migrations` in both
+trees, not carried over from the last entry. The ranked list still does not
+reflect that unpushed work, for the reason given on the 3rd.
+
+**The CHANGES.md conflict flagged on the 3rd is still coming**, untouched by
+this entry: the working copy carries overnight-loop entries origin has never
+seen, and this file now has two top-of-file hunks origin-side. Keep both,
+newest first, when those 38 commits are pushed.
+
+---
+
 ## 2026-08-03 - nothing on main; the work is real but unpushed
 
 **Not material, from where this document can see.** `origin/main` has not moved
