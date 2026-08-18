@@ -7,6 +7,30 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-08-18 - one day on from the last run; nothing moved
+
+**Not material.** `origin/main` is still `cc0a948`, which is yesterday's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Fifteen days now
+since the last real commit on either side. No strategy rewrite, no republish, no
+research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since` and
+`git status --porcelain` on both trees, a read-only diff of `BRIEF.md` between
+them (byte-identical, file last touched 2026-07-31 with no content change since
+the 2026-07-30 fold), and a listing of `supabase/migrations` in both.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits ahead
+of `origin/main` — measured this run, not carried over, and unmoved because no
+commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that unpushed
+work, for the reason given on the 3rd. The CHANGES.md merge conflict flagged then
+is still coming — keep both hunks, newest first, when those 38 commits are
+pushed.
+
+---
+
 ## 2026-08-17 - two weeks quiet; still nothing to rank
 
 **Not material.** `origin/main` has moved exactly once since the 13th, and that
