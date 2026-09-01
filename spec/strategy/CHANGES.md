@@ -7,6 +7,41 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-09-01 - twenty-nine days quiet; a run one day after the last
+
+**Not material.** `origin/main` is still `fbb85a7`, which is the last run's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Twenty-nine days
+now since the last real commit on either side. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-08-30`
+and `git status --porcelain` on both trees, a read-only diff of `BRIEF.md`
+between them (byte-identical; the working copy's file was last touched
+2026-07-31 with no content change since the 2026-07-30 fold), `spec/INBOX.md`
+mtime (untouched since 2026-07-26), and a listing of `supabase/migrations` in
+both.
+
+**New this run, and again about the routine rather than the product:** this
+entry lands one day after the last, not the three the schedule asks for. Taken
+with the six-day gap on the 28th and the on-cadence three days on the 31st, the
+firing interval is drifting either side of three days rather than holding. That
+is an observation from three data points, not a diagnosis — nothing was
+investigated, and on a repo this quiet an early or late run costs nothing. It
+would only matter if work resumed and a run fired between commits it then
+failed to log.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits ahead
+of `origin/main` — measured this run via `rev-list --count`, and unmoved because
+no commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that unpushed
+work, for the reason given on the 3rd. The CHANGES.md merge conflict flagged then
+is still coming — keep both hunks, newest first, when those 38 commits are
+pushed.
+
+---
+
 ## 2026-08-31 - twenty-eight days quiet; the schedule is back on cadence
 
 **Not material.** `origin/main` is still `a5739ba`, which is the last run's own
