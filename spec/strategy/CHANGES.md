@@ -7,6 +7,30 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-09-14 - forty-two days quiet
+
+**Not material.** `origin/main` is still `c0065ff`, which is the last run's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Forty-two days
+now since the last real commit on either side. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-09-07`
+and `git status --porcelain` on both trees, `BRIEF.md` (unchanged since the
+2026-07-30 fold — no new entries below the Log section), and a listing of
+`supabase/migrations` in both (same three pending: `20260751_sweep_template`,
+`20260752_source_instances`, `20260753_parallel_ratios`).
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits
+ahead of `origin/main`, same as the 9/7 run — no commits have been made since.
+The ranked list still does not reflect that unpushed work, for the reason
+given on 2026-08-03. The CHANGES.md merge conflict flagged then is still
+coming — keep both hunks, newest first, when those 38 commits are pushed. The
+firing-interval observation closed out on 9/7 (that was the last run meant to
+re-observe it); not reopened here.
+
+---
+
 ## 2026-09-07 - thirty-five days quiet; the firing interval is not three days
 
 **Not material.** `origin/main` is still `020cdee`, which is the last run's own
