@@ -7,6 +7,27 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-09-20 - forty-eight days quiet
+
+**Not material.** `origin/main` is still `83b4bfc`, the last run's own CHANGES
+entry — no other commit since. Beau's working copy is unmoved: HEAD `14f4fd3`
+(2026-08-03), tree clean, still 38 commits ahead of `origin/main`, the same
+three migrations pending (`20260751`-`20260753`) and neither merged nor pasted
+here. `BRIEF.md` is byte-identical in both trees with no new entries below the
+Log section. No strategy rewrite, no republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-09-16`
+and `git status --porcelain` on both trees, a diff of `BRIEF.md` between them,
+`rev-list --count origin/main..HEAD` on the working copy, and a listing of
+`supabase/migrations` in both.
+
+**Unchanged, not re-counted as new:** the ranked list still does not reflect
+those 38 unpushed commits, for the reason given on 2026-08-03. The CHANGES.md
+merge conflict flagged then is still coming - keep both hunks, newest first,
+when they are pushed.
+
+---
+
 ## 2026-09-16 - forty-four days quiet
 
 **Not material.** `origin/main` is still `b54edec`, the last run's own CHANGES
