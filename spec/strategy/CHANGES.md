@@ -7,6 +7,16 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-09-25 - fifty-three days quiet
+
+**Not material.** `origin/main` is still `d3ea01f`, the last run's own CHANGES
+entry. Beau's working copy is unmoved: HEAD `14f4fd3` (2026-08-03), tree clean,
+38 commits ahead of `origin/main`, the same three migrations pending
+(`20260751`-`20260753`), not merged or pasted here. `BRIEF.md` byte-identical in
+both trees, no new entries. No rewrite, no republish, no research.
+
+---
+
 ## 2026-09-22 - fifty days quiet
 
 **Not material.** `origin/main` is still `0841288`, the last run's own CHANGES
