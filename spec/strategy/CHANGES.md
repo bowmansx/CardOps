@@ -7,6 +7,18 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-10-19 - seventy-seven days quiet
+
+**Not material.** `origin/main` is still `6291a45`, the last run's own CHANGES
+entry; no other commits since 2026-10-16. `BRIEF.md` byte-identical in both
+trees, no new entries. Beau's working copy unchanged: HEAD `14f4fd3`
+(2026-08-03), the merge of `origin/main` still stopped on the
+`spec/strategy/CHANGES.md` conflict (38 ahead / 21 behind its local
+`origin/main` ref), the same three migrations pending (`20260751`-`20260753`).
+Not resolved, merged or pasted from here. No rewrite, no republish, no research.
+
+---
+
 ## 2026-10-16 - seventy-four days quiet
 
 **Not material.** `origin/main` is still `b799e5f`, the last run's own CHANGES
