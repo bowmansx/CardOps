@@ -1,5 +1,45 @@
 # CardOps — where things stand and what's left
 
+## STATE AS OF 2026-10-29 (overnight)
+
+**Nothing in the product code was broken.** Three months had passed with only
+the strategy review's "nothing material" entries on main. What was wrong sat
+outside the code, where typecheck, tests and the build cannot see it. Full
+account in `spec/OUTBOX.md`.
+
+- **AI intake has been "manual" since the split** — `service_config.anthropic_vision`
+  is seeded `false` in bootstrap and in the init migration, so the fresh
+  project came up with it off. Beau flips it in Services; it gates paid calls.
+  Now step 7 of `supabase/bootstrap/README.md`, so a rebuild can't repeat it.
+- **Every comp paste fails in production** — `private_to` exists only in the
+  unpasted migration 20260752. `scripts/schema-probe.mjs` now checks the live
+  schema against what the code expects.
+- **The free Supabase plan kept pausing the project** — no crons and no cards
+  means zero traffic. A daily GitHub Actions keepalive is live.
+- **Built, not merged:** `claude/import-any-format` — import from any
+  inventory file's own column names, with the mapping shown before writing.
+  Not merged because `npm run check` fails on lint outside the branch.
+
+### Next, in order
+
+**Beau's:**
+
+1. Turn on **Services → AI card scan (Anthropic)**.
+2. Paste `20260752_source_instances.sql`, then `node scripts/schema-probe.mjs`.
+3. Fix the three variable names in `.env.local` (see `CLAUDE.md` → Commands).
+4. Answer the lint questions (CameraSheet disable vs restructure; the four
+   warnings), which is what unblocks every merge — including the import branch.
+5. Decide whether to push local main's four unpushed commits.
+
+**The loop's, once unblocked:**
+
+- Merge `claude/import-any-format` when the gate passes.
+- The card-estimates overlap lock — needs a migration, so it waits until
+  20260752 and 20260753 are applied (migrations are never stacked).
+- Wire `card_parallel_ratio` into the valuation route, after 20260753.
+
+---
+
 ## ✅ STATE AS OF 2026-07-29 (overnight)
 
 **Migrations 20260750 and 20260751 are APPLIED and verified** against

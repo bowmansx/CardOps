@@ -43,6 +43,21 @@ card_pool row. Hence the user-creation step in the middle.
 5. First login on card-ops-zeta (magic link needs `shouldCreateUser` relaxed
    or use Google; see note below), then `02_after_first_login.sql`.
 6. Acceptance: paste `supabase/tests/money-core.test.sql` → 13 of 13 PASSED.
+7. **Turn AI back on — a fresh project comes up with it OFF.** Both
+   `01_schema_part1.sql` and `20260713150000_cardops_init.sql` seed
+   `('anthropic_vision', false, 0)`. Every scan, re-read, estimate and AI
+   feature fails closed on that row, so after a rebuild the camera reads
+   nothing and every card says **manual**. This is exactly what happened after
+   the 2026-07-25 split — "it would automatically do all of this stuff in our
+   previous iteration" — and it went undiagnosed for three months because the
+   old shared project had the toggle on and nothing about the code had
+   changed. Flip **Services → "AI card scan (Anthropic)"** in the app. It is
+   seeded off on purpose: it enables paid API calls, so it is the owner's
+   decision, never a default.
+8. Run `node scripts/schema-probe.mjs`. Every migration the code depends on
+   should report present; one that does not is pasted on disk and missing in
+   the database, which typecheck, the tests and the build all pass straight
+   through.
 
 Note on first login: the login page sends magic links with
 `shouldCreateUser: false` (defense in depth), so on an EMPTY auth the very

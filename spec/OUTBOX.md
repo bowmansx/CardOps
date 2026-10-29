@@ -10,127 +10,140 @@ file will get overwritten.
 
 ---
 
-## Where things stand — 2026-07-27 evening
+## Where things stand — 2026-10-28, late
 
-Everything below is **merged and live** on card-ops-zeta. Two migrations are
-waiting on you; nothing breaks until you run them.
+**Copy.** Your *"big test... hello world... do you copy?"* has been in Do next
+since 2026-07-25. Yes — the loop reads INBOX. You can clear it.
 
-### Paste when you're ready
+### Three things that make the app work again — yours, in this order
 
-| Migration | What it does | If you skip it |
-|---|---|---|
-| `20260748000000_scan_on_open.sql` | The **Start scan** button — camera opens for framing, scanning waits for the tap | Nothing breaks. The default applies and you get the button anyway. Pasting it just lets you turn it OFF. |
-| `20260749000000_graded_template.sql` | The **Graded slab** template — front, back, label close-up, auto-picks the slab guide | The template doesn't appear in the list. Nothing else is affected. |
+1. **Turn on AI card scan.** *Services → "AI card scan (Anthropic)".* This is
+   why scanning has filled nothing in since the split. The new database was
+   built from bootstrap SQL that seeds this switch **off**; the old shared one
+   had it on. The code never broke. It's off by design because it's the switch
+   that allows paid API calls — so it's yours to flip.
+   If scans then show *"AI request failed: … authentication"*, the Anthropic
+   key is missing on the card-ops Vercel project. It was probably carried over
+   from before the split, but nobody has checked.
+2. **Paste `supabase/migrations/20260752000000_source_instances.sql`.** Every
+   comp paste fails in production until you do — the app writes a `private_to`
+   column that only this migration creates. Safe to paste: the column is
+   nullable and every existing row keeps the visibility it has today. The
+   MasterOps session checked it against the live database tonight — Postgres
+   17.6, every column it references exists, and `card_market_sales` is empty —
+   but did not run it; that's yours, and should be done awake. Then run
+   `node scripts/schema-probe.mjs`; it should end with *"Live schema matches
+   what the code expects."*
+3. **Fix the three names in `C:\dev\CardOps\.env.local`** so the app runs on
+   your laptop. Every local page 500s right now, even `/login`. The exact
+   names are in `CLAUDE.md` under *Commands*; the values come from Supabase →
+   Settings → API.
 
-Still unpasted from earlier: `20260745000000_identity_auto_relic.sql`, on the
-unmerged `identity-auto-relic` branch. Autographs and relics still share market
-history with the unsigned base card until it lands.
+### Built tonight — waiting for you to merge
 
-### The one test that decides the next big piece
+**Import any inventory file.** Branch `claude/import-any-format` —
+[compare it and open a PR](https://github.com/bowmansx/CardOps/compare/main...claude/import-any-format?expand=1).
 
-Use a **raw card** — matte, on a dark non-glossy surface. Frame it, hit Start
-scan, then move the phone around it for ~10 seconds and read the verdict line.
+Your [[00-what-cardops-is]]: CardOps *"can also receive an inventory system
+from the template/format of any other inventory software."* It couldn't.
+Import read only its own column names, so a Card Ladder export, or a sheet
+headed *Player Name / Card # / Set*, matched nothing — and still "succeeded",
+creating **one blank card per row**. Now:
 
-A PSA slab is the wrong test and that's a real finding, not a nitpick: polished
-plastic reflects a far wider slice of the room than cardstock, so a lamp that's
-sweepable on a raw card may be un-sweepable on a slab. It's also why the edge
-detector locks onto the holder rather than the card.
+- it reads the file's own headers and matches them to CardOps fields, then
+  **shows you the match before writing anything**, and you can change any of it;
+- it never guesses at a bare *Price* (your cost? an asking price? a sale
+  price?), *Condition* or *Title* — those wait for you to say what they are;
+- a "#" column that just counts 1, 2, 3 is recognised as a row number;
+- a file that would only make blank cards is refused.
 
-What the answer decides:
-- *"small enough to sweep around"* → build the glare compositor (Stage 2, ~9 days)
-- *"doesn't move as you do"* → don't build it; the answer is a smaller lamp
+Fixed on the way, and these hit CardOps' own CSVs too: Excel's hidden first
+character ate the first column; **"$12.50" became a cost of 0**; **a PSA 10
+with no condition column came in as RAW** and would have priced off raw comps;
+"2021-22" lost its year; one "NM" in a condition column rejected the whole file.
 
-### Honest state of the multi-frame scan
+**The review caught a money bug in my own first draft:** a European-format
+"12,50" would have imported as **$1,250** — a hundredfold error with nothing
+flagged. Fixed, and tested by putting the bad version back and watching exactly
+those tests fail.
 
-- **Stage 0, light measurement** — built, that's the readout you're testing
-- **Stage 1, deskew + derived corner crops** — *not started*. Ships value either
-  way: a square-on rectified front/back, and corner crops that beat hand-held
-  close-ups because a phone can't focus close enough to compete
-- **Stage 2, the glare-free compilation** — *not started, gated on the test above*
+**Why it isn't merged:** the gate (`npm run check`) fails on lint in files this
+branch doesn't touch — see *Waiting on your answer*. 896 tests pass, the build
+passes, and everything I touched lints clean.
 
-### Also unfinished
+**Not built, on purpose:** remembering a mapping you corrected. The table for it
+exists, but it's shared across every account, so a mapping you taught it would
+apply to your friends' imports too. That's a decision, not a default.
 
-The **temporal tracker** — the piece that makes the lock glide instead of
-wobble. Designed, not written. Jitter currently sits around 2.9px at the ~2°
-angle a hand actually holds; the flat case is already 10× steadier than this
-morning.
+### The record was wrong in places — corrected tonight
 
----
+- The vault said CardOps runs on Master-Ops' database. **It doesn't** — its own
+  project since 2026-07-25, proven from the live app. Fixed in CardOps-Overview,
+  MasterOps-Overview, 60-Ops/README and the CONSISTENCY-AUDIT (#229, #236).
+- The vault listed a *"still-open P0: card-estimates charges for a failed
+  estimate."* **Already fixed in the code** — it saves first and charges
+  second. One piece is left (two runs at the same moment could both charge),
+  and it needs a migration, which can't be stacked on top of 20260752/53 while
+  those are unpasted.
+- Fix order 1 — Master-Ops' card crons removed — **confirmed shipped.**
+- `CLAUDE.md` gave a reason for keeping `CRON_SECRET` unset that stopped being
+  true in July. Corrected: the reason now is that the crons aren't hardened.
+- **My own mistakes:** in August I left two lint errors in the valuation code
+  and never ran the full gate — fixed in `1e7ef31`, on your local main, not
+  pushed. Tonight my schema probe checked a column that doesn't exist; the
+  MasterOps session fixed it (`e043ae6`) before it could tell you a correct
+  paste had failed.
 
-## Shipped
+### The database stays awake now
 
-Newest first. Full record in the git log and `reference/next-steps.md`.
-
-**Find, and update a batch** — `/cards/find`, linked from the Intake header
-("Already own it?") and the cards menu. Point the camera at a card you already
-own and it goes to that card's page. Typing works too, and costs nothing — which
-matters, because the case you described this for is a card already boxed up for
-a grader. Every candidate shows *why* it matched and what disagreed, labelled
-Certain / Likely / Possible; nothing is auto-selected. Then the update half:
-add each match to a batch, and change all of them at once — **Sent to grader**
-is the default. It reports what did *not* change too, so eight-of-ten never
-reads as ten.
-
-**The placement sheet** you asked about — print it, lay each card on its
-numbered slot, and the stack, the list, and the app are all in one order.
-Slots are true card size, so print at 100%. It is not a substitute for PSA's or
-BGS's own submission form, and the value column says "your recorded value"
-rather than "declared value" — that one is yours and your grader's call, with
-insurance consequences the app has no business deciding.
-
-**The session menu** — the expand/collapse window from the left you described.
-The whole run in a list: reorder by dragging the grip, delete any shot (taken,
-current, or upcoming), tap a taken one to go back and retake it. Your *"order
-of your session = order your photos are saved"* is now literally true, which is
-what the third migration is for. Deleting a shot you already took asks once —
-the button turns into "Discard?" and takes a second tap — because that throws a
-photo away.
-
-**The camera aims itself.** A template shot can now state how much of the frame
-the card should fill and at what angle, and the camera says *Move closer* /
-*Move back* / *Hold the phone flatter* until you're on it, then goes green. One
-instruction at a time, distance before angle. Auto-snap waits for the target
-instead of firing while you're still walking the phone in.
-
-**Edge detection**, which everything above stands on: the card's outline lights
-thin yellow — per side, so three lit and one dark tells you which way to move —
-plus live distance in inches and viewing angle in degrees. A review pass caught
-it inventing a card out of noise in 199 of 200 blank frames; fixed and pinned
-by tests. Two more defects surfaced after that: it was measuring the
-*toploader* rather than the card (any rectangle enclosing the card won it), and
-every distance in portrait read ~45% low. Both fixed.
-
-**`npm run backup`** — every row of all 30 tables plus every photo in the
-bucket, to a local folder. Writes an `INCOMPLETE.txt` and exits non-zero if any
-part failed, so a half-backup can never look like a good one.
-
----
-
-## Noticed, didn't act
-
-- **The camera used to remount between every shot** of a template — tearing
-  down and re-acquiring the camera twelve times in a grading run. Fixed as part
-  of the session menu, but it explains any sluggishness you noticed there.
-- **`card_photos.width`/`height` exist and nothing populates them.** Harmless
-  today; would matter if listing ever needs to reject an undersized image
-  before it uploads.
-- **The four back-corner roles have no built-in template except grading.** If
-  you shoot backs of corners outside a grading run, that's a template worth
-  having — say the word and it's a one-line addition to 20260746.
+A daily GitHub Actions job touches the database so the free plan can't pause it
+again. Free (the repo is public), no secrets, live since tonight. One limit:
+GitHub switches scheduled jobs off after 60 days with no commits to the repo.
 
 ---
 
 ## Waiting on your answer
 
-_(nothing blocking — the three migrations above are the only handoff)_
+| | Question | What it unblocks |
+|---|---|---|
+| **Lint: CameraSheet** | A lint-disable comment there, or restructure when the sweep starts? Restructuring needs testing on a phone. | The gate — nothing can merge until `npm run check` passes |
+| **Lint: four warnings** | Fix them, or let `check:lint` tolerate warnings? | Same |
+| **Lint PR** | Open and merge `claude/inspiring-curran-a8d129`? | Same |
+| **Shared import mappings** | Should a column mapping one account teaches the app apply to everyone's imports? | Remembering import mappings |
+| **Cost Basis note** | You want a default % drawn from "the cost basis pool" on each sale. The global pool was retired on 2026-07-25 for purchase lots, which draw the lot's *average*. A chosen % is a different rule — replace the average, or sit alongside it? | That note |
+| Storage tiers | How much per plan, at what price? | P4 quotas |
+| Off-site backup | R2, Google Drive or S3? | Seeding the Mantle |
+| Credits scope | Org-level or user-level? | Wave C tenancy |
+| Wave B UI | Build it, or wait? | The investor-asset screens |
+| PSA fee approach | Flat defaults or a service-level ladder? | Grading cost pre-fill |
+
+**Answered — you can clear it from INBOX:** *"VALUATION_ENGINE.md — does this
+exist somewhere?"* It does now: `reference/VALUATION_ENGINE.md`, written from
+the code on 2026-07-30.
+
+---
+
+## Noticed, didn't act
+
+- **Four commits on your local main are unpushed:** `1e7ef31` (my lint fixes),
+  `ae3999b` (your Definition of done), and `0335293` / `e043ae6` (the MasterOps
+  session). Not pushed from here — two aren't mine, and a push deploys.
+- **The Oct 31 strategy review won't push those four either.** The MasterOps
+  session changed that task tonight so it refuses to push any commit it didn't
+  make that reaches beyond `spec/`. Pushing them is your call.
+- **`/vault-log`**, which your notes rule says to run at session end, doesn't
+  exist yet. The vault's state block was updated by hand instead.
+- **Your Home Page Layout note** (Pricing Templates, Photo Templates, Inventory,
+  Inventory Groups, Watchlist) — a candidate, not built. Say the word in INBOX.
+- **Your photo note** also asks for video capture and third-party camera
+  support. Not started.
 
 ---
 
 ## Blocked
 
-- **Storage tier numbers** — the per-plan photo quota. Every screen that would
-  warn you before you hit it is written around a number that doesn't exist yet.
-- **Off-site backup destination** — `npm run backup` writes locally. Where it
-  should also go (S3? Backblaze? a synced folder?) is yours to pick.
-- **PSA fee approach** — flat defaults or a service-level ladder. Decides what
-  the grading cost line pre-fills.
+- **Storage tier numbers** — every screen that would warn you before a quota is
+  written around a number that doesn't exist yet.
+- **Off-site backup destination** — `npm run backup` writes locally.
+- **The card-estimates overlap lock** — needs a migration; stacked behind the
+  two unpasted ones.

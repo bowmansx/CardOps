@@ -13,11 +13,17 @@ mistaken for a request to build something.
 
 ---
 
-last_seen_commit: a9b84cc
-last_seen_at: 2026-07-27T04:10:00
-last_action: built the photo notes out — template targets, the session menu,
-             FIND and the grading batch. OUTBOX rewritten with three migrations
-             waiting on Beau (20260745, 20260746, 20260747).
+last_seen_commit: e043ae6
+last_seen_at: 2026-10-29T00:10:00
+last_action: first iteration since 2026-07-27. Read every vault change since
+             a9b84cc. INBOX: answered "do you copy"; the 00 note (receive any
+             inventory format) was the direction, so built branch
+             claude/import-any-format — pushed, NOT merged, because
+             `npm run check` fails on lint in src/ that the branch doesn't touch
+             (CameraSheet + 4 warnings, waiting on Beau). Diagnosed the AI-fill
+             bug Beau reported 2026-07-26: anthropic_vision seeded false in the
+             fresh project. OUTBOX rewritten. Migrations 20260752 and 20260753
+             still unpasted — the next item needing a migration is blocked.
 
 ## How the loop uses it
 
