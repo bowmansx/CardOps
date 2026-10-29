@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import Link from "next/link";
 import { Camera, Loader2, ScanLine, RotateCcw, AlertTriangle } from "lucide-react";
 import { SPORT_CATEGORIES, ZONES, GRADERS, PRICING_STRATEGY_OPTIONS } from "@/lib/cards/types";
@@ -10,7 +10,7 @@ import { IntakeSessionList } from "./IntakeSessionList";
 import {
   addToSession, removeFromSession, sessionLabel, type SessionCard,
 } from "@/lib/cards/intake-session";
-import { isManual, showAiOffBanner, type ManualReason } from "@/lib/cards/intake-mode";
+import { isManual, nextManualReason, showAiOffBanner } from "@/lib/cards/intake-mode";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
 import { uploadCardPhotos, type PhotoShot } from "@/lib/cards/upload";
 import { createClient } from "@/lib/supabase/client";
@@ -42,8 +42,9 @@ export function FullIntake({
   const [busy, setBusy] = useState<null | "scanning" | "saving">(null);
   const [err, setErr] = useState<string | null>(null);
   // WHY the form is manual, not just whether — see intake-mode.ts. One boolean
-  // made "Enter manually" claim AI was off.
-  const [manualReason, setManualReason] = useState<ManualReason>(null);
+  // made "Enter manually" claim AI was off. Changed only by dispatching an
+  // event; nextManualReason decides, and is what the test pins.
+  const [manualReason, dispatchMode] = useReducer(nextManualReason, null);
   // The full uncropped frames. A crop must never be the only record of an edge.
   const [frontOriginal, setFrontOriginal] = useState<string | null>(null);
   const [backOriginal, setBackOriginal] = useState<string | null>(null);
@@ -73,24 +74,27 @@ export function FullIntake({
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Scan failed.");
-      if (d.aiOff) {
+      const aiOff = Boolean(d.aiOff);
+      dispatchMode({ type: "scan-replied", aiOff });
+      if (aiOff) {
         // The server tells us WHY and we used to throw it away, so "Re-read
         // (AI)" looked like a dead button. A fail-closed path the user can't
         // see is indistinguishable from a broken one (rules 4 and 8).
-        setManualReason("ai-off");
         setErr(d.message ?? "AI scan is off — fill the card in manually.");
         setF({});
       } else {
-        setManualReason(null);
         setErr(null);
         setF({ ...d.card });
       }
       setStep("review");
-    } catch (e) { setErr(e instanceof Error ? e.message : "Scan failed."); }
+    } catch (e) {
+      dispatchMode({ type: "scan-failed" });
+      setErr(e instanceof Error ? e.message : "Scan failed.");
+    }
     finally { setBusy(null); }
   }
 
-  function manual() { setManualReason("chosen"); setF({}); setStep("review"); }
+  function manual() { dispatchMode({ type: "chose-manual" }); setF({}); setStep("review"); }
 
   async function save() {
     setErr(null); setBusy("saving");
@@ -277,7 +281,7 @@ export function FullIntake({
 
   function reset() {
     setFront(null); setBack(null); setFrontOriginal(null); setBackOriginal(null);
-    setF({}); setManualReason(null); setStep("capture"); setPendingPhotos(null);
+    setF({}); dispatchMode({ type: "reset" }); setStep("capture"); setPendingPhotos(null);
   }
 
   function cardTitle(x: Fields) {
