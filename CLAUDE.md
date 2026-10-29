@@ -230,23 +230,22 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
   only.
 - Surface merges or deletions that would lose work instead of just doing them.
 
-## Notes, spec, and the vault (standing rule, 2026-10-29)
+## Notes — where this program's memory lives
 
-- **`spec/` is the spec the code reads, and it stays in this repo.** It is both
-  Beau's Obsidian vault and the project spec, deliberately. `scripts/component-check.mjs`
-  reads `spec/strategy/COMPONENTS.md`, and the scheduled strategy review owns
-  `spec/strategy/CHANGES.md`. Do not relocate it.
-- **Facts, status and decisions about the app live in the Bowman-Vault**, not
-  here and not in chat:
-  `G:\My Drive\Bowman-Vault\Bowman-Vault\60-Ops\CardOps\CardOps-Overview.md`.
-  The vault note **links to `spec/`, it never copies it** — a copy is a second
-  source of truth, and the copy is the one that goes stale.
-- **Obsidian is an editor only.** Auto-commit is fine; **nothing auto-pushes**
-  (`disablePush: true` in `spec/.obsidian/plugins/obsidian-git/data.json`), and
-  **every push to GitHub is deliberate** — a person or an agent decides to push.
-  This is not housekeeping: this repo is git-integrated with Vercel, so an
-  automatic push deploys whatever happens to be in the working tree straight to
-  production. That setting is load-bearing; don't turn it back on.
+- **This repo:** `CLAUDE.md` and `spec/` are the contract the code reads. Keep them
+  current with the code.
+- **The vault:** `G:\My Drive\Bowman-Vault\Bowman-Vault\60-Ops\CardOps\CardOps-Overview.md`
+  holds status, decisions and what is blocked on Beau. (MasterOps: `60-Ops\MasterOps\MasterOps-Overview.md`.)
+- **Session start:** read the vault note's state block — the five bold lines under the
+  H1 (**What** / **Stands** / **Next** / **Blocked** / **Changed**) — before reading the task.
+- **Session end:** run `/vault-log`. Never copy business facts into `spec/`; **link to
+  the vault note instead.** A copy is a second source of truth and it is the one that
+  goes stale.
+- Code lives in `C:\dev\<repo>`, never inside a cloud folder. Obsidian is an editor
+  only; **nothing auto-pushes** and every push to GitHub is deliberate.
+  `disablePush: true` lives in `spec/.obsidian/plugins/obsidian-git/data.json` and is load-bearing: this repo is
+  git-integrated with Vercel, so an automatic push would deploy whatever is in the
+  working tree straight to production.
 
 ## Reference
 
