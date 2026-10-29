@@ -13,6 +13,14 @@ at https://card-ops-zeta.vercel.app.
 - `npm test` — vitest, the full card suite
 - `npm run build` — production build
 - `npm run dev` — dev server on port 3100
+- `node scripts/component-check.mjs` — registry drift (repo against itself)
+- `node scripts/schema-probe.mjs` — **live schema against what the code expects.**
+  Run it when anything misbehaves at runtime while the build is clean. Typecheck,
+  tests, the build and the registry all pass straight through an unapplied
+  migration, because none of them can see the database; on 2026-10-28 that let
+  every comp paste in production fail on a column that only existed on disk. It
+  needs no secrets — it reads error codes, and lifts the public anon key out of
+  the deployed bundle if none is in the environment.
 
 **Local dev needs `.env.local`, and a missing or misnamed var fails LOUDLY but
 misleadingly.** `proxy.ts` builds a Supabase client in middleware, which runs

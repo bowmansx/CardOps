@@ -50,6 +50,8 @@ these three is how a to-do list becomes a wall of guilt.
 **Status:** stalled
 **Files:** `supabase/migrations/20260752000000_source_instances.sql`
 **Blocker:** Migration not applied. Nothing reads `card_source_configs` or `card_data_sources` yet, and no credential store exists — `credential_ref` names a secret that has nowhere to live.
+**BREAKS PRODUCTION TODAY (found 2026-10-28).** This stopped being a dormant blocker. `saleToRow` in `market-sales.ts` sets `private_to`, which only 20260752 creates, and `/api/cards/market-sales/paste` upserts those rows — so **every comp paste fails** with `column card_market_sales.private_to does not exist`. Verified against the live project with `scripts/schema-probe.mjs`: `provenance`, `added_by`, `price_basis` and `is_graded` are all present (20260750 is applied), `private_to` is not, and `card_source_configs`/`card_data_sources` do not exist. Rule 1 means it fails loudly with the real message rather than silently, which is the only reason it is diagnosable.
+**The fix is to paste 20260752, not to change the code.** The column is nullable and defaults NULL, so existing rows keep the visibility they have; the RLS policy it installs (`has_card_access() and (private_to is null or private_to = auth.uid())`) is a no-op on today's rows. Making `saleToRow` omit the field instead would write every row as shared and defeat the one thing the column exists to prevent — the migration's own comment says the write path must set it.
 **Left:** Apply the migration, build the secret store, build the settings UI, teach the orchestrator to use a user's key.
 
 ### net-proceeds

@@ -7,6 +7,73 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-10-28 (reconciliation) - the record was wrong and a paste was broken
+
+**Material, and the first time in eighty-seven days.** Beau asked to reconcile
+the program and get it working. Nothing in the product code was broken —
+typecheck clean, 841/841 tests, production build exit 0, registry no drift,
+tree clean, nothing unpushed. Two real faults, both invisible to all of that.
+
+**EVERY COMP PASTE IN PRODUCTION WAS FAILING.** `saleToRow` sets
+`private_to`; only migration 20260752 creates it; 20260752 was never pasted.
+`/api/cards/market-sales/paste` upserts those rows, so the write came back
+`column card_market_sales.private_to does not exist`. Rule 1 is why it was
+diagnosable at all — the error is checked and surfaced rather than swallowed.
+Probed against the live project: `provenance`, `added_by`, `price_basis`,
+`is_graded` all present (20260750 is applied, as CLAUDE.md said), `private_to`
+absent, `card_source_configs` and `card_data_sources` absent. **The fix is to
+paste 20260752, not to touch the code** — the column is nullable and defaults
+NULL so existing rows keep their visibility, and making the writer omit it
+would mark every row shared and defeat the one thing it exists to prevent.
+
+**`scripts/schema-probe.mjs` is new, and it is the generalizable half.**
+`component-check.mjs` compares the repo against itself; nothing compared the
+repo against the database. The gap is not code-vs-migrations — the migration
+file was present and correct — but migrations-on-disk vs migrations-APPLIED,
+which no static check can reach. It needs no secrets: it reads PostgREST error
+codes and lifts the public anon key out of the deployed bundle. It carries a
+canary column that cannot exist and refuses to report anything if that comes
+back present, because a method that cannot distinguish is worse than no check.
+
+**THE RECORD SAID CARDOPS RUNS ON MASTER-OPS'S DATABASE. IT DOES NOT.**
+CONSISTENCY-AUDIT #229/#236 had this open as "Beau should say which is true in
+code today: one repo or two, one Supabase project or two." It did not need
+asking — the code answers it. Two repos with separate HEADs; two Supabase
+projects (the production bundle carries `zgkydwvmdnnrxcacegth`, MasterOps uses
+`wjcalfuwqantwhizkdks`, both live); standalone, not folded. The "shared
+database" line described 2026-07-24, the day before the split, and the "folded
+into MasterOps" line restated the superseded 2026-07-13 plan. Corrected
+together: CardOps-Overview, MasterOps-Overview, 60-Ops/README and the audit
+itself. The repo's CLAUDE.md had been right since 2026-07-25; the vault was the
+stale side.
+
+**Fix order 1 is shipped**, and nobody had confirmed it: Master-Ops's
+`vercel.json` declares refresh / alerts / reminders / recap / subs-sync and
+nothing card or eBay. Closed that GAP.
+
+**The interlock's stated reason had gone false.** CLAUDE.md justified an unset
+`CRON_SECRET` as double-run protection because "Master-Ops still declares and
+runs the same jobs against the shared database" — untrue on both counts now.
+The interlock stays, for the reason that is still true: the crons are not
+hardened (fix order 9, plus the open P0 where a failed card-estimate insert
+debits the ledger and re-selects the same card). Its real cost is now written
+down: no crons anywhere plus no cards entered means zero traffic, and the FREE
+plan pauses a project after ~7 idle days, which takes its DNS with it and fails
+the app at the middleware. That has happened at least three times (08-18,
+09-05, and a spell still down on 08-29). Up as of today.
+
+**Local dev was 500ing on every route** including `/login` and paths that do
+not exist — `proxy.ts` builds a Supabase client in middleware, so one missing
+env var takes everything down, and Next still prints `Environments: .env.local`
+because it loaded the file without checking the names inside. The three required
+names are now in CLAUDE.md; the values are Beau's to put in (the file is behind
+a deny rule and stayed unread).
+
+**Not done, deliberately:** no migration pasted, nothing pushed (a push deploys
+to production), no `CRON_SECRET` set, `.env.local` never read.
+
+---
+
 ## 2026-10-28 - eighty-six days quiet
 
 **Not material.** `origin/main` is still `7afc985`, the last run's own CHANGES
