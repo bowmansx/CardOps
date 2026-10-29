@@ -71,48 +71,61 @@ const db = createClient(URL_, KEY, { auth: { persistSession: false } });
 // the nightly job reported success 74 times running. Same trap, same script
 // shape, so this one discovers instead.
 //
-// PostgREST publishes the full table set at the API root as an OpenAPI doc.
-async function discoverTables() {
+// PostgREST publishes the full table set at the API root as an OpenAPI doc,
+// AND flags every column that forms part of a primary key. We need both: the
+// names so coverage cannot rot, the keys so paging is deterministic.
+async function discoverRelations() {
   const res = await fetch(`${URL_}/rest/v1/`, {
     headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
   });
   if (!res.ok) throw new Error(`Could not list tables: ${res.status} ${res.statusText}`);
   const spec = await res.json();
-  const names = Object.keys(spec.definitions ?? spec.components?.schemas ?? {});
-  if (!names.length) throw new Error("Table discovery returned nothing — refusing to write an empty backup.");
-  return names.sort();
+  const defs = spec.definitions ?? spec.components?.schemas ?? {};
+  const rels = Object.entries(defs).map(([name, def]) => ({
+    name,
+    pk: Object.entries(def.properties ?? {})
+      .filter(([, p]) => /Primary Key/i.test(p.description ?? ""))
+      .map(([col]) => col),
+  }));
+  if (!rels.length) throw new Error("Table discovery returned nothing — refusing to write an empty backup.");
+  return rels.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const PAGE = 1000; // PostgREST caps here regardless of what we ask for
 
-/** Read a table to completion. A short read is a FAILED read, never the end. */
-async function dumpTable(name) {
-  const rows = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await db.from(name).select("*").order("id", { ascending: true }).range(from, from + PAGE - 1);
-    if (error) {
-      // A table that doesn't exist in this project is fine and expected; any
-      // other error is not, and must not be mistaken for an empty table.
-      if (/does not exist|schema cache/i.test(error.message)) return { rows: null, skipped: error.message };
-      throw new Error(`${name}: ${error.message}`);
-    }
-    rows.push(...data);
-    if (data.length < PAGE) break;
-  }
-  return { rows, skipped: null };
-}
+// ONLY a genuinely absent relation may be skipped.
+//
+// This test used to be /does not exist|schema cache/ against the message, which
+// ALSO matches "column <t>.id does not exist" — so every table lacking an `id`
+// column was labelled "not in this project" and dropped from the backup. That
+// hid 17 of CardOps' 61 relations, two of them holding live config rows, and
+// the run still printed Done. Match the relation-missing codes, nothing looser.
+const isMissingRelation = (e) =>
+  e?.code === "42P01" || e?.code === "PGRST205" ||
+  /Could not find the table/i.test(e?.message ?? "") ||
+  /relation .* does not exist/i.test(e?.message ?? "");
 
-/** Some tables have no `id` to order by; fall back to unordered paging. */
-async function dumpTableLoose(name) {
+/** Read a relation to completion. A short read is a FAILED read, never the end. */
+async function dumpRelation({ name, pk }) {
   const rows = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await db.from(name).select("*").range(from, from + PAGE - 1);
+    let q = db.from(name).select("*");
+    for (const col of pk) q = q.order(col, { ascending: true });
+    const { data, error } = await q.range(from, from + PAGE - 1);
     if (error) {
-      if (/does not exist|schema cache/i.test(error.message)) return { rows: null, skipped: error.message };
-      throw new Error(`${name}: ${error.message}`);
+      if (isMissingRelation(error)) return { rows: null, skipped: error.message };
+      // Any other error is a failure. A relation we could not read is neither
+      // an empty one nor an absent one, and must not be recorded as either.
+      throw new Error(`${name}: ${error.message}${error.code ? ` [${error.code}]` : ""}`);
     }
     rows.push(...data);
     if (data.length < PAGE) break;
+    // With no ORDER BY, Postgres makes no promise that page 2 resumes where
+    // page 1 stopped, so a multi-page unordered read can repeat and omit rows
+    // at the same time. Refuse rather than write a plausible partial copy.
+    if (!pk.length) {
+      throw new Error(`${name}: over ${PAGE} rows and no primary key to page by — cannot copy this relation safely.`);
+    }
   }
   return { rows, skipped: null };
 }
@@ -121,24 +134,20 @@ async function backupTables() {
   fs.mkdirSync(path.join(outDir, "tables"), { recursive: true });
   const manifest = {};
   let total = 0;
-  const TABLES = await discoverTables();
-  for (const t of TABLES) {
-    let res;
-    try {
-      res = await dumpTable(t);
-    } catch (e) {
-      if (/column .*id.* does not exist|42703/i.test(String(e.message))) res = await dumpTableLoose(t);
-      else throw e;
-    }
+  const RELATIONS = await discoverRelations();
+  for (const rel of RELATIONS) {
+    const res = await dumpRelation(rel);
     if (res.rows === null) {
-      manifest[t] = { skipped: res.skipped };
-      process.stdout.write(`  ${t}: not in this project\n`);
+      // Discovery found it and the read says it is gone. That is a real
+      // anomaly, not routine, so it is loud and it is counted.
+      manifest[rel.name] = { skipped: res.skipped };
+      process.stdout.write(`  ${rel.name}: SKIPPED — ${res.skipped}\n`);
       continue;
     }
-    fs.writeFileSync(path.join(outDir, "tables", `${t}.json`), JSON.stringify(res.rows, null, 2));
-    manifest[t] = { rows: res.rows.length };
+    fs.writeFileSync(path.join(outDir, "tables", `${rel.name}.json`), JSON.stringify(res.rows, null, 2));
+    manifest[rel.name] = { rows: res.rows.length, pk: rel.pk };
     total += res.rows.length;
-    process.stdout.write(`  ${t}: ${res.rows.length}\n`);
+    process.stdout.write(`  ${rel.name}: ${res.rows.length}\n`);
   }
   return { manifest, total };
 }
@@ -210,7 +219,13 @@ const report = {
 fs.writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(report, null, 2));
 
 console.log(`\nDone in ${report.seconds}s`);
-if (tables) console.log(`  ${tables.total} rows across ${Object.keys(tables.manifest).length} tables`);
+if (tables) {
+  const skipped = Object.entries(tables.manifest).filter(([, v]) => v.skipped).map(([t]) => t);
+  console.log(`  ${tables.total} rows across ${Object.keys(tables.manifest).length} tables`);
+  if (skipped.length) {
+    console.log(`  ${skipped.length} SKIPPED — THIS BACKUP IS INCOMPLETE: ${skipped.join(", ")}`);
+  }
+}
 if (photos) {
   console.log(`  ${photos.downloaded}/${photos.objects} objects (${(photos.bytes / 1048576).toFixed(1)} MB)`);
   if (photos.failed) console.log(`  ${photos.failed} FAILED — this backup is incomplete`);
