@@ -7,6 +7,415 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-10-07 - sixty-five days quiet
+
+**Not material.** `origin/main` is still `952dcfa`, the last run's own CHANGES
+entry. Beau's working copy is unmoved: HEAD `14f4fd3` (2026-08-03), tree clean,
+38 commits ahead of `origin/main`, the same three migrations pending
+(`20260751`-`20260753`), not merged or pasted here. `BRIEF.md` byte-identical in
+both trees, no new entries. No rewrite, no republish, no research.
+
+---
+
+## 2026-10-05 - sixty-three days quiet
+
+**Not material.** `origin/main` is still `2cbac04`, the last run's own CHANGES
+entry. Beau's working copy is unmoved: HEAD `14f4fd3` (2026-08-03), tree clean,
+38 commits ahead of `origin/main`, the same three migrations pending
+(`20260751`-`20260753`), not merged or pasted here. `BRIEF.md` byte-identical in
+both trees, no new entries. No rewrite, no republish, no research.
+
+---
+
+## 2026-10-01 - fifty-nine days quiet
+
+**Not material.** `origin/main` is still `156dfd0`, the last run's own CHANGES
+entry. Beau's working copy is unmoved: HEAD `14f4fd3` (2026-08-03), tree clean,
+38 commits ahead of `origin/main`, the same three migrations pending
+(`20260751`-`20260753`), not merged or pasted here. `BRIEF.md` byte-identical in
+both trees, no new entries. No rewrite, no republish, no research.
+
+---
+
+## 2026-09-28 - fifty-six days quiet
+
+**Not material.** `origin/main` is still `336ca1e`, the last run's own CHANGES
+entry. Beau's working copy is unmoved: HEAD `14f4fd3` (2026-08-03), tree clean,
+38 commits ahead of `origin/main`, the same three migrations pending
+(`20260751`-`20260753`), not merged or pasted here. `BRIEF.md` byte-identical in
+both trees, no new entries. No rewrite, no republish, no research.
+
+---
+
+## 2026-09-25 - fifty-three days quiet
+
+**Not material.** `origin/main` is still `d3ea01f`, the last run's own CHANGES
+entry. Beau's working copy is unmoved: HEAD `14f4fd3` (2026-08-03), tree clean,
+38 commits ahead of `origin/main`, the same three migrations pending
+(`20260751`-`20260753`), not merged or pasted here. `BRIEF.md` byte-identical in
+both trees, no new entries. No rewrite, no republish, no research.
+
+---
+
+## 2026-09-22 - fifty days quiet
+
+**Not material.** `origin/main` is still `0841288`, the last run's own CHANGES
+entry. Beau's working copy is unmoved: HEAD `14f4fd3` (2026-08-03), tree clean,
+38 commits ahead of `origin/main`, the same three migrations pending
+(`20260751`-`20260753`), not merged or pasted here. `BRIEF.md` byte-identical in
+both trees, no new entries. No rewrite, no republish, no research.
+
+---
+
+## 2026-09-20 - forty-eight days quiet
+
+**Not material.** `origin/main` is still `83b4bfc`, the last run's own CHANGES
+entry — no other commit since. Beau's working copy is unmoved: HEAD `14f4fd3`
+(2026-08-03), tree clean, still 38 commits ahead of `origin/main`, the same
+three migrations pending (`20260751`-`20260753`) and neither merged nor pasted
+here. `BRIEF.md` is byte-identical in both trees with no new entries below the
+Log section. No strategy rewrite, no republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-09-16`
+and `git status --porcelain` on both trees, a diff of `BRIEF.md` between them,
+`rev-list --count origin/main..HEAD` on the working copy, and a listing of
+`supabase/migrations` in both.
+
+**Unchanged, not re-counted as new:** the ranked list still does not reflect
+those 38 unpushed commits, for the reason given on 2026-08-03. The CHANGES.md
+merge conflict flagged then is still coming - keep both hunks, newest first,
+when they are pushed.
+
+---
+
+## 2026-09-16 - forty-four days quiet
+
+**Not material.** `origin/main` is still `b54edec`, the last run's own CHANGES
+entry. Beau's working copy is unmoved: HEAD `14f4fd3` (2026-08-03), tree clean,
+still 38 commits ahead of `origin/main`, the same three migrations pending
+(`20260751`–`20260753`) and not merged or pasted here. `BRIEF.md` is
+byte-identical in both trees with no new entries. No rewrite, no republish, no
+research.
+
+---
+
+## 2026-09-14 - forty-two days quiet
+
+**Not material.** `origin/main` is still `c0065ff`, which is the last run's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Forty-two days
+now since the last real commit on either side. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-09-07`
+and `git status --porcelain` on both trees, `BRIEF.md` (unchanged since the
+2026-07-30 fold — no new entries below the Log section), and a listing of
+`supabase/migrations` in both (same three pending: `20260751_sweep_template`,
+`20260752_source_instances`, `20260753_parallel_ratios`).
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits
+ahead of `origin/main`, same as the 9/7 run — no commits have been made since.
+The ranked list still does not reflect that unpushed work, for the reason
+given on 2026-08-03. The CHANGES.md merge conflict flagged then is still
+coming — keep both hunks, newest first, when those 38 commits are pushed. The
+firing-interval observation closed out on 9/7 (that was the last run meant to
+re-observe it); not reopened here.
+
+---
+
+## 2026-09-07 - thirty-five days quiet; the firing interval is not three days
+
+**Not material.** `origin/main` is still `020cdee`, which is the last run's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Thirty-five days
+now since the last real commit on either side. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-09-01`
+and `git status --porcelain` on both trees, a read-only diff of `BRIEF.md`
+between them (byte-identical; the working copy's file was last touched
+2026-07-31 with no content change since the 2026-07-30 fold), `spec/INBOX.md`
+mtime (untouched since 2026-07-26), and a listing of `supabase/migrations` in
+both.
+
+**New this run, and still about the routine rather than the product:** six days
+since the last entry, against a schedule that asks for three. With the six-day
+gap on the 28th, the on-cadence three on the 31st and the one-day run on the
+1st, four consecutive intervals have been 6, 3, 1, 6 — so the earlier reading
+that the 28th was "a single missed firing" no longer holds. The interval is
+irregular, measured from the entry dates alone; nothing was investigated and no
+cause is claimed. On a repo this quiet it costs nothing, and it is only worth
+fixing if work resumes and a run fires between commits it then fails to log.
+This is the last run that will re-observe it — repeating the same measurement
+every three days is noise, not signal.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits ahead
+of `origin/main` — measured this run via `rev-list --count`, and unmoved because
+no commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that unpushed
+work, for the reason given on the 3rd. The CHANGES.md merge conflict flagged then
+is still coming — keep both hunks, newest first, when those 38 commits are
+pushed.
+
+---
+
+## 2026-09-01 - twenty-nine days quiet; a run one day after the last
+
+**Not material.** `origin/main` is still `fbb85a7`, which is the last run's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Twenty-nine days
+now since the last real commit on either side. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-08-30`
+and `git status --porcelain` on both trees, a read-only diff of `BRIEF.md`
+between them (byte-identical; the working copy's file was last touched
+2026-07-31 with no content change since the 2026-07-30 fold), `spec/INBOX.md`
+mtime (untouched since 2026-07-26), and a listing of `supabase/migrations` in
+both.
+
+**New this run, and again about the routine rather than the product:** this
+entry lands one day after the last, not the three the schedule asks for. Taken
+with the six-day gap on the 28th and the on-cadence three days on the 31st, the
+firing interval is drifting either side of three days rather than holding. That
+is an observation from three data points, not a diagnosis — nothing was
+investigated, and on a repo this quiet an early or late run costs nothing. It
+would only matter if work resumed and a run fired between commits it then
+failed to log.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits ahead
+of `origin/main` — measured this run via `rev-list --count`, and unmoved because
+no commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that unpushed
+work, for the reason given on the 3rd. The CHANGES.md merge conflict flagged then
+is still coming — keep both hunks, newest first, when those 38 commits are
+pushed.
+
+---
+
+## 2026-08-31 - twenty-eight days quiet; the schedule is back on cadence
+
+**Not material.** `origin/main` is still `a5739ba`, which is the last run's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Twenty-eight days
+now since the last real commit on either side. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-08-28`
+and `git status --porcelain` on both trees, a read-only diff of `BRIEF.md`
+between them (byte-identical; the working copy's file was last touched
+2026-07-31 with no content change since the 2026-07-30 fold), `spec/INBOX.md`
+mtime (untouched since 2026-07-26), and a listing of `supabase/migrations` in
+both.
+
+**New this run, and again about the routine rather than the product:** this
+entry lands three days after the last, which is the interval the schedule asks
+for. The six-day gap flagged on the 28th therefore looks like a single missed
+firing rather than a broken schedule — one data point, not a pattern, and no
+diagnosis was attempted.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits ahead
+of `origin/main` — measured this run via `rev-list --count`, and unmoved because
+no commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that unpushed
+work, for the reason given on the 3rd. The CHANGES.md merge conflict flagged then
+is still coming — keep both hunks, newest first, when those 38 commits are
+pushed.
+
+---
+
+## 2026-08-28 - twenty-five days quiet; the run itself skipped a beat
+
+**Not material.** `origin/main` is still `c3ce322`, which is the last run's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Twenty-five days
+now since the last real commit on either side. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-08-22`
+and `git status --porcelain` on both trees, a read-only diff of `BRIEF.md`
+between them (byte-identical; the working copy's file was last touched
+2026-07-31 with no content change since the 2026-07-30 fold), `spec/INBOX.md`
+mtime (untouched since 2026-07-26), and a listing of `supabase/migrations` in
+both.
+
+**New this run, and it is about the routine rather than the product:** the gap
+between this entry and the last is six days, not the three the schedule asks
+for. Either a run did not fire around the 25th or it fired and wrote nothing —
+there is no entry between, and nothing in the loop clone to distinguish the two.
+Recorded here rather than diagnosed, because on a quiet repo a missed run costs
+nothing; it would matter only if work resumed and an update went unlogged.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits ahead
+of `origin/main` — measured this run via `rev-list --count`, and unmoved because
+no commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that unpushed
+work, for the reason given on the 3rd. The CHANGES.md merge conflict flagged then
+is still coming — keep both hunks, newest first, when those 38 commits are
+pushed.
+
+---
+
+
+## 2026-08-22 - nineteen days, still nothing to rank
+
+**Not material.** `origin/main` is still `3ade619`, which is yesterday's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Nineteen days now
+since the last real commit on either side. No strategy rewrite, no republish, no
+research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-08-21`
+and `git status --porcelain` on both trees, a read-only diff of `BRIEF.md`
+between them (byte-identical; the working copy's file was last touched
+2026-07-31 with no content change since the 2026-07-30 fold), `spec/INBOX.md`
+mtime (untouched since 2026-07-26), and a listing of `supabase/migrations` in
+both.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits ahead
+of `origin/main` — measured this run via `rev-list --count`, and unmoved because
+no commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that unpushed
+work, for the reason given on the 3rd. The CHANGES.md merge conflict flagged then
+is still coming — keep both hunks, newest first, when those 38 commits are
+pushed.
+
+---
+
+## 2026-08-21 - eighteen days since the last real commit
+
+**Not material.** `origin/main` is still `55e1d72`, which is the last run's own
+CHANGES entry — no other commit since the 18th. Beau's working copy is unmoved
+too: HEAD still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted.
+Eighteen days now since the last real commit on either side. No strategy
+rewrite, no republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log` and
+`git status --porcelain` on both trees, a read-only diff of `BRIEF.md` between
+them (byte-identical; the working copy's file was last touched 2026-07-31 with
+no content change since the 2026-07-30 fold), `spec/INBOX.md` mtime (untouched
+since 2026-07-26), and a listing of `supabase/migrations` in both.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits
+ahead of `origin/main` — measured this run via `rev-list --count`, and unmoved
+because no commits have been made. The same three migrations remain pending and
+unpasted (`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that
+unpushed work, for the reason given on the 3rd. The CHANGES.md merge conflict
+flagged then is still coming — keep both hunks, newest first, when those 38
+commits are pushed.
+
+---
+
+## 2026-08-18 - one day on from the last run; nothing moved
+
+**Not material.** `origin/main` is still `cc0a948`, which is yesterday's own
+CHANGES entry — no other commit since. Beau's working copy is unmoved too: HEAD
+still `14f4fd3` (2026-08-03), tree clean, nothing uncommitted. Fifteen days now
+since the last real commit on either side. No strategy rewrite, no republish, no
+research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since` and
+`git status --porcelain` on both trees, a read-only diff of `BRIEF.md` between
+them (byte-identical, file last touched 2026-07-31 with no content change since
+the 2026-07-30 fold), and a listing of `supabase/migrations` in both.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits ahead
+of `origin/main` — measured this run, not carried over, and unmoved because no
+commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`). The ranked list still does not reflect that unpushed
+work, for the reason given on the 3rd. The CHANGES.md merge conflict flagged then
+is still coming — keep both hunks, newest first, when those 38 commits are
+pushed.
+
+---
+
+## 2026-08-17 - two weeks quiet; still nothing to rank
+
+**Not material.** `origin/main` has moved exactly once since the 13th, and that
+commit is the last run's own CHANGES entry (`ee29600`). Beau's working copy is
+also unmoved — HEAD still `14f4fd3`, `git log --since=2026-08-13` empty there,
+and the tree is clean with no uncommitted work. Fourteen days now since the
+last real commit on either side (2026-08-03). No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only` on the loop clone, `git log --since=2026-08-13`
+and `git status --porcelain` on both trees, a read-only diff of `BRIEF.md`
+between them (byte-identical, last changed 2026-07-30), and a listing of
+`supabase/migrations` in both.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits
+ahead of `origin/main` — the count has not moved since the 3rd because no
+commits have been made. The same three migrations remain pending and unpasted
+(`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`); verified by listing both migration directories,
+not carried over. The ranked list still does not reflect that unpushed work,
+for the reason given on the 3rd. The CHANGES.md merge conflict flagged then is
+still coming — keep both hunks, newest first, when those 38 commits are pushed.
+
+---
+
+## 2026-08-13 - ten quiet days; nothing moved anywhere
+
+**Not material, and this time not because of the push boundary.** `origin/main`
+is still `eb7624e` (2026-08-03). Beau's working copy is also still at
+2026-08-03 — its newest commit is `14f4fd3`, and `git log --since=2026-08-03`
+is empty in both. Ten days with no commits on either side. No strategy rewrite,
+no republish, no research.
+
+Checked: `git pull --ff-only` and `git fetch` on the loop clone (no movement),
+`git log --since` on both repos, and a read-only diff of `BRIEF.md` between the
+two — byte-identical, last changed 2026-07-30. `spec/INBOX.md` untouched since
+2026-07-26.
+
+**Unchanged, not re-counted as new:** the working copy is still 38 commits
+ahead of `origin/main`, and the same three migrations are still pending and
+unpasted — `20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`. Confirmed by listing `supabase/migrations` in both
+trees, not carried over from the last entry. The ranked list still does not
+reflect that unpushed work, for the reason given on the 3rd.
+
+**The CHANGES.md conflict flagged on the 3rd is still coming**, untouched by
+this entry: the working copy carries overnight-loop entries origin has never
+seen, and this file now has two top-of-file hunks origin-side. Keep both,
+newest first, when those 38 commits are pushed.
+
+---
+
+## 2026-08-03 - nothing on main; the work is real but unpushed
+
+**Not material, from where this document can see.** `origin/main` has not moved
+since the 30th — zero commits, HEAD still `3a2ac9d`. `BRIEF.md` has no new
+entries from Beau, committed or working-tree. No strategy rewrite, no
+republish, no research.
+
+Checked: `git pull --ff-only`, `git log --since=2026-07-30` on the loop clone
+(empty), `BRIEF.md`, and a read-only look at the working copy.
+
+**Noted, not acted on.** Beau's working copy is now **38 commits ahead** of
+`origin/main` — 71 files, ~8,700 lines, all unpushed. The last entry recorded
+four; that count is stale, not wrong. Among them: the valuation engine got a
+route and a panel, the paste lane got wired end to end, and the camera sweep
+landed. Several of those close things this document ranked. **They are not
+reflected in the ranking, because ranking work I cannot read from a pushed
+commit would be guessing.** The next run that sees them on `main` should treat
+them as material.
+
+**Three migrations are pending** in that range and unpasted here:
+`20260751_sweep_template`, `20260752_source_instances`,
+`20260753_parallel_ratios`. Not pasted, not merged, per the rules.
+
+**A conflict is coming in this file.** The overnight build loop writes its own
+entries into `spec/strategy/CHANGES.md` in the working copy — there is already
+a `2026-08-02 (overnight, into the 3rd)` entry there that origin has never
+seen. This entry adds a second top-of-file hunk. When those 38 commits are
+pushed, resolve by keeping both, newest first.
 ## 2026-08-02 (overnight, into the 3rd) - the engine got a caller, and three paths became one
 
 **Fourteen commits, and almost none of them adds a feature.** They connect
