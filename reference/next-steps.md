@@ -38,10 +38,12 @@ account in `spec/OUTBOX.md`.
 
 **The loop's, once unblocked:**
 
-- **Next to build:** split `FullIntake`'s `aiOff` into "the server says AI is
-  off" and "the user chose manual", so the Services banner only shows for the
-  first. Unblocked; deferred tonight only because the machine was down to
-  ~1.3 GB free and the build gate couldn't run safely.
+- **DONE 2026-10-29 in `0870bf7`:** `FullIntake`'s `aiOff` split into "the server
+  says AI is off" and "the user chose manual" (`src/lib/cards/intake-mode.ts`,
+  tested), so the Services banner only shows for the first. Type check, 852
+  tests and the build all pass. The disk was not the blocker: a later check found
+  C: with 186 GB free and G: with 29 GB, so the earlier ~1.3 GB reading was not
+  this machine's drive.
 - Merge `claude/import-any-format` when the gate passes.
 - The card-estimates overlap lock — needs a migration, so it waits until
   20260752 and 20260753 are applied (migrations are never stacked).
