@@ -7,10 +7,15 @@ the strategy review's "nothing material" entries on main. What was wrong sat
 outside the code, where typecheck, tests and the build cannot see it. Full
 account in `spec/OUTBOX.md`.
 
-- **AI intake has been "manual" since the split** — `service_config.anthropic_vision`
-  is seeded `false` in bootstrap and in the init migration, so the fresh
-  project came up with it off. Beau flips it in Services; it gates paid calls.
-  Now step 7 of `supabase/bootstrap/README.md`, so a rebuild can't repeat it.
+- **AI intake: the switch is ON in the live database** (read by the MasterOps
+  session). It is seeded `false` in bootstrap and the init migration, so a
+  fresh project starts with it off — the likely cause of Beau's 2026-07-26
+  report, a day after the split — and that is now step 7 of
+  `supabase/bootstrap/README.md`. An earlier draft of this block said it was
+  still off; that was inferred from the seed files and was wrong.
+  **Open defect:** `FullIntake` shows "AI scan is off — turn it on in
+  Services" whenever the user taps *Enter manually*, because both states set
+  one `aiOff` flag. It can send Beau to a switch that is already on.
 - **Every comp paste fails in production** — `private_to` exists only in the
   unpasted migration 20260752. `scripts/schema-probe.mjs` now checks the live
   schema against what the code expects.
@@ -24,15 +29,19 @@ account in `spec/OUTBOX.md`.
 
 **Beau's:**
 
-1. Turn on **Services → AI card scan (Anthropic)**.
-2. Paste `20260752_source_instances.sql`, then `node scripts/schema-probe.mjs`.
-3. Fix the three variable names in `.env.local` (see `CLAUDE.md` → Commands).
-4. Answer the lint questions (CameraSheet disable vs restructure; the four
+1. Paste `20260752_source_instances.sql`, then `node scripts/schema-probe.mjs`.
+2. Check local dev runs (`npm run dev`, open `/login`) — the MasterOps session
+   added the missing anon key to `.env.local`; not yet confirmed end to end.
+3. Answer the lint questions (CameraSheet disable vs restructure; the four
    warnings), which is what unblocks every merge — including the import branch.
-5. Decide whether to push local main's four unpushed commits.
+4. Decide whether to push local main's unpushed commits.
 
 **The loop's, once unblocked:**
 
+- **Next to build:** split `FullIntake`'s `aiOff` into "the server says AI is
+  off" and "the user chose manual", so the Services banner only shows for the
+  first. Unblocked; deferred tonight only because the machine was down to
+  ~1.3 GB free and the build gate couldn't run safely.
 - Merge `claude/import-any-format` when the gate passes.
 - The card-estimates overlap lock — needs a migration, so it waits until
   20260752 and 20260753 are applied (migrations are never stacked).

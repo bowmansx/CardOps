@@ -20,9 +20,12 @@ last_action: first iteration since 2026-07-27. Read every vault change since
              inventory format) was the direction, so built branch
              claude/import-any-format — pushed, NOT merged, because
              `npm run check` fails on lint in src/ that the branch doesn't touch
-             (CameraSheet + 4 warnings, waiting on Beau). Diagnosed the AI-fill
-             bug Beau reported 2026-07-26: anthropic_vision seeded false in the
-             fresh project. OUTBOX rewritten. Migrations 20260752 and 20260753
+             (CameraSheet + 4 warnings, waiting on Beau). AI-fill bug from
+             2026-07-26: anthropic_vision is seeded false, so a fresh project
+             starts off — but it is ON in the live DB now (MasterOps read it);
+             an earlier version of this line claimed otherwise from the seed
+             files alone. Found FullIntake's aiOff flag conflating "AI off" with
+             "chose manual" — next to build. OUTBOX rewritten. Migrations 20260752 and 20260753
              still unpasted — the next item needing a migration is blocked.
 
 ## How the loop uses it

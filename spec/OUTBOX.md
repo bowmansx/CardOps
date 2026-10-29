@@ -15,17 +15,27 @@ file will get overwritten.
 **Copy.** Your *"big test... hello world... do you copy?"* has been in Do next
 since 2026-07-25. Yes — the loop reads INBOX. You can clear it.
 
-### Three things that make the app work again — yours, in this order
+### Correction first — AI card scan is already ON
 
-1. **Turn on AI card scan.** *Services → "AI card scan (Anthropic)".* This is
-   why scanning has filled nothing in since the split. The new database was
-   built from bootstrap SQL that seeds this switch **off**; the old shared one
-   had it on. The code never broke. It's off by design because it's the switch
-   that allows paid API calls — so it's yours to flip.
-   If scans then show *"AI request failed: … authentication"*, the Anthropic
-   key is missing on the card-ops Vercel project. It was probably carried over
-   from before the split, but nobody has checked.
-2. **Paste `supabase/migrations/20260752000000_source_instances.sql`.** Every
+An earlier version of this note told you to turn it on. **Wrong.** The
+MasterOps session read the live database and `anthropic_vision` is **on**. I
+had diagnosed from the setup SQL, which does create a fresh database with it
+off — that very likely explains your July 26 report, a day after the new
+database was built — but someone has switched it on since, and I couldn't
+read the live setting from here.
+
+**If a scan still fills nothing in, don't trust the amber "AI scan is off"
+box.** It appears whenever you tap *Enter manually*, even with AI on — the
+"you chose manual" and "the server says AI is off" states share one flag. A
+real failure shows as a **red line on the scan screen**; one mentioning
+*authentication* means the Anthropic key is missing on the card-ops Vercel
+project, which nobody has checked. The banner fix is small and is the next
+thing to build; it wasn't built tonight because the machine was too short on
+memory to run the production build safely.
+
+### Two things that make the app work again — yours
+
+1. **Paste `supabase/migrations/20260752000000_source_instances.sql`.** Every
    comp paste fails in production until you do — the app writes a `private_to`
    column that only this migration creates. Safe to paste: the column is
    nullable and every existing row keeps the visibility it has today. The
@@ -34,10 +44,14 @@ since 2026-07-25. Yes — the loop reads INBOX. You can clear it.
    but did not run it; that's yours, and should be done awake. Then run
    `node scripts/schema-probe.mjs`; it should end with *"Live schema matches
    what the code expects."*
-3. **Fix the three names in `C:\dev\CardOps\.env.local`** so the app runs on
-   your laptop. Every local page 500s right now, even `/login`. The exact
-   names are in `CLAUDE.md` under *Commands*; the values come from Supabase →
-   Settings → API.
+2. **Check the app runs on your laptop:** `npm run dev`, then open
+   `localhost:3100/login`. Earlier tonight every local page 500'd because
+   `.env.local` was missing a name. **The MasterOps session then edited your
+   `.env.local`** — it added `NEXT_PUBLIC_SUPABASE_ANON_KEY`, copied from the
+   live site (it's the public key every visitor's browser already has), and
+   reports the project accepted it. My session can't read that file — your
+   deny rule — so I haven't confirmed it end to end; that's the 30-second check
+   above. The required names are in `CLAUDE.md` under *Commands*.
 
 ### Built tonight — waiting for you to merge
 
@@ -132,8 +146,10 @@ the code on 2026-07-30.
 - **The Oct 31 strategy review won't push them either.** The MasterOps
   session changed that task tonight so it refuses to push any commit it didn't
   make that reaches beyond `spec/`. Pushing them is your call.
-- **`/vault-log`**, which your notes rule says to run at session end, doesn't
-  exist yet. The vault's state block was updated by hand instead.
+- **The vault was updated by one writer.** The MasterOps session did tonight's
+  vault-note edits (logged as CONSISTENCY-AUDIT #631, checker clean) so two
+  sessions weren't editing the same notes at once. Your morning list from it is
+  in `C:\dev\Master-Ops\NEEDS-YOU.md`.
 - **Your Home Page Layout note** (Pricing Templates, Photo Templates, Inventory,
   Inventory Groups, Watchlist) — a candidate, not built. Say the word in INBOX.
 - **Your photo note** also asks for video capture and third-party camera

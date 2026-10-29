@@ -47,11 +47,12 @@ card_pool row. Hence the user-creation step in the middle.
    `01_schema_part1.sql` and `20260713150000_cardops_init.sql` seed
    `('anthropic_vision', false, 0)`. Every scan, re-read, estimate and AI
    feature fails closed on that row, so after a rebuild the camera reads
-   nothing and every card says **manual**. This is exactly what happened after
-   the 2026-07-25 split — "it would automatically do all of this stuff in our
-   previous iteration" — and it went undiagnosed for three months because the
-   old shared project had the toggle on and nothing about the code had
-   changed. Flip **Services → "AI card scan (Anthropic)"** in the app. It is
+   nothing and every card says **manual**. This very likely explains Beau's
+   report the day after the 2026-07-25 split — "it would automatically do all
+   of this stuff in our previous iteration" — because the old shared project
+   had the toggle on and nothing about the code had changed. (It has since been
+   switched on in the live project.) Flip **Services → "AI card scan
+   (Anthropic)"** in the app. It is
    seeded off on purpose: it enables paid API calls, so it is the owner's
    decision, never a default.
 8. Run `node scripts/schema-probe.mjs`. Every migration the code depends on
