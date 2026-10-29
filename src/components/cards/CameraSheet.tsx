@@ -17,7 +17,7 @@ import {
   EMPTY_CAPTURE, offerFrame, finishSweep, probeQuadToVideo, warpVideoFrame,
   bufferToDataUrl, type SweepCapture, type SweepOutput,
 } from "@/lib/cards/sweep-frames";
-import { sweepProgress, sweepWideEnough, SWEEP_DEFAULTS, type SweepDecision } from "@/lib/cards/sweep";
+import { sweepProgress, sweepWideEnough, SWEEP_DEFAULTS } from "@/lib/cards/sweep";
 import { stackAdvice, surfaceAdvice } from "@/lib/cards/stack";
 
 // Card-scanner aspect guides (w/h): raw card 2.5"x3.5", PSA-style slab ~3.32"x5.44".
@@ -510,6 +510,11 @@ export function CameraSheet({
     if (sweepArmedFor.current === key) return;
     if (glare?.verdict === "fixed") return;
     sweepArmedFor.current = key;
+    // Starting a sweep IS setState, and here that is the point: what arms it is
+    // the camera coming ready and the light reading, not an event a handler could
+    // own. `sweepArmedFor` makes it once per shot, so the extra render the rule
+    // warns about happens once and cannot cascade.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-arm, once per shot
     startSweep();
     // startSweep only touches refs and setState; re-running on its identity
     // would re-arm the sweep on every render.
