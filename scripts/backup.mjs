@@ -16,7 +16,12 @@
  * same laptop is a backup would be worse than admitting it isn't. The script
  * says so on every run.
  *
- *   node scripts/backup.mjs [--out DIR] [--tables-only] [--photos-only]
+ *   node scripts/backup.mjs [--out DIR] [--tables-only] [--photos-only] [--keep N]
+ *
+ * RETENTION. Runs into the default backups/ folder keep the newest N COMPLETE
+ * runs (default 14) and delete the rest. Complete means tables AND photos,
+ * with no failures — see scripts/lib/prune-runs.mjs for why counting folders
+ * would be the dangerous version. An explicit --out is never pruned.
  *
  * Needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the
  * environment (a .env.local is read if present).
@@ -25,6 +30,7 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { runsToPrune } from "./lib/prune-runs.mjs";
 
 // ── env ────────────────────────────────────────────────────────────────────
 function loadEnvLocal() {
@@ -232,4 +238,27 @@ if (photos) {
 }
 console.log(`\n  ${outDir}`);
 console.log(`  This is a LOCAL copy. It does not survive losing this machine.\n`);
+
+// ── retention ──────────────────────────────────────────────────────────────
+// A failed run exits above, before this line, so a bad night can never delete
+// a good backup. Only the default folder is pruned; an explicit --out is not.
+if (arg("--out", null) === null) {
+  const keep = Number(arg("--keep", "14"));
+  const root = path.dirname(outDir);
+  const isComplete = (dir) => {
+    if (fs.existsSync(path.join(dir, "INCOMPLETE.txt"))) return false;
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+      return m.tables != null && m.storage != null && m.storage.failed === 0;
+    } catch {
+      return false; // no manifest, or unreadable: not a run we can rely on
+    }
+  };
+  const entries = fs.readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => ({ name: d.name, complete: isComplete(path.join(root, d.name)) }));
+  const doomed = runsToPrune(entries, keep);
+  for (const name of doomed) fs.rmSync(path.join(root, name), { recursive: true, force: true });
+  if (doomed.length) console.log(`  Pruned ${doomed.length} old run(s); kept the newest ${keep} complete.\n`);
+}
 void readline;

@@ -34,7 +34,11 @@ Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
 
 ## The loop, per iteration
 
-1. **Start clean.** In `C:\dev\CardOps-loop`: `git checkout main && git pull`.
+1. **Start current.** In `C:\dev\CardOps` (the one clone; `CardOps-loop` was
+   retired 2026-10-28): `git fetch origin`, then `git merge --ff-only origin/main`.
+   Never `checkout`, `reset` or `stash` — this is Beau's live working tree, where
+   Obsidian writes his notes. If the merge refuses, that is information: escalate,
+   don't force it.
    Never build on a stale ref — that mistake has already been made twice in
    this repo, and both times it produced a confidently wrong diagnosis.
 2. **Read the spec vault at `spec/` FIRST.** It is Beau's Obsidian vault and
