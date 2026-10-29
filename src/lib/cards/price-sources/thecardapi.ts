@@ -39,13 +39,6 @@ export type CardApiSale = {
   price_confirmed?: boolean | null;
 };
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
-const median = (xs: number[]) => {
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-};
-
 // Build the full-text query for a card from its identifying fields.
 export function saleQuery(card: CardForPricing): string {
   return [card.year, card.set_name, card.player, card.parallel, card.card_number]

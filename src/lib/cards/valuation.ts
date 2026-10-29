@@ -244,7 +244,7 @@ export function interpretPipeline(
   // adjusted onto this card's grade is dropped, because it is evidence about a
   // different card.
   const era = ctx?.era ?? "modern";
-  let entries = (scope === "raw" || delta === 0
+  const entries = (scope === "raw" || delta === 0
     ? pool.map((c) => ({ price: c.sale_price as number, date: c.sale_date }))
     : pool
         .map((c) => {

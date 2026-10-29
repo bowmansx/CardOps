@@ -135,7 +135,7 @@ export function ValuationPanel({ cardId, className = "" }: { cardId: string; cla
     <section className={"overflow-hidden rounded-xl border border-hairline bg-white " + className}>
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
         <h2 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/50">
-          <Gauge size={13} className="text-flag" /> What it's worth
+          <Gauge size={13} className="text-flag" /> What it&apos;s worth
         </h2>
         <div className="flex items-center gap-1.5">
           <select
