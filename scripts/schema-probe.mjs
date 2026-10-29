@@ -41,7 +41,10 @@ const EXPECTED = [
   { table: "card_market_sales", column: "private_to",  migration: "20260752 source_instances" },
   { table: "card_market_rollups", column: "provenances", migration: "20260750 sale_provenance" },
   { table: "card_source_configs", column: "credential_ref", migration: "20260752 source_instances" },
-  { table: "card_data_sources",   column: "kind",          migration: "20260752 source_instances" },
+  // source_type is this table's primary key. An earlier version checked a "kind"
+  // column that no migration creates, so a CORRECT paste of 20260752 would still
+  // have been reported as missing.
+  { table: "card_data_sources",   column: "source_type",   migration: "20260752 source_instances" },
 ];
 
 // A column that cannot exist. If this does NOT report missing, the probe is
