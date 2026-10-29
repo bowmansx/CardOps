@@ -137,7 +137,7 @@ export function finishSweep(cap: SweepCapture): SweepOutput | null {
  * on a phone holding them past the point of use is the difference between a
  * second sweep working and the tab being killed.
  */
-export function releaseCapture(cap: SweepCapture): SweepCapture {
+export function releaseCapture(): SweepCapture {
   return EMPTY_CAPTURE;
 }
 

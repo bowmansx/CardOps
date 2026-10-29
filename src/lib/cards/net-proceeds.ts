@@ -108,20 +108,6 @@ export function perOrderFee(orderTotal: number, tiers: PerOrderTier[]): number {
   return tiers.length ? tiers[tiers.length - 1].amount : 0;
 }
 
-/** Which band a feeable amount falls in — the marginal rate and its floor. */
-function bandFor(feeable: number, tiers: FeeTier[]): { pct: number; floor: number; feeBelow: number } {
-  let floor = 0;
-  let feeBelow = 0;
-  for (const t of tiers) {
-    const ceil = t.upTo ?? Infinity;
-    if (feeable <= ceil) return { pct: t.pct, floor, feeBelow };
-    feeBelow += (ceil - floor) * t.pct;
-    floor = ceil;
-  }
-  const last = tiers[tiers.length - 1];
-  return { pct: last?.pct ?? 0, floor, feeBelow };
-}
-
 /**
  * Schedules, ADOPTED FROM THE EXISTING APP PRESETS.
  *

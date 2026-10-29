@@ -518,7 +518,6 @@ export function CameraSheet({
     startSweep();
     // startSweep only touches refs and setState; re-running on its identity
     // would re-arm the sweep on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shotTarget?.sweep, started, ready, osMode, session?.index, shotLabel, glare?.verdict]);
 
   /** Best of a short burst — kills the odd blurred frame at almost no cost. */
