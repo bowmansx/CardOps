@@ -230,6 +230,24 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
   only.
 - Surface merges or deletions that would lose work instead of just doing them.
 
+## Notes, spec, and the vault (standing rule, 2026-10-29)
+
+- **`spec/` is the spec the code reads, and it stays in this repo.** It is both
+  Beau's Obsidian vault and the project spec, deliberately. `scripts/component-check.mjs`
+  reads `spec/strategy/COMPONENTS.md`, and the scheduled strategy review owns
+  `spec/strategy/CHANGES.md`. Do not relocate it.
+- **Facts, status and decisions about the app live in the Bowman-Vault**, not
+  here and not in chat:
+  `G:\My Drive\Bowman-Vault\Bowman-Vault\60-Ops\CardOps\CardOps-Overview.md`.
+  The vault note **links to `spec/`, it never copies it** — a copy is a second
+  source of truth, and the copy is the one that goes stale.
+- **Obsidian is an editor only.** Auto-commit is fine; **nothing auto-pushes**
+  (`disablePush: true` in `spec/.obsidian/plugins/obsidian-git/data.json`), and
+  **every push to GitHub is deliberate** — a person or an agent decides to push.
+  This is not housekeeping: this repo is git-integrated with Vercel, so an
+  automatic push deploys whatever happens to be in the working tree straight to
+  production. That setting is load-bearing; don't turn it back on.
+
 ## Reference
 
 - `spec/` — **Beau's Obsidian vault: the spec.** Read it, never write to it.
