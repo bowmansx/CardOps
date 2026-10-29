@@ -14,6 +14,8 @@ at https://card-ops-zeta.vercel.app.
 - `npm run build` — production build
 - `npm run dev` — dev server on port 3100
 - `node scripts/component-check.mjs` — registry drift (repo against itself)
+- `node scripts/keepalive.mjs` — one read against the live project, to stop the
+  FREE plan pausing it. Runs daily from `.github/workflows/keepalive.yml`.
 - `node scripts/schema-probe.mjs` — **live schema against what the code expects.**
   Run it when anything misbehaves at runtime while the build is clean. Typecheck,
   tests, the build and the registry all pass straight through an unapplied
@@ -234,7 +236,13 @@ Until the one-sitting cutover in `reference/next-steps.md` §3 happens:
   before any route runs. It has gone down this way at least three times
   (2026-08-18, 2026-09-05, and a spell that was still down on 08-29 and is
   back up as of 10-28). This is the price of the interlock, not a fault to
-  hunt — the fix is either the Pro plan or a deliberate keepalive.
+  hunt. **Beau chose the free fix (2026-10-28): `.github/workflows/keepalive.yml`**
+  runs `scripts/keepalive.mjs` daily from GitHub Actions — off the laptop,
+  which goes 7-9 days unopened. It needs no secrets and does not touch
+  `CRON_SECRET`, so the interlock is unaffected. A red run means the project
+  is already unreachable. It stops silently if the repo has no commits for 60
+  days — GitHub disables scheduled workflows then — so re-enable it from the
+  Actions tab after a long quiet spell. Moving to Pro makes it unnecessary.
 - **eBay stays single-homed on Master-Ops.** The OAuth RuName is registered
   against `master-ops-iota.vercel.app`; copying `EBAY_*` env vars here does
   nothing until a CardOps redirect URI is added in eBay's developer portal. UI
