@@ -7,6 +7,97 @@ Full history of the document itself is in `journal/`.
 
 ---
 
+## 2026-10-28 - eighty-six days quiet
+
+**Not material.** `origin/main` is still `7afc985`, the last run's own CHANGES
+entry; no other commits since 2026-10-25. `BRIEF.md` byte-identical in both
+trees, no new entries. Beau's working copy unchanged: HEAD `14f4fd3`
+(2026-08-03), the merge of `origin/main` still stopped on the
+`spec/strategy/CHANGES.md` conflict, the same three migrations pending
+(`20260751`-`20260753`, per prior runs; not re-verified). Its local
+`origin/main` ref now reads 25 behind (was 24), so a fetch ran there again;
+nothing was merged. Not resolved, merged or pasted from here. No rewrite, no
+republish, no research.
+
+---
+
+## 2026-10-25 - eighty-three days quiet
+
+**Not material.** `origin/main` is still `7b6aa96`, the last run's own CHANGES
+entry; no other commits since 2026-10-22. `BRIEF.md` byte-identical in both
+trees, no new entries. Beau's working copy unchanged: HEAD `14f4fd3`
+(2026-08-03), the merge of `origin/main` still stopped on the
+`spec/strategy/CHANGES.md` conflict, the same three migrations pending
+(`20260751`-`20260753`, per prior runs; not re-verified). Its local
+`origin/main` ref now reads 24 behind (was 23), so a fetch ran there again;
+nothing was merged. Not resolved, merged or pasted from here. No rewrite, no
+republish, no research.
+
+---
+
+## 2026-10-22 - eighty days quiet
+
+**Not material.** `origin/main` is still `97f706c`, the last run's own CHANGES
+entry; no other commits since 2026-10-19. `BRIEF.md` byte-identical in both
+trees, no new entries. Beau's working copy unchanged: HEAD `14f4fd3`
+(2026-08-03), the merge of `origin/main` still stopped on the
+`spec/strategy/CHANGES.md` conflict, the same three migrations pending
+(`20260751`-`20260753`). Its local `origin/main` ref now reads 23 behind (was
+21), so a fetch ran there; nothing was merged. Not resolved, merged or pasted
+from here. No rewrite, no republish, no research.
+
+---
+
+## 2026-10-19 - seventy-seven days quiet
+
+**Not material.** `origin/main` is still `6291a45`, the last run's own CHANGES
+entry; no other commits since 2026-10-16. `BRIEF.md` byte-identical in both
+trees, no new entries. Beau's working copy unchanged: HEAD `14f4fd3`
+(2026-08-03), the merge of `origin/main` still stopped on the
+`spec/strategy/CHANGES.md` conflict (38 ahead / 21 behind its local
+`origin/main` ref), the same three migrations pending (`20260751`-`20260753`).
+Not resolved, merged or pasted from here. No rewrite, no republish, no research.
+
+---
+
+## 2026-10-16 - seventy-four days quiet
+
+**Not material.** `origin/main` is still `b799e5f`, the last run's own CHANGES
+entry; no other commits since 2026-10-13. `BRIEF.md` byte-identical in both
+trees, no new entries. Beau's working copy unchanged: HEAD `14f4fd3`
+(2026-08-03), the merge of `origin/main` still stopped on the
+`spec/strategy/CHANGES.md` conflict (38 ahead / 21 behind its local
+`origin/main` ref), the same three migrations pending (`20260751`-`20260753`).
+Not resolved, merged or pasted from here. No rewrite, no republish, no research.
+
+---
+
+## 2026-10-13 - seventy-one days quiet
+
+**Not material.** `origin/main` is still `9776c04`, the last run's own CHANGES
+entry; no commits since 2026-10-10. `BRIEF.md` byte-identical in both trees, no
+new entries. Beau's working copy unchanged since last run: HEAD `14f4fd3`
+(2026-08-03), the merge of `origin/main` still stopped on the
+`spec/strategy/CHANGES.md` conflict (38 ahead / 19 behind its local
+`origin/main` ref), the same three migrations pending (`20260751`-`20260753`).
+Not resolved, merged or pasted from here. No rewrite, no republish, no research.
+
+---
+
+## 2026-10-10 - sixty-eight days quiet
+
+**Not material.** `origin/main` is still `4d52d38`, the last run's own CHANGES
+entry. `BRIEF.md` byte-identical in both trees, no new entries. One thing is
+NEW in Beau's working copy, though no code moved: a merge of `origin/main`
+(`4d52d38`) is in progress there and stopped on a conflict in
+`spec/strategy/CHANGES.md` — both sides prepended entries at the top. HEAD is
+still `14f4fd3` (2026-08-03), 38 commits ahead and 19 behind `origin/main`;
+the same three migrations pending (`20260751`-`20260753`). Not resolved,
+merged or pasted from here — resolving it means keeping both sides' entries.
+No rewrite, no republish, no research.
+
+---
+
 ## 2026-10-07 - sixty-five days quiet
 
 **Not material.** `origin/main` is still `952dcfa`, the last run's own CHANGES
