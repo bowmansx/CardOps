@@ -125,10 +125,11 @@ the code on 2026-07-30.
 
 ## Noticed, didn't act
 
-- **Four commits on your local main are unpushed:** `1e7ef31` (my lint fixes),
-  `ae3999b` (your Definition of done), and `0335293` / `e043ae6` (the MasterOps
-  session). Not pushed from here — two aren't mine, and a push deploys.
-- **The Oct 31 strategy review won't push those four either.** The MasterOps
+- **Your local main has unpushed commits** — `git log origin/main..HEAD` lists
+  them. Tonight: `1e7ef31` (my lint fixes) and this OUTBOX's own commit, your
+  Definition of done (`ae3999b`), and the MasterOps session's `0335293` and
+  `e043ae6`. Not pushed from here — some aren't mine, and a push deploys.
+- **The Oct 31 strategy review won't push them either.** The MasterOps
   session changed that task tonight so it refuses to push any commit it didn't
   make that reaches beyond `spec/`. Pushing them is your call.
 - **`/vault-log`**, which your notes rule says to run at session end, doesn't
