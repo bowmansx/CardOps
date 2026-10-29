@@ -12,6 +12,28 @@ at https://card-ops-zeta.vercel.app.
 - `npx tsc --noEmit` — typecheck
 - `npm test` — vitest, the full card suite
 - `npm run build` — production build
+- `npm run dev` — dev server on port 3100
+
+**Local dev needs `.env.local`, and a missing or misnamed var fails LOUDLY but
+misleadingly.** `proxy.ts` builds a Supabase client in middleware, which runs
+before routing, so one absent var 500s *every* path — including `/login` and
+routes that do not exist. A 500 on `/api/anything-fake` is the signature: that
+is the middleware, not your route. Next will still print
+`Environments: .env.local`, because it loaded the FILE; it says nothing about
+whether the names inside match. Exactly these three, spelled exactly so:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://zgkydwvmdnnrxcacegth.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+Values come from the CardOps project's API settings
+(<https://supabase.com/dashboard/project/zgkydwvmdnnrxcacegth/settings/api>) —
+the `anon`/publishable key and the `service_role`/secret key. Vendor keys
+(`THECARDAPI_TOKEN`, `PRICECHARTING_TOKEN`, `ZOHO_*`, `EBAY_*`, `VAPID_*`) are
+optional locally: their adapters report themselves disabled rather than
+throwing. `CRON_SECRET` must stay unset — see the cutover interlock.
 
 ## Layout: app/ shells over src/ implementations
 
@@ -185,12 +207,26 @@ rejects the specular sample (the card, glare removed) and `stackSurface` keeps i
 
 ## Cutover interlock — do not "fix" these
 
-Until the one-sitting cutover in `reference/next-steps.md` §3 happens
-(Master-Ops sheds its six card crons first):
+Until the one-sitting cutover in `reference/next-steps.md` §3 happens:
 
 - **`CRON_SECRET` stays UNSET on the card-ops Vercel project.** The six crons
-  in `vercel.json` returning 401 is the double-run protection — Master-Ops
-  still declares and runs the same jobs against the shared database.
+  in `vercel.json` return 401, and that is still deliberate — but NOT, any
+  longer, for double-run protection. Master-Ops shed its card crons on
+  2026-07-25 (re-verified 2026-10-28: its `vercel.json` declares refresh /
+  alerts / reminders / recap / subs-sync and nothing card or eBay), and the
+  database is no longer shared. **The reason now is that the crons are not
+  hardened** — fix order 9, plus the still-open P0 where a failed
+  card-estimate insert debits the credit ledger and re-selects the same card
+  the next day. Setting the secret before that is fixed starts a paid loop
+  that charges for nothing.
+  THE COST OF THIS INTERLOCK, recorded because it bites: with no crons
+  anywhere and no cards entered, the CardOps Supabase project sees zero
+  traffic, and the FREE plan pauses a project after ~7 idle days. A paused
+  project stops resolving in DNS, so the whole app fails at the middleware
+  before any route runs. It has gone down this way at least three times
+  (2026-08-18, 2026-09-05, and a spell that was still down on 08-29 and is
+  back up as of 10-28). This is the price of the interlock, not a fault to
+  hunt — the fix is either the Pro plan or a deliberate keepalive.
 - **eBay stays single-homed on Master-Ops.** The OAuth RuName is registered
   against `master-ops-iota.vercel.app`; copying `EBAY_*` env vars here does
   nothing until a CardOps redirect URI is added in eBay's developer portal. UI
