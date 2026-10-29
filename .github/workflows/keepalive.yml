@@ -1,0 +1,66 @@
+# Keep the CardOps Supabase project from auto-pausing (2026-10-28).
+#
+# The FREE plan pauses a project after ~7 idle days, and CardOps is idle by
+# construction: no cron runs anywhere and no cards are entered. It has paused at
+# least three times. Beau chose this over the Pro plan. See scripts/keepalive.mjs.
+#
+# DAILY, not weekly. GitHub's scheduled runs are best-effort and can be delayed
+# or dropped under load, so a 7-day pause window gets seven chances rather than
+# one. The odd minute keeps it off the top-of-hour stampede.
+#
+# THE ONE WAY THIS SILENTLY STOPS: GitHub disables scheduled workflows on a repo
+# with no commits for 60 days. If the repo goes quiet that long, re-enable it
+# from the Actions tab — and expect the project to have paused in the meantime.
+#
+# No secrets. The anon key is public by design and the script lifts it from the
+# deployed bundle. Read-only.
+
+name: Supabase keepalive
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      # The scripts use only built-in fetch, so there is no npm install — one
+      # fewer thing that can fail on a job whose only purpose is to not fail.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # MUST PASS. A red run here means the project is unreachable — most
+      # likely already paused — and GitHub emails the repo owner about it.
+      - name: Touch the database
+        run: node scripts/keepalive.mjs
+
+      # INFORMATIONAL. Reports any migration that exists on disk but not in the
+      # live database. Kept from failing the job on purpose: a pending
+      # migration would otherwise turn every run red, and a run that is always
+      # red trains you to ignore the one that matters — the keepalive above.
+      - name: Schema drift (informational)
+        continue-on-error: true
+        run: |
+          set +e
+          out=$(node scripts/schema-probe.mjs 2>&1); code=$?
+          echo "$out"
+          {
+            echo "### Schema probe — exit $code"
+            echo '```'
+            echo "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $code
