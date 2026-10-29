@@ -41,7 +41,13 @@ memory to run the production build safely.
    nullable and every existing row keeps the visibility it has today. The
    MasterOps session checked it against the live database tonight — Postgres
    17.6, every column it references exists, and `card_market_sales` is empty —
-   but did not run it; that's yours, and should be done awake. Then run
+   but did not run it. **It has to be you, by hand:** when you asked me to run
+   it through Chrome on 2026-10-29, the permission system refused even opening
+   the SQL editor, as a production deploy — the same block that session hit
+   overnight. Open
+   <https://supabase.com/dashboard/project/zgkydwvmdnnrxcacegth/sql/new>,
+   paste the file, Run. It refuses to touch anything if it's the wrong
+   database. Then run
    `node scripts/schema-probe.mjs`; it should end with *"Live schema matches
    what the code expects."*
 2. **Check the app runs on your laptop:** `npm run dev`, then open
