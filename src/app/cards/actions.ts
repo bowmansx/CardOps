@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { catCode, buildSku } from "@/lib/cards/sku";
+import { moneyNumber, basisStated, importCondition, parseYear, isIdentityless } from "@/lib/cards/import-map";
 
 const CARD_ENTITY = "bfa6ad79-0d3a-412b-a682-603aa9d23f1d"; // CARD entity id
 
@@ -49,12 +50,6 @@ export async function listStorageLocations(): Promise<string[]> {
   } catch {
     return [];
   }
-}
-/** A CSV basis cell, coerced. Anything unusable becomes 0 and is reported as
- *  NOT stated, so an unreadable column can never masquerade as a free card. */
-function importBasis(v: string | undefined): number {
-  const b = v == null || v.trim() === "" ? null : Number(v);
-  return b != null && Number.isFinite(b) && b >= 0 && b <= 10_000_000 ? b : 0;
 }
 
 function num(v: FormDataEntryValue | null): number | null {
@@ -206,18 +201,29 @@ const IMPORTABLE_STATUSES = new Set(["booked", "archived"]);
 
 export async function importCards(
   rows: Record<string, string>[],
-): Promise<{ ok: boolean; inserted?: number; coerced?: number; error?: string }> {
+): Promise<{ ok: boolean; inserted?: number; coerced?: number; skipped?: number; error?: string }> {
   const supabase = await authed();
   const nowYear = new Date().getFullYear();
   let coerced = 0;
+  // Rows with nothing that identifies a card. These used to be inserted as
+  // blank cards with a fresh SKU each — every row of a file whose columns
+  // didn't match. Now they are refused and COUNTED (rule 10), never silently.
+  let skipped = 0;
   // SKU year matches createCard (the card's own year, not the import date),
   // and the sequence namespace is keyed per (category, year).
   const out: Record<string, unknown>[] = [];
   const seqByKey: Record<string, number> = {};
   for (const r of rows) {
+    // "2021-22" is a season; the print year is its first four digits. It used
+    // to fail Number() and land as no year at all.
+    const yr = parseYear(r.year ?? "");
+    const yearNum = yr ? Number(yr) : null;
+    // Judged on the PARSED year: a row whose only identity is an unreadable
+    // year ("unknown") would otherwise pass and still become a blank card.
+    if (isIdentityless({ ...r, year: yearNum != null ? String(yearNum) : "" })) { skipped += 1; continue; }
     const category = r.sport_category?.trim() || null;
     const cat = catCode(category);
-    const y = r.year && Number.isFinite(Number(r.year)) ? Number(r.year) : nowYear;
+    const y = yearNum ?? nowYear;
     const key = `${cat}-${y}`;
     if (seqByKey[key] == null) {
       const prefix = `${key}-`;
@@ -236,16 +242,20 @@ export async function importCards(
       sku: buildSku(cat, y, seqByKey[key]),
       entity_id: CARD_ENTITY,
       player: r.player?.trim() || null,
-      year: r.year ? Number(r.year) || null : null,
+      year: yearNum,
       set_name: r.set_name?.trim() || null,
       card_number: r.card_number?.trim() || null,
       parallel: r.parallel?.trim() || null,
       sport_category: category,
-      condition_type: r.condition_type?.trim() || "raw",
+      // Graded when the row names a grader and didn't say otherwise. The old
+      // default of "raw" turned a PSA 10 into a raw card holding a PSA grade,
+      // which then priced off ungraded comps.
+      condition_type: importCondition(r),
       grader: r.grader?.trim() || null,
       grade: (() => { const g = r.grade ? Number(r.grade) || null : null; return g != null && g >= 0 && g <= 10 ? g : null; })(),
       // Negative/absurd CSV money is treated as absent, never imported as fact.
-      market_value: (() => { const m = r.market_value ? Number(r.market_value) || null : null; return m != null && m >= 0 && m <= 10_000_000 ? m : null; })(),
+      // A stated market value of zero is also treated as absent, as before.
+      market_value: (() => { const m = moneyNumber(r.market_value); return m != null && m > 0 ? m : null; })(),
       status: (() => {
         const s = r.status?.trim() || "booked";
         if (IMPORTABLE_STATUSES.has(s)) return s;
@@ -257,13 +267,23 @@ export async function importCards(
       // CLAUDE.md said import defaults basis to 0; the code set nothing at all,
       // so every imported card carried NULL and every sum coalesced it to 0 —
       // indistinguishable from a genuinely free card. Now it says which it is.
-      individual_basis: importBasis(r.individual_basis),
-      basis_entered: importBasis(r.individual_basis) > 0 || /^\s*0/.test(r.individual_basis ?? ""),
+      // "$12.50" used to fail Number() and become an un-entered 0; it is now
+      // read as 12.50, and only a blank or unreadable cell leaves it un-costed.
+      individual_basis: moneyNumber(r.individual_basis) ?? 0,
+      basis_entered: basisStated(r.individual_basis),
     });
   }
-  if (out.length === 0) return { ok: false, error: "No rows to import." };
+  if (out.length === 0) {
+    return {
+      ok: false,
+      skipped,
+      error: skipped
+        ? `None of the ${skipped} row${skipped === 1 ? "" : "s"} has a player, set, card number or year, so nothing was imported.`
+        : "No rows to import.",
+    };
+  }
   const { error } = await supabase.from("cards").insert(out);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/cards");
-  return { ok: true, inserted: out.length, coerced };
+  return { ok: true, inserted: out.length, coerced, skipped };
 }
