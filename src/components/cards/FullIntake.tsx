@@ -10,6 +10,7 @@ import { IntakeSessionList } from "./IntakeSessionList";
 import {
   addToSession, removeFromSession, sessionLabel, type SessionCard,
 } from "@/lib/cards/intake-session";
+import { isManual, showAiOffBanner, type ManualReason } from "@/lib/cards/intake-mode";
 import { usePhotoPrefs } from "@/lib/cards/use-photo-prefs";
 import { uploadCardPhotos, type PhotoShot } from "@/lib/cards/upload";
 import { createClient } from "@/lib/supabase/client";
@@ -40,7 +41,9 @@ export function FullIntake({
   const [step, setStep] = useState<Step>("capture");
   const [busy, setBusy] = useState<null | "scanning" | "saving">(null);
   const [err, setErr] = useState<string | null>(null);
-  const [aiOff, setAiOff] = useState(false);
+  // WHY the form is manual, not just whether — see intake-mode.ts. One boolean
+  // made "Enter manually" claim AI was off.
+  const [manualReason, setManualReason] = useState<ManualReason>(null);
   // The full uncropped frames. A crop must never be the only record of an edge.
   const [frontOriginal, setFrontOriginal] = useState<string | null>(null);
   const [backOriginal, setBackOriginal] = useState<string | null>(null);
@@ -74,11 +77,11 @@ export function FullIntake({
         // The server tells us WHY and we used to throw it away, so "Re-read
         // (AI)" looked like a dead button. A fail-closed path the user can't
         // see is indistinguishable from a broken one (rules 4 and 8).
-        setAiOff(true);
+        setManualReason("ai-off");
         setErr(d.message ?? "AI scan is off — fill the card in manually.");
         setF({});
       } else {
-        setAiOff(false);
+        setManualReason(null);
         setErr(null);
         setF({ ...d.card });
       }
@@ -87,7 +90,7 @@ export function FullIntake({
     finally { setBusy(null); }
   }
 
-  function manual() { setAiOff(true); setF({}); setStep("review"); }
+  function manual() { setManualReason("chosen"); setF({}); setStep("review"); }
 
   async function save() {
     setErr(null); setBusy("saving");
@@ -274,7 +277,7 @@ export function FullIntake({
 
   function reset() {
     setFront(null); setBack(null); setFrontOriginal(null); setBackOriginal(null);
-    setF({}); setAiOff(false); setStep("capture"); setPendingPhotos(null);
+    setF({}); setManualReason(null); setStep("capture"); setPendingPhotos(null);
   }
 
   function cardTitle(x: Fields) {
@@ -342,7 +345,7 @@ export function FullIntake({
         <div className="space-y-3 rounded-2xl border border-hairline bg-white p-4">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/50">Review &amp; confirm</span>
-            {aiOff
+            {isManual(manualReason)
               ? <span className="figures rounded bg-ink/10 px-1.5 py-0.5 text-[10px] font-semibold text-ink/50">manual</span>
               : <span className="figures rounded bg-pos/15 px-1.5 py-0.5 text-[10px] font-semibold text-pos">AI-filled</span>}
           </div>
@@ -350,7 +353,7 @@ export function FullIntake({
           {/* "manual" alone doesn't say WHY or what to do about it. When the
               kill-switch is the reason, say so and link to the fix — otherwise
               re-reading just re-renders the same grey chip forever. */}
-          {aiOff && (
+          {showAiOffBanner(manualReason) && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-800">
               AI scan is <strong>off</strong>, so nothing was filled in and <em>Re-read (AI)</em> can&apos;t do anything.
               {" "}<Link href="/cards/services" className="underline underline-offset-2">Turn on “AI card scan (Anthropic)” in Services</Link>, then re-read.
