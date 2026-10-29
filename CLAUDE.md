@@ -299,6 +299,18 @@ hygiene and "flags to raise with your CPA" — never filing or tax advice.
   git-integrated with Vercel, so an automatic push would deploy whatever is in the
   working tree straight to production.
 
+## Definition of done
+
+A piece is done only when:
+- every acceptance criterion in its spec has a passing test;
+- `npm run build`, type check and lint pass with zero errors;
+- you have shown Beau the test output;
+- the spec file matches what was built;
+- there are no secrets or hard-coded values that belong in config;
+- the PR description lists what changed and what was not done.
+
+Never edit a test to make it pass; fix the code or tell Beau the criterion is wrong.
+
 ## Reference
 
 - `spec/` — **Beau's Obsidian vault: the spec.** Read it, never write to it.
