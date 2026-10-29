@@ -13,15 +13,22 @@ If something matters, it must be written down, not remembered.
 
 ## Where the loop works
 
-**`C:\dev\CardOps-loop`** — a separate clone, and the loop never touches
-`C:\dev\CardOps`.
+**`C:\dev\CardOps`** — one clone, Beau's. The separate `C:\dev\CardOps-loop`
+was retired on 2026-10-28.
 
-That directory is Beau's: he has the `spec/` vault open in Obsidian there, with
-the Obsidian Git plugin auto-committing his notes. A `git checkout` from the
-loop in the same working tree would collide with his uncommitted edits, and the
-plugin's auto-commit would sweep the loop's half-finished work into a commit of
-its own. Two clones, one remote, no collisions — git is the only channel
-between them.
+The two-clone design had a real reason: the `spec/` vault is open in Obsidian
+with the Git plugin auto-committing, so a `checkout` from the loop could collide
+with unsaved edits. But the cost turned out to be higher than the risk. With two
+trees the loop could SEE a problem in Beau's copy and was forbidden to touch it
+— and that is exactly what happened. A merge sat conflicted on
+`spec/strategy/CHANGES.md` for three weeks while the loop correctly reported it
+every single run, into a file nobody had reason to open. 86 days, ~29 runs, all
+accurate, all unread.
+
+So: one clone, and the collision risk is handled by rules instead of walls —
+never `checkout`/`reset`/`rebase`/`stash`/force-push, never `git add -A`, only
+ever stage files the loop owns. And the loop may now resolve a conflict in its
+OWN journal, which is what it was stuck on.
 
 Use absolute paths. `cd` alone is not enough; the shell's cwd resets.
 

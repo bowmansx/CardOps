@@ -63,19 +63,25 @@ const outDir = path.resolve(arg("--out", path.join("backups", stamp)));
 
 const db = createClient(URL_, KEY, { auth: { persistSession: false } });
 
-// Every table holding data that is not reconstructible from the repo. Ordered
-// roughly parent-first so a human reading the dump can follow it.
-const TABLES = [
-  "profiles", "card_businesses", "cards", "purchase_lots",
-  "purchase_lot_adjustments", "card_sales", "card_basis_items",
-  "card_basis_item_kinds", "card_photos", "card_photo_templates",
-  "card_photo_presets", "card_user_prefs", "card_identities",
-  "card_market_sales", "card_source_quotes", "card_documents",
-  "card_asset_records", "card_custody_log", "card_lots", "card_alerts",
-  "card_watchlist", "card_storage_locations", "card_pricing_strategies",
-  "card_grading_submissions", "credit_ledger", "ai_usage", "usage_events",
-  "card_portfolio_snapshots", "audit_log", "user_settings",
-];
+// Tables are DISCOVERED from the live API, not listed here.
+//
+// A hardcoded list is a backup whose coverage depends on someone remembering to
+// edit it. Master-Ops had exactly that: a list written in July, 32 tables added
+// after it, none of them backed up — including its double-entry ledger — while
+// the nightly job reported success 74 times running. Same trap, same script
+// shape, so this one discovers instead.
+//
+// PostgREST publishes the full table set at the API root as an OpenAPI doc.
+async function discoverTables() {
+  const res = await fetch(`${URL_}/rest/v1/`, {
+    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+  });
+  if (!res.ok) throw new Error(`Could not list tables: ${res.status} ${res.statusText}`);
+  const spec = await res.json();
+  const names = Object.keys(spec.definitions ?? spec.components?.schemas ?? {});
+  if (!names.length) throw new Error("Table discovery returned nothing — refusing to write an empty backup.");
+  return names.sort();
+}
 
 const PAGE = 1000; // PostgREST caps here regardless of what we ask for
 
@@ -115,6 +121,7 @@ async function backupTables() {
   fs.mkdirSync(path.join(outDir, "tables"), { recursive: true });
   const manifest = {};
   let total = 0;
+  const TABLES = await discoverTables();
   for (const t of TABLES) {
     let res;
     try {
