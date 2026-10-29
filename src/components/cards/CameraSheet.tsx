@@ -514,7 +514,7 @@ export function CameraSheet({
     // the camera coming ready and the light reading, not an event a handler could
     // own. `sweepArmedFor` makes it once per shot, so the extra render the rule
     // warns about happens once and cannot cascade.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-arm, once per shot
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the trigger is camera readiness, not an event a handler owns; sweepArmedFor makes it once per shot
     startSweep();
     // startSweep only touches refs and setState; re-running on its identity
     // would re-arm the sweep on every render.
